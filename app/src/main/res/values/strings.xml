@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LamaPhone</string>
+
+    <!-- Navigation -->
+    <string name="nav_chat">Chat</string>
+    <string name="nav_server">Server</string>
+
+    <!-- Chat screen -->
+    <string name="chat_placeholder_loaded">What\'s on your mind?</string>
+    <string name="chat_placeholder_no_model">Load a model to get started</string>
+    <string name="chat_input_hint">Type a message…</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_stop">Stop</string>
+    <string name="chat_clear">Clear chat</string>
+    <string name="chat_snackbar_no_model">Please load a model first</string>
+
+    <!-- Model -->
+    <string name="model_label">Model</string>
+    <string name="model_not_loaded">No model loaded</string>
+    <string name="model_load_button">Load model from storage</string>
+    <string name="model_loading">Loading model…</string>
+
+    <!-- Server screen -->
+    <string name="server_running">Server Running</string>
+    <string name="server_stopped">Server Stopped</string>
+    <string name="server_start">Start Server</string>
+    <string name="server_stop">Stop Server</string>
+    <string name="server_url_label">Server URL</string>
+    <string name="server_copy_url">Copy URL</string>
+    <string name="server_qr_code">Show QR Code</string>
+    <string name="server_requests_served">Requests served</string>
+    <string name="server_no_model_title">No model loaded</string>
+    <string name="server_no_model_body">Load a model first to start the server</string>
+
+    <!-- Connect with -->
+    <string name="connect_with">Connect with</string>
+    <string name="connect_openclaw_title">OpenClaw</string>
+    <string name="connect_openwebui_title">Open WebUI</string>
+    <string name="connect_curl_title">curl</string>
+
+    <!-- QR dialog -->
+    <string name="qr_dialog_title">Connect via QR Code</string>
+    <string name="qr_dialog_hint">Scan with your camera app to connect</string>
+    <string name="qr_dialog_close">Close</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_name">LamaPhone API Server</string>
+    <string name="notif_channel_desc">Shows while the OpenAI-compatible API server is running</string>
+    <string name="notif_title">LamaPhone API Server</string>
+</resources>

@@ -1,0 +1,35 @@
+# Built artifacts
+build/
+.gradle/
+local.properties
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+*.ipr
+*.iws
+
+# Generated
+app/release/
+app/debug/
+app/build/
+
+# Signing
+*.keystore
+*.jks
+release.jks
+keystore.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# NDK
+*.so
+*.o
+*.a
+
+# llama.cpp submodule — track .gitmodules but not the content directory
+# (run: git submodule update --init --recursive  to populate)
+app/src/main/cpp/llama.cpp/*
+!app/src/main/cpp/llama.cpp/.git

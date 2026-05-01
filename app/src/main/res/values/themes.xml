@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Minimal theme stub. The full Material 3 theme is defined in Compose (LamaPhoneTheme).
+    This XML theme is only needed for the Activity window background before Compose renders.
+-->
+<resources>
+    <style name="Theme.LamaPhone" parent="android:Theme.Material.NoTitleBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
