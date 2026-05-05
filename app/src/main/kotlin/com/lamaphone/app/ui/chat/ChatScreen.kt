@@ -6,7 +6,9 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -66,6 +68,8 @@ import com.lamaphone.app.model.ChatMessage
 import com.lamaphone.app.model.Role
 import com.lamaphone.app.ui.components.ModelPickerButton
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
+import com.lamaphone.app.ui.theme.RetroCliColors
+import com.lamaphone.app.ui.theme.TerminalPanel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -170,6 +174,7 @@ fun ChatScreen(
 
     Scaffold(
         modifier    = modifier,
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarState) },
         bottomBar   = {
             ChatInputBar(
@@ -215,8 +220,8 @@ fun ChatScreen(
                 LazyColumn(
                     state           = listState,
                     modifier        = Modifier.fillMaxSize(),
-                    contentPadding  = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    contentPadding  = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(messages, key = { it.id }) { message ->
                         val isLastAssistant = message.id == messages.lastOrNull()?.id &&
@@ -243,36 +248,35 @@ private fun ChatHeaderBar(
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier     = modifier.fillMaxWidth(),
-        tonalElevation = 2.dp,
-        color        = MaterialTheme.colorScheme.surfaceVariant
+    TerminalPanel(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        title = "SESSION",
+        accent = if (isLoaded) RetroCliColors.Cyan else RetroCliColors.Magenta
     ) {
         Row(
             modifier            = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .fillMaxWidth(),
             verticalAlignment   = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Model name chip
             if (isLoaded && modelPath != null) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text  = "Model",
+                        text  = "STATUS: ONLINE",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = RetroCliColors.Success
                     )
                     Text(
-                        text  = modelPath.substringAfterLast('/'),
+                        text  = "MODEL: ${modelPath.substringAfterLast('/')}",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = RetroCliColors.Cyan,
                         maxLines = 1
                     )
-                    // GPU / CPU backend badge
                     val (badgeText, badgeColor) = when {
-                        gpuLayers > 0  -> "GPU · $gpuLayers layers" to MaterialTheme.colorScheme.tertiary
-                        gpuLayers == 0 -> "CPU fallback" to MaterialTheme.colorScheme.error
+                        gpuLayers > 0  -> "BACKEND: GPU / $gpuLayers LAYERS" to RetroCliColors.Magenta
+                        gpuLayers == 0 -> "BACKEND: CPU FALLBACK" to RetroCliColors.Warning
                         else           -> null to null
                     }
                     if (badgeText != null && badgeColor != null) {
@@ -285,25 +289,23 @@ private fun ChatHeaderBar(
                 }
             } else {
                 Text(
-                    text     = "No model loaded",
+                    text     = "STATUS: WAITING_FOR_MODEL",
                     style    = MaterialTheme.typography.bodySmall,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color    = RetroCliColors.Muted,
                     modifier = Modifier.weight(1f)
                 )
             }
 
             Row {
-                // Clear button
                 if (isLoaded) {
                     IconButton(onClick = onClear) {
                         Icon(
                             imageVector        = Icons.Filled.Clear,
                             contentDescription = "Clear chat",
-                            tint               = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint               = RetroCliColors.Magenta
                         )
                     }
                 }
-                // Load model button
                 ModelPickerButton(
                     onModelSelected = onModelSelected,
                     modifier        = Modifier.height(36.dp)
@@ -322,19 +324,28 @@ private fun EmptyChatPlaceholder(
         modifier         = modifier,
         contentAlignment = Alignment.Center
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier            = Modifier.padding(32.dp)
+        TerminalPanel(
+            modifier = Modifier
+                .padding(28.dp)
+                .fillMaxWidth(),
+            title = "BOOT",
+            accent = RetroCliColors.Magenta
         ) {
             Text(
-                text  = "🦙",   // llama emoji
-                style = MaterialTheme.typography.displayLarge
+                text  = "LAMAPHONE TERMINAL",
+                style = MaterialTheme.typography.titleLarge,
+                color = RetroCliColors.Cyan
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text  = if (isLoaded) "> READY. TYPE A PROMPT." else "> LOAD_MODEL REQUIRED.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isLoaded) RetroCliColors.Success else RetroCliColors.Warning
             )
             Text(
-                text  = if (isLoaded) "What's on your mind?" else "Load a model to get started",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "> LOCAL INFERENCE / OFFLINE CHAT",
+                style = MaterialTheme.typography.bodySmall,
+                color = RetroCliColors.Muted
             )
         }
     }
@@ -350,13 +361,15 @@ private fun ChatInputBar(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier       = modifier.fillMaxWidth(),
-        tonalElevation = 4.dp
+        modifier = modifier.fillMaxWidth(),
+        color = RetroCliColors.Void,
+        contentColor = RetroCliColors.Text,
+        border = BorderStroke(1.dp, RetroCliColors.Magenta.copy(alpha = 0.55f))
     ) {
         Row(
             modifier          = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -364,7 +377,7 @@ private fun ChatInputBar(
                 value         = text,
                 onValueChange = onTextChange,
                 modifier      = Modifier.weight(1f),
-                placeholder   = { Text("Type a message…") },
+                placeholder   = { Text("> enter prompt") },
                 enabled       = !isGenerating,
                 maxLines      = 4,
                 keyboardOptions = KeyboardOptions(
@@ -374,14 +387,27 @@ private fun ChatInputBar(
                 keyboardActions = KeyboardActions(
                     onSend = { onSend() }
                 ),
-                shape = RoundedCornerShape(24.dp)
+                shape = RoundedCornerShape(4.dp),
+                textStyle = MaterialTheme.typography.bodyMedium,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = RetroCliColors.Text,
+                    unfocusedTextColor = RetroCliColors.Text,
+                    disabledTextColor = RetroCliColors.Muted,
+                    cursorColor = RetroCliColors.Cyan,
+                    focusedBorderColor = RetroCliColors.Cyan,
+                    unfocusedBorderColor = RetroCliColors.Purple,
+                    disabledBorderColor = RetroCliColors.Purple.copy(alpha = 0.45f),
+                    focusedPlaceholderColor = RetroCliColors.Muted,
+                    unfocusedPlaceholderColor = RetroCliColors.Muted
+                )
             )
 
             if (isGenerating) {
                 Button(
                     onClick  = onStop,
                     colors   = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
+                        containerColor = RetroCliColors.Error,
+                        contentColor = RetroCliColors.Void
                     )
                 ) {
                     Icon(
@@ -392,7 +418,13 @@ private fun ChatInputBar(
             } else {
                 Button(
                     onClick  = onSend,
-                    enabled  = text.isNotBlank()
+                    enabled  = text.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RetroCliColors.Cyan,
+                        contentColor = RetroCliColors.Void,
+                        disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
+                        disabledContentColor = RetroCliColors.Muted
+                    )
                 ) {
                     Icon(
                         imageVector        = Icons.Filled.Send,
@@ -411,8 +443,8 @@ fun MessageBubble(
     modifier: Modifier = Modifier
 ) {
     val isUser = message.role == Role.USER
+    val accent = if (isUser) RetroCliColors.Magenta else RetroCliColors.Cyan
 
-    // Blinking cursor animation
     val infiniteTransition = rememberInfiniteTransition(label = "cursor")
     val cursorAlpha by infiniteTransition.animateFloat(
         initialValue    = 1f,
@@ -426,50 +458,55 @@ fun MessageBubble(
 
     Row(
         modifier            = modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        horizontalArrangement = Arrangement.Start
     ) {
         Box(
             modifier = Modifier
-                .widthIn(max = 300.dp)
+                .fillMaxWidth()
                 .clip(
                     RoundedCornerShape(
-                        topStart    = if (isUser) 12.dp else 4.dp,
-                        topEnd      = if (isUser) 4.dp else 12.dp,
-                        bottomStart = 12.dp,
-                        bottomEnd   = 12.dp
+                        topStart = 4.dp,
+                        topEnd = 4.dp,
+                        bottomStart = 4.dp,
+                        bottomEnd = 4.dp
                     )
                 )
                 .background(
-                    if (isUser) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant
+                    if (isUser) RetroCliColors.TerminalSoft else RetroCliColors.Terminal
                 )
-                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .border(1.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             val displayContent = if (isStreaming) message.content else message.content
 
             if (isStreaming && message.content.isEmpty()) {
-                // Show loading dots while waiting for first token
                 CircularProgressIndicator(
                     modifier  = Modifier.size(16.dp),
-                    color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color     = RetroCliColors.Cyan,
                     strokeWidth = 2.dp
                 )
             } else {
-                Row(verticalAlignment = Alignment.Bottom) {
+                Column {
+                    Text(
+                        text = if (isUser) "> USER" else "> LAMA",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = accent
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
                     Text(
                         text  = displayContent,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (isUser) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = RetroCliColors.Text
                     )
                     if (isStreaming) {
                         Text(
                             text     = "|",
                             style    = MaterialTheme.typography.bodyMedium,
-                            color    = if (isUser) MaterialTheme.colorScheme.onPrimary
-                                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color    = RetroCliColors.Cyan,
                             modifier = Modifier.alpha(cursorAlpha)
                         )
+                    }
                     }
                 }
             }

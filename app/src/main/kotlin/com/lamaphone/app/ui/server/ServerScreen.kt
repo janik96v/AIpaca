@@ -29,12 +29,9 @@ import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +44,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -61,6 +57,8 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.server.ServerManager
 import com.lamaphone.app.ui.components.ModelPickerButton
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
+import com.lamaphone.app.ui.theme.RetroCliColors
+import com.lamaphone.app.ui.theme.TerminalPanel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -95,8 +93,8 @@ fun ServerScreen(
         modifier            = modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
 
         // ---- Status indicator -----------------------------------------------
@@ -144,12 +142,14 @@ fun ServerScreen(
                 .fillMaxWidth()
                 .height(52.dp),
             colors   = ButtonDefaults.buttonColors(
-                containerColor = if (isRunning) MaterialTheme.colorScheme.error
-                                 else MaterialTheme.colorScheme.primary
+                containerColor = if (isRunning) RetroCliColors.Error else RetroCliColors.Cyan,
+                contentColor = RetroCliColors.Void,
+                disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
+                disabledContentColor = RetroCliColors.Muted
             )
         ) {
             Text(
-                text  = if (isRunning) "Stop Server" else "Start Server",
+                text  = if (isRunning) "STOP_SERVER" else "START_SERVER",
                 style = MaterialTheme.typography.titleMedium
             )
         }
@@ -172,7 +172,7 @@ private fun ServerStatusCard(
     modifier: Modifier = Modifier
 ) {
     val dotColor by animateColorAsState(
-        targetValue = if (isRunning) Color(0xFF22C55E) else Color(0xFFEF4444),
+        targetValue = if (isRunning) RetroCliColors.Success else RetroCliColors.Error,
         label       = "dotColor"
     )
 
@@ -187,16 +187,14 @@ private fun ServerStatusCard(
         label         = "pulseAlpha"
     )
 
-    Card(
-        modifier  = modifier.fillMaxWidth(),
-        colors    = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "SERVER",
+        accent = if (isRunning) RetroCliColors.Success else RetroCliColors.Error
     ) {
         Row(
             modifier            = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
+                .fillMaxWidth(),
             verticalAlignment   = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
@@ -209,9 +207,9 @@ private fun ServerStatusCard(
             )
             Spacer(Modifier.width(12.dp))
             Text(
-                text  = if (isRunning) "Server Running" else "Server Stopped",
+                text  = if (isRunning) "RUNNING" else "STOPPED",
                 style = MaterialTheme.typography.titleLarge,
-                color = if (isRunning) Color(0xFF22C55E) else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (isRunning) RetroCliColors.Success else RetroCliColors.Muted,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -225,17 +223,16 @@ private fun ServerUrlCard(
     onQrCode: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    TerminalPanel(
         modifier = modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+        title = "ENDPOINT",
+        accent = RetroCliColors.Cyan
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Text(
-                text  = "Server URL",
+                text  = "OPENAI_COMPATIBLE_BASE_URL",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = RetroCliColors.Muted
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -247,7 +244,7 @@ private fun ServerUrlCard(
                     text     = url,
                     style    = MaterialTheme.typography.bodyLarge,
                     fontFamily = FontFamily.Monospace,
-                    color    = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color    = RetroCliColors.Cyan,
                     modifier = Modifier.weight(1f)
                 )
                 Row {
@@ -255,14 +252,14 @@ private fun ServerUrlCard(
                         Icon(
                             imageVector        = Icons.Filled.ContentCopy,
                             contentDescription = "Copy URL",
-                            tint               = MaterialTheme.colorScheme.onPrimaryContainer
+                            tint               = RetroCliColors.Cyan
                         )
                     }
                     IconButton(onClick = onQrCode) {
                         Icon(
                             imageVector        = Icons.Filled.QrCode,
                             contentDescription = "Show QR code",
-                            tint               = MaterialTheme.colorScheme.onPrimaryContainer
+                            tint               = RetroCliColors.Magenta
                         )
                     }
                 }
@@ -276,24 +273,22 @@ private fun ModelInfoCard(
     modelPath: String?,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    TerminalPanel(
         modifier = modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        title = "MODEL",
+        accent = if (modelPath != null) RetroCliColors.Cyan else RetroCliColors.Magenta
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Text(
-                text  = "Model",
+                text  = "ACTIVE_MODEL",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = RetroCliColors.Muted
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text  = modelPath?.substringAfterLast('/') ?: "None",
+                text  = modelPath?.substringAfterLast('/') ?: "NONE",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (modelPath != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (modelPath != null) RetroCliColors.Cyan else RetroCliColors.Warning
             )
         }
     }
@@ -304,24 +299,23 @@ private fun NoModelWarningCard(
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    TerminalPanel(
         modifier = modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer
-        )
+        title = "WARNING",
+        accent = RetroCliColors.Warning
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column {
             Text(
-                text  = "No model loaded",
+                text  = "NO_MODEL_LOADED",
                 style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = RetroCliColors.Warning,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text  = "Load a model first to start the server",
+                text  = "> Load a model first to start the server.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onErrorContainer
+                color = RetroCliColors.Muted
             )
             Spacer(Modifier.height(12.dp))
             ModelPickerButton(onModelSelected = onModelSelected)
@@ -340,13 +334,13 @@ private fun ConnectWithSection(
             verticalAlignment   = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            Box(modifier = Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+            Box(modifier = Modifier.weight(1f).height(1.dp).background(RetroCliColors.Cyan.copy(alpha = 0.35f)))
             Text(
-                text     = "  Connect with  ",
+                text     = "  CONNECT_WITH  ",
                 style    = MaterialTheme.typography.labelMedium,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant
+                color    = RetroCliColors.Magenta
             )
-            Box(modifier = Modifier.weight(1f).height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
+            Box(modifier = Modifier.weight(1f).height(1.dp).background(RetroCliColors.Magenta.copy(alpha = 0.35f)))
         }
 
         Spacer(Modifier.height(12.dp))
@@ -380,38 +374,37 @@ private fun ConnectCard(
     code: String,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    TerminalPanel(
         modifier = modifier.fillMaxWidth(),
-        colors   = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
-        )
+        title = title.uppercase(),
+        accent = RetroCliColors.Purple
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column {
             Text(
                 text       = title,
                 style      = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
-                color      = MaterialTheme.colorScheme.primary
+                color      = RetroCliColors.Cyan
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 text  = description,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = RetroCliColors.Muted
             )
             Spacer(Modifier.height(8.dp))
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(RetroCliColors.Void)
                     .padding(10.dp)
             ) {
                 Text(
                     text       = code,
                     style      = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color      = MaterialTheme.colorScheme.onSurface
+                    color      = RetroCliColors.Text
                 )
             }
         }
@@ -425,22 +418,21 @@ private fun QrCodeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Connect via QR Code") },
+        title = { Text("CONNECT VIA QR") },
         text  = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // Placeholder — actual QR generation is a Week 2 feature
                 Box(
                     modifier         = Modifier
                         .size(180.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        .background(RetroCliColors.TerminalSoft),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector        = Icons.Filled.QrCode,
                         contentDescription = null,
                         modifier           = Modifier.size(80.dp),
-                        tint               = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint               = RetroCliColors.Cyan
                     )
                 }
                 Spacer(Modifier.height(12.dp))
@@ -453,12 +445,12 @@ private fun QrCodeDialog(
                 Text(
                     text  = "Scan with your camera app to connect",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = RetroCliColors.Muted
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text("CLOSE") }
         }
     )
 }

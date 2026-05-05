@@ -16,71 +16,55 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ---- Palette ----------------------------------------------------------------
-// Deep purple / teal tech aesthetic
-
-private val PurplePrimary   = Color(0xFF7C3AED)   // violet-600
-private val PurpleOnPrimary = Color(0xFFFFFFFF)
-private val PurpleContainer = Color(0xFFEDE9FE)   // violet-100
-private val PurpleOnContainer = Color(0xFF3B0764)
-
-private val TealSecondary   = Color(0xFF0D9488)   // teal-600
-private val TealOnSecondary = Color(0xFFFFFFFF)
-private val TealContainer   = Color(0xFFCCFBF1)   // teal-100
-private val TealOnContainer = Color(0xFF042F2E)
-
-private val SurfaceLight    = Color(0xFFF8F7FF)
-private val BackgroundLight = Color(0xFFFAF9FF)
-
-private val PurplePrimaryDark      = Color(0xFF7B61FF)   // spec: vibrant violet
-private val PurpleOnPrimaryDark    = Color(0xFFFFFFFF)
-private val PurpleContainerDark    = Color(0xFF4A3580)   // muted container
-private val PurpleOnContainerDark  = Color(0xFFE8E0FF)
-
-private val TealSecondaryDark      = Color(0xFF2DD4BF)   // teal-400
-private val TealOnSecondaryDark    = Color(0xFF042F2E)
-private val TealContainerDark      = Color(0xFF0F766E)   // teal-700
-private val TealOnContainerDark    = Color(0xFFCCFBF1)
-
-private val SurfaceDark    = Color(0xFF1A1A2E)   // spec: dark navy
-private val BackgroundDark = Color(0xFF0F0F1A)   // spec: near-black
-
 // ---- Schemes ----------------------------------------------------------------
 
 private val LightColors = lightColorScheme(
-    primary          = PurplePrimary,
-    onPrimary        = PurpleOnPrimary,
-    primaryContainer = PurpleContainer,
-    onPrimaryContainer = PurpleOnContainer,
-    secondary        = TealSecondary,
-    onSecondary      = TealOnSecondary,
-    secondaryContainer = TealContainer,
-    onSecondaryContainer = TealOnContainer,
-    surface          = SurfaceLight,
-    background       = BackgroundLight,
-    error            = Color(0xFFB91C1C),
-    onError          = Color(0xFFFFFFFF)
+    primary = RetroCliColors.Cyan,
+    onPrimary = RetroCliColors.Void,
+    primaryContainer = Color(0xFF071A3A),
+    onPrimaryContainer = RetroCliColors.Text,
+    secondary = RetroCliColors.Magenta,
+    onSecondary = RetroCliColors.Void,
+    secondaryContainer = Color(0xFF321044),
+    onSecondaryContainer = RetroCliColors.Text,
+    tertiary = RetroCliColors.Blue,
+    surface = RetroCliColors.Terminal,
+    onSurface = RetroCliColors.Text,
+    surfaceVariant = RetroCliColors.TerminalSoft,
+    onSurfaceVariant = RetroCliColors.Muted,
+    background = RetroCliColors.Void,
+    onBackground = RetroCliColors.Text,
+    outline = RetroCliColors.Purple,
+    outlineVariant = RetroCliColors.Cyan.copy(alpha = 0.35f),
+    error = RetroCliColors.Error,
+    onError = RetroCliColors.Void,
+    errorContainer = Color(0xFF3A102D),
+    onErrorContainer = RetroCliColors.Text
 )
 
 private val DarkColors = darkColorScheme(
-    primary               = PurplePrimaryDark,
-    onPrimary             = PurpleOnPrimaryDark,
-    primaryContainer      = PurpleContainerDark,
-    onPrimaryContainer    = PurpleOnContainerDark,
-    secondary             = TealSecondaryDark,
-    onSecondary           = TealOnSecondaryDark,
-    secondaryContainer    = TealContainerDark,
-    onSecondaryContainer  = TealOnContainerDark,
-    surface               = SurfaceDark,
-    onSurface             = Color(0xFFE6E1E5),
-    surfaceVariant        = Color(0xFF232340),   // slightly lighter than surface
-    onSurfaceVariant      = Color(0xFFCAC4D0),
-    background            = BackgroundDark,
-    onBackground          = Color(0xFFE6E1E5),
-    outline               = Color(0xFF49454F),
-    outlineVariant        = Color(0xFF49454F),
-    error                 = Color(0xFFF87171),
-    onError               = Color(0xFF450A0A)
+    primary = RetroCliColors.Cyan,
+    onPrimary = RetroCliColors.Void,
+    primaryContainer = Color(0xFF071A3A),
+    onPrimaryContainer = RetroCliColors.Text,
+    secondary = RetroCliColors.Magenta,
+    onSecondary = RetroCliColors.Void,
+    secondaryContainer = Color(0xFF321044),
+    onSecondaryContainer = RetroCliColors.Text,
+    tertiary = RetroCliColors.Blue,
+    onTertiary = RetroCliColors.Void,
+    surface = RetroCliColors.Terminal,
+    onSurface = RetroCliColors.Text,
+    surfaceVariant = RetroCliColors.TerminalSoft,
+    onSurfaceVariant = RetroCliColors.Muted,
+    background = RetroCliColors.Void,
+    onBackground = RetroCliColors.Text,
+    outline = RetroCliColors.Purple,
+    outlineVariant = RetroCliColors.Cyan.copy(alpha = 0.35f),
+    error = RetroCliColors.Error,
+    onError = RetroCliColors.Void,
+    errorContainer = Color(0xFF3A102D),
+    onErrorContainer = RetroCliColors.Text
 )
 
 // ---- Theme ------------------------------------------------------------------
@@ -107,8 +91,11 @@ fun LamaPhoneTheme(
         SideEffect {
             val window = (view.context as Activity).window
             @Suppress("DEPRECATION")
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            window.statusBarColor = RetroCliColors.Void.toArgb()
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = RetroCliColors.Void.toArgb()
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
         }
     }
 

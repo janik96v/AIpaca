@@ -4,33 +4,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- Llama body (simplified) -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,28 C46,28 40,34 40,42 C40,46 42,50 45,52 L42,70 L50,70 L52,56 C53,56.3 54,56.5 54,56.5 C54,56.5 55,56.3 56,56 L58,70 L66,70 L63,52 C66,50 68,46 68,42 C68,34 62,28 54,28 Z" />
-
-    <!-- Llama head / neck bump -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,20 C50,20 47,23 47,27 C47,31 50,34 54,34 C58,34 61,31 61,27 C61,23 58,20 54,20 Z" />
-
-    <!-- Wifi signal arc (server icon) -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
-        android:fillAlpha="0"
-        android:pathData="M38,78 Q54,68 70,78" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.5"
-        android:fillAlpha="0"
-        android:pathData="M43,83 Q54,76 65,83" />
-
-    <!-- Center dot -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,87 m-2.5,0 a2.5,2.5 0 1,1 5,0 a2.5,2.5 0 1,1 -5,0" />
+        android:fillColor="#00000000"
+        android:pathData="M0,0h108v108h-108z" />
 </vector>

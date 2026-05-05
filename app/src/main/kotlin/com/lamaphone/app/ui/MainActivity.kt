@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -15,7 +16,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -24,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -34,10 +38,12 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.ui.chat.ChatScreen
 import com.lamaphone.app.ui.server.ServerScreen
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
+import com.lamaphone.app.ui.theme.RetroCliColors
+import com.lamaphone.app.ui.theme.TerminalBackground
 
 private sealed class Screen(val route: String, val label: String) {
-    object Chat   : Screen("chat",   "Chat")
-    object Server : Screen("server", "Server")
+    object Chat   : Screen("chat",   "CHAT")
+    object Server : Screen("server", "SERVER")
 }
 
 private val bottomNavItems = listOf(Screen.Chat, Screen.Server)
@@ -67,66 +73,90 @@ private fun LamaPhoneApp() {
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
+        containerColor = RetroCliColors.Void,
         topBar   = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            text  = "LamaPhone 🦙",   // llama emoji
+                            text  = "> LAMAPHONE",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onPrimary
+                            color = RetroCliColors.Cyan
                         )
                         if (isLoaded && modelPath != null) {
                             Text(
-                                text  = modelPath!!.substringAfterLast('/'),
+                                text  = "MODEL: ${modelPath!!.substringAfterLast('/')}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                color = RetroCliColors.Magenta
+                            )
+                        } else {
+                            Text(
+                                text = "MODEL: NOT_LOADED",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RetroCliColors.Muted
                             )
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor    = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor    = RetroCliColors.Void,
+                    titleContentColor = RetroCliColors.Cyan
                 )
             )
         },
         bottomBar = {
-            NavigationBar {
-                bottomNavItems.forEach { screen ->
-                    val selected = currentDestination?.hierarchy
-                        ?.any { it.route == screen.route } == true
+            Surface(
+                color = RetroCliColors.Void,
+                border = BorderStroke(1.dp, RetroCliColors.Cyan.copy(alpha = 0.36f))
+            ) {
+                NavigationBar(containerColor = RetroCliColors.Void) {
+                    bottomNavItems.forEach { screen ->
+                        val selected = currentDestination?.hierarchy
+                            ?.any { it.route == screen.route } == true
 
-                    NavigationBarItem(
-                        selected = selected,
-                        onClick  = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                        NavigationBarItem(
+                            selected = selected,
+                            onClick  = {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState    = true
                                 }
-                                launchSingleTop = true
-                                restoreState    = true
-                            }
-                        },
-                        icon  = {
-                            when (screen) {
-                                Screen.Chat   -> Icon(Icons.Filled.Chat, contentDescription = "Chat")
-                                Screen.Server -> Icon(Icons.Filled.Dns,  contentDescription = "Server")
-                            }
-                        },
-                        label = { Text(screen.label) }
-                    )
+                            },
+                            icon  = {
+                                when (screen) {
+                                    Screen.Chat   -> Icon(Icons.Filled.Chat, contentDescription = "Chat")
+                                    Screen.Server -> Icon(Icons.Filled.Dns,  contentDescription = "Server")
+                                }
+                            },
+                            label = { Text(if (selected) "[${screen.label}]" else screen.label) },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = RetroCliColors.Void,
+                                selectedTextColor = RetroCliColors.Cyan,
+                                indicatorColor = RetroCliColors.Cyan,
+                                unselectedIconColor = RetroCliColors.Muted,
+                                unselectedTextColor = RetroCliColors.Muted
+                            )
+                        )
+                    }
                 }
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController    = navController,
-            startDestination = Screen.Chat.route,
-            modifier         = Modifier.padding(innerPadding)
+        TerminalBackground(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
         ) {
-            composable(Screen.Chat.route)   { ChatScreen() }
-            composable(Screen.Server.route) { ServerScreen() }
+            NavHost(
+                navController    = navController,
+                startDestination = Screen.Chat.route
+            ) {
+                composable(Screen.Chat.route)   { ChatScreen() }
+                composable(Screen.Server.route) { ServerScreen() }
+            }
         }
     }
 }
