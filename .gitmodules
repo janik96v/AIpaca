@@ -1,4 +1,5 @@
 [submodule "app/src/main/cpp/llama.cpp"]
     path = app/src/main/cpp/llama.cpp
-    url = https://github.com/ggml-org/llama.cpp.git
+    url = https://github.com/janik96v/llama.cpp.git
     shallow = true
+    branch = lamaphone/android-vulkan-build
