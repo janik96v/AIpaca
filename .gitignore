@@ -13,6 +13,11 @@ local.properties
 app/release/
 app/debug/
 app/build/
+app/.cxx/
+.cxx/
+.kotlin/
+.serena/
+*.log
 
 # Signing
 *.keystore
@@ -28,6 +33,7 @@ Thumbs.db
 *.so
 *.o
 *.a
+!app/src/main/cpp/opencl-stub/arm64-v8a/libOpenCL.so
 
 # llama.cpp submodule — track .gitmodules but not the content directory
 # (run: git submodule update --init --recursive  to populate)
