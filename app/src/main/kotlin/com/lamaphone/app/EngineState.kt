@@ -53,6 +53,13 @@ object EngineState {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    /**
+     * Number of GPU layers actually used by the loaded model.
+     * -1 = no model loaded, 0 = CPU-only (GPU probe failed or disabled), >0 = GPU layers count.
+     */
+    private val _gpuLayers = MutableStateFlow(-1)
+    val gpuLayers: StateFlow<Int> = _gpuLayers.asStateFlow()
+
     // ---- Actions -----------------------------------------------------------
 
     /**
@@ -67,22 +74,26 @@ object EngineState {
     suspend fun loadModel(
         path: String,
         nThreads: Int    = Runtime.getRuntime().availableProcessors().coerceAtMost(6),
-        contextSize: Int = 2048
+        contextSize: Int = 512,
+        nGpuLayers: Int  = -1   // -1 = all layers (full GPU offload)
     ): Result<Unit> {
         _errorMessage.value = null
         _isLoaded.value     = false
         _modelPath.value    = null
 
-        Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize")
-        val result = engine.loadModel(path, nThreads, contextSize)
+        Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
+        val result = engine.loadModel(path, nThreads, contextSize, nGpuLayers)
 
         result.fold(
             onSuccess = {
                 _isLoaded.value  = true
                 _modelPath.value = path
-                Log.i(TAG, "Model ready")
+                _gpuLayers.value = engine.getActiveGpuLayers()
+                val gpuInfo = if (_gpuLayers.value > 0) "GPU (${_gpuLayers.value} layers)" else "CPU only"
+                Log.i(TAG, "Model ready — backend: $gpuInfo")
             },
             onFailure = { e ->
+                _gpuLayers.value = -1
                 _errorMessage.value = e.message ?: "Unknown load error"
                 Log.e(TAG, "loadModel failed", e)
             }
@@ -101,6 +112,7 @@ object EngineState {
             _isLoaded.value     = false
             _modelPath.value    = null
             _isGenerating.value = false
+            _gpuLayers.value    = -1
         }
     }
 

@@ -7,11 +7,14 @@
 #include <cmath>
 #include <cstring>
 #include <vector>
+#include <setjmp.h>
+#include <signal.h>
 
 #define LOG_TAG "LamaPhone"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
 
 // ---------------------------------------------------------------------------
 // Global backend init flag — llama_backend_init() must be called exactly once
@@ -35,6 +38,7 @@ struct LlamaContext {
     llama_context*     ctx           = nullptr;
     std::atomic<bool>  stop_flag     { false };
     float              tokens_per_sec = 0.0f;
+    int32_t            gpu_layers    = 0;     // actual GPU layers in use
 };
 
 // ---------------------------------------------------------------------------
@@ -49,6 +53,20 @@ static std::string jstring_to_std(JNIEnv* env, jstring js) {
 }
 
 // ---------------------------------------------------------------------------
+// GPU probe signal handler machinery
+// Must be process-global because signal handlers are process-global.
+// ---------------------------------------------------------------------------
+static sigjmp_buf        g_probe_jmp;
+static struct sigaction  g_old_sigsegv;
+static struct sigaction  g_old_sigbus;
+static std::atomic<bool> g_probe_active { false };
+
+static void probe_signal_handler(int /*sig*/) {
+    // Jump back to the setjmp site with value 1
+    siglongjmp(g_probe_jmp, 1);
+}
+
+// ---------------------------------------------------------------------------
 // 1. nativeLoadModel
 //    Returns a jlong handle (pointer to heap-allocated LlamaContext), 0 on failure.
 // ---------------------------------------------------------------------------
@@ -59,17 +77,52 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
         jobject  /* thiz */,
         jstring  jModelPath,
         jint     nThreads,
-        jint     nCtx)
+        jint     nCtx,
+        jint     nGpuLayers)
 {
     std::string modelPath = jstring_to_std(env, jModelPath);
-    LOGI("Loading model: %s  threads=%d  ctx=%d", modelPath.c_str(), (int)nThreads, (int)nCtx);
+    LOGI("Loading model: %s  threads=%d  ctx=%d  gpu_layers=%d",
+         modelPath.c_str(), (int)nThreads, (int)nCtx, (int)nGpuLayers);
 
     ensure_backend_init();
 
-    // Model params — CPU-only for MVP
+    // Load model on CPU first to read the actual transformer layer count.
+    // We need the exact count so n_gpu_layers offloads only transformer layers,
+    // keeping the input/output embedding tensors on CPU. If n_gpu_layers exceeds
+    // the layer count, llama.cpp also puts embedding tensors on GPU — but Vulkan
+    // has no get_rows shader for many quant types (e.g. IQ2_M), causing a crash.
     llama_model_params mparams = llama_model_default_params();
-    mparams.n_gpu_layers = 0;
+    int32_t gpu_layers_actual = 0;
 
+    if (nGpuLayers != 0) {
+        mparams.n_gpu_layers = 0;
+        llama_model* probe = llama_model_load_from_file(modelPath.c_str(), mparams);
+        if (probe == nullptr) {
+            LOGE("nativeLoadModel: failed to probe model from %s", modelPath.c_str());
+            return 0L;
+        }
+        int32_t n_layer = llama_model_n_layer(probe);
+        llama_model_free(probe);
+        LOGI("Model has %d layers, reloading with GPU offload", (int)n_layer);
+
+        // Clamp requested GPU layers to (n_layer - 1).
+        // When n_gpu_layers == n_layer llama.cpp also offloads the output/embedding
+        // tensors (token_embd, output) to GPU. On Adreno Vulkan this triggers a
+        // shader link failure ("Failed to link shaders") for several model
+        // architectures (Qwen2, Gemma, etc.) and causes a SIGSEGV.
+        // Keeping at least one transformer layer on CPU ensures those tensors stay
+        // on the CPU backend and avoids the crash entirely.
+        // nGpuLayers == -1 means "all layers" (caller's default).
+        int32_t max_gpu = (n_layer > 0) ? n_layer - 1 : 0;
+        gpu_layers_actual = (nGpuLayers < 0 || nGpuLayers > max_gpu) ? max_gpu : (int32_t)nGpuLayers;
+        LOGI("Using %d/%d GPU layers (capped to n_layer-1 to keep embeddings on CPU)",
+             (int)gpu_layers_actual, (int)n_layer);
+    } else {
+        LOGI("Loading model in CPU-only mode (gpu_layers=0)");
+    }
+
+    mparams = llama_model_default_params();
+    mparams.n_gpu_layers = gpu_layers_actual;
     llama_model* model = llama_model_load_from_file(modelPath.c_str(), mparams);
     if (model == nullptr) {
         LOGE("nativeLoadModel: failed to load model from %s", modelPath.c_str());
@@ -80,7 +133,6 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
     const llama_vocab* vocab = llama_model_get_vocab(model);
     int64_t n_params     = llama_model_n_params(model);
     int32_t n_ctx_train  = llama_model_n_ctx_train(model);
-    const char* desc     = llama_model_desc(model, nullptr, 0) > 0 ? "" : "";
     char desc_buf[128]   = {};
     llama_model_desc(model, desc_buf, sizeof(desc_buf));
     LOGI("Model loaded: type=%s  n_params=%lld  n_ctx_train=%d  vocab_size=%d",
@@ -93,7 +145,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
     cparams.n_threads              = static_cast<uint32_t>(nThreads);
     cparams.n_threads_batch        = static_cast<uint32_t>(nThreads);
 
-    llama_context* ctx = llama_new_context_with_model(model, cparams);
+    llama_context* ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
         LOGE("nativeLoadModel: failed to create context");
         llama_model_free(model);
@@ -103,12 +155,103 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
     auto* lc       = new LlamaContext();
     lc->model      = model;
     lc->ctx        = ctx;
-    LOGI("Model ready, handle=%p", (void*)lc);
+    lc->gpu_layers = gpu_layers_actual;
+    LOGI("Model ready, handle=%p  gpu_layers=%d", (void*)lc, (int)gpu_layers_actual);
     return reinterpret_cast<jlong>(lc);
 }
 
 // ---------------------------------------------------------------------------
-// 2. nativeGenerate
+// 2. nativeProbeGpu
+//    Runs a single 1-token decode with SIGSEGV/SIGBUS handlers installed.
+//    Returns JNI_TRUE if the decode succeeds (GPU is working), JNI_FALSE if
+//    the Vulkan driver crashes (SIGSEGV/SIGBUS caught via siglongjmp).
+//
+//    This is needed because the Adreno Vulkan driver can crash inside shader
+//    pipeline compilation — a driver-level SIGSEGV that C++ try/catch cannot
+//    intercept. The signal handler lets us detect and survive the crash.
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_lamaphone_app_engine_LlamaCppEngine_nativeProbeGpu(
+        JNIEnv*  /* env */,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    if (ctxPtr == 0L) {
+        LOGE("nativeProbeGpu: null context pointer");
+        return JNI_FALSE;
+    }
+
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+
+    if (lc->gpu_layers == 0) {
+        // Already CPU-only; no need to probe
+        LOGI("nativeProbeGpu: skipped (CPU-only context)");
+        return JNI_TRUE;
+    }
+
+    LOGI("nativeProbeGpu: probing GPU with 1-token decode...");
+
+    // Install temporary signal handlers for SIGSEGV and SIGBUS.
+    // SA_RESETHAND: auto-restore default handler after first signal fires,
+    // so production crashes are never silently swallowed.
+    struct sigaction sa = {};
+    sa.sa_handler = probe_signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;
+
+    g_probe_active.store(true);
+    sigaction(SIGSEGV, &sa, &g_old_sigsegv);
+    sigaction(SIGBUS,  &sa, &g_old_sigbus);
+
+    int crashed = sigsetjmp(g_probe_jmp, /*savesigs=*/1);
+    if (crashed == 0) {
+        // --- Happy path: run minimal decode ---
+        llama_memory_clear(llama_get_memory(lc->ctx), true);
+        llama_token probe_tok = 1;   // token id 1 is always valid (BOS or similar)
+        llama_batch b = llama_batch_get_one(&probe_tok, 1);
+        int rc = llama_decode(lc->ctx, b);
+        llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+        // Restore original handlers (only reached if no signal fired)
+        sigaction(SIGSEGV, &g_old_sigsegv, nullptr);
+        sigaction(SIGBUS,  &g_old_sigbus,  nullptr);
+        g_probe_active.store(false);
+
+        if (rc != 0) {
+            LOGW("nativeProbeGpu: llama_decode returned error %d — treating as GPU failure", rc);
+            return JNI_FALSE;
+        }
+        LOGI("nativeProbeGpu: GPU probe SUCCESS (%d layers)", (int)lc->gpu_layers);
+        return JNI_TRUE;
+    } else {
+        // --- Signal caught: GPU driver crashed ---
+        // Handlers already reset by SA_RESETHAND.
+        g_probe_active.store(false);
+        LOGW("nativeProbeGpu: GPU probe CRASHED (SIGSEGV/SIGBUS caught) — Vulkan not usable");
+        return JNI_FALSE;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3. nativeGetActiveGpuLayers
+//    Returns the number of GPU layers actually in use for this context.
+//    0 = CPU-only, >0 = GPU offloaded layers.
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jint JNICALL
+Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
+        JNIEnv*  /* env */,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    if (ctxPtr == 0L) return 0;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    return (jint)lc->gpu_layers;
+}
+
+// ---------------------------------------------------------------------------
+// 4. nativeGenerate
 //    Builds a chat-formatted prompt from systemPrompt + userPrompt,
 //    tokenises it, runs the decode/sample loop, fires tokenCallback per token.
 // ---------------------------------------------------------------------------
@@ -152,9 +295,9 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
     std::vector<char> tmpl_buf(4096);
+    const char* tmpl = llama_model_chat_template(model, nullptr);
     int tmpl_len = llama_chat_apply_template(
-            model,
-            nullptr,                   // use model's built-in template
+            tmpl,
             messages.data(),
             messages.size(),
             /*add_ass=*/true,          // append start of assistant turn
@@ -166,7 +309,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
         if (tmpl_len > (int)tmpl_buf.size()) {
             tmpl_buf.resize(tmpl_len + 1);
             llama_chat_apply_template(
-                    model, nullptr,
+                    tmpl,
                     messages.data(), messages.size(),
                     /*add_ass=*/true,
                     tmpl_buf.data(), (int32_t)tmpl_buf.size());
@@ -223,13 +366,18 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
     }
 
     // ---- Evaluate prompt tokens (prefill) ----------------------------------
-    llama_kv_cache_clear(lc->ctx);
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
 
+    double t_prefill_start = (double)ggml_time_ms();
     llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
     if (llama_decode(lc->ctx, batch) != 0) {
         LOGE("nativeGenerate: llama_decode failed for prompt");
         return;
     }
+    double t_prefill_ms = (double)ggml_time_ms() - t_prefill_start;
+    LOGI("Prefill: %d tokens in %.0f ms (%.1f ms/tok)",
+         n_tokens, t_prefill_ms,
+         n_tokens > 0 ? t_prefill_ms / n_tokens : 0.0);
 
     // ---- Build sampler chain -----------------------------------------------
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
@@ -250,7 +398,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
         llama_token new_token = llama_sampler_sample(sampler, lc->ctx, -1);
 
         // Stop on end-of-generation tokens
-        if (llama_token_is_eog(vocab, new_token)) {
+        if (llama_vocab_is_eog(vocab, new_token)) {
             LOGD("EOS reached after %d tokens", n_generated);
             break;
         }
@@ -287,6 +435,14 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
         }
 
         n_generated++;
+
+        // Log speed every 5 tokens
+        if (n_generated % 5 == 0) {
+            double now = (double)ggml_time_ms();
+            double elapsed = now - t_start_ms;
+            LOGI("Generation: %d tokens @ %.2f tok/s",
+                 n_generated, elapsed > 0 ? (double)n_generated / (elapsed / 1000.0) : 0.0);
+        }
     }
 
     // Record performance
@@ -300,11 +456,11 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
     llama_sampler_free(sampler);
 
     // Clear KV cache so the next call starts fresh
-    llama_kv_cache_clear(lc->ctx);
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
 }
 
 // ---------------------------------------------------------------------------
-// 3. nativeStopGeneration
+// 5. nativeStopGeneration
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
@@ -320,7 +476,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeStopGeneration(
 }
 
 // ---------------------------------------------------------------------------
-// 4. nativeUnloadModel
+// 6. nativeUnloadModel
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
@@ -343,7 +499,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeUnloadModel(
 }
 
 // ---------------------------------------------------------------------------
-// 5. nativeGetSystemInfo
+// 7. nativeGetSystemInfo
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL

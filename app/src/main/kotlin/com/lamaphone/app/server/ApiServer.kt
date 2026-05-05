@@ -9,6 +9,7 @@ import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
+import io.ktor.utils.io.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.request.*
@@ -45,7 +46,7 @@ object ApiServer {
     val port = 8080
     val requestCount = AtomicLong(0L)
 
-    private var server: EmbeddedServer<*, *>? = null
+    private var server: ApplicationEngine? = null
 
     /** Mutex to ensure only one generate call runs at a time through the API. */
     private val generateMutex = Mutex()
@@ -76,7 +77,7 @@ object ApiServer {
 
     fun stop() {
         Log.i(TAG, "Stopping Ktor server")
-        server?.stop(gracePeriodMillis = 500, timeoutMillis = 1000)
+        server?.stop(500, 1000)
         server = null
         Log.i(TAG, "Ktor server stopped")
     }
@@ -250,7 +251,7 @@ object ApiServer {
                                 )
                             )
                         )
-                        writeFully("data: ${json.encodeToString(roleDelta)}\n\n".toByteArray(Charsets.UTF_8))
+                        writeStringUtf8("data: ${json.encodeToString(roleDelta)}\n\n")
                         flush()
 
                         try {
@@ -268,7 +269,7 @@ object ApiServer {
                                             )
                                         )
                                     )
-                                    writeFully("data: ${json.encodeToString(chunk)}\n\n".toByteArray(Charsets.UTF_8))
+                                    writeStringUtf8("data: ${json.encodeToString(chunk)}\n\n")
                                     flush()
                                 }
                             }
@@ -289,8 +290,8 @@ object ApiServer {
                                 )
                             )
                         )
-                        writeFully("data: ${json.encodeToString(stopChunk)}\n\n".toByteArray(Charsets.UTF_8))
-                        writeFully("data: [DONE]\n\n".toByteArray(Charsets.UTF_8))
+                        writeStringUtf8("data: ${json.encodeToString(stopChunk)}\n\n")
+                        writeStringUtf8("data: [DONE]\n\n")
                         flush()
                     }
                 }
@@ -304,15 +305,23 @@ object ApiServer {
 
     private fun buildPromptFromMessages(messages: List<OpenAIMessage>): Pair<String?, String> {
         val systemPrompt = messages.firstOrNull { it.role == "system" }?.content
-        val conversationText = messages
-            .filter { it.role != "system" }
-            .joinToString("\n") { msg ->
+        // Pass non-system messages as plain text; llama_jni.cpp will apply the
+        // model's own chat template via llama_chat_apply_template.
+        // For multi-turn conversations we concatenate turns so the template sees them.
+        val nonSystem = messages.filter { it.role != "system" }
+        val conversationText = if (nonSystem.size == 1) {
+            nonSystem.first().content
+        } else {
+            // Flatten multi-turn into a single user message; the JNI layer wraps
+            // it in the model's template. This is a simplification until the JNI
+            // layer gains proper multi-turn support.
+            nonSystem.joinToString("\n") { msg ->
                 when (msg.role) {
-                    "user" -> "User: ${msg.content}"
                     "assistant" -> "Assistant: ${msg.content}"
                     else -> msg.content
                 }
-            } + "\nAssistant:"
+            }
+        }
         return Pair(systemPrompt, conversationText)
     }
 }

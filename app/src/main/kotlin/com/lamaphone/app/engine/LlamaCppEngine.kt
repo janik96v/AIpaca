@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -46,8 +47,20 @@ class LlamaCppEngine : InferenceEngine {
     private external fun nativeLoadModel(
         modelPath: String,
         nThreads: Int,
-        nCtx: Int
+        nCtx: Int,
+        nGpuLayers: Int
     ): Long
+
+    /**
+     * Probes whether the GPU (Vulkan) backend works for this context by running a
+     * single 1-token decode guarded by a POSIX signal handler (sigsetjmp/siglongjmp).
+     * Returns true if the decode completes without a SIGSEGV/SIGBUS, false otherwise.
+     * Must be called immediately after [nativeLoadModel] before any other decode.
+     */
+    private external fun nativeProbeGpu(ctxPtr: Long): Boolean
+
+    /** Returns the number of GPU layers in use for this context (0 = CPU-only). */
+    private external fun nativeGetActiveGpuLayers(ctxPtr: Long): Int
 
     private external fun nativeGenerate(
         ctxPtr: Long,
@@ -67,9 +80,10 @@ class LlamaCppEngine : InferenceEngine {
     // ---- Mutable state -----------------------------------------------------
 
     /** Holds the native LlamaContext* cast to Long; 0 means no model loaded. */
-    private val contextPtr   = AtomicLong(0L)
-    private val _isLoaded    = AtomicBoolean(false)
-    private val _modelPath   = AtomicReference<String?>(null)
+    private val contextPtr      = AtomicLong(0L)
+    private val _isLoaded       = AtomicBoolean(false)
+    private val _modelPath      = AtomicReference<String?>(null)
+    private val _activeGpuLayers = AtomicInteger(-1)
 
     @Volatile private var lastTokensPerSec: Float = 0f
     @Volatile private var lastTotalTokens: Int    = 0
@@ -79,11 +93,16 @@ class LlamaCppEngine : InferenceEngine {
     /**
      * Load a GGUF model file. Runs the blocking native call on [Dispatchers.IO].
      * Any previously-loaded model is unloaded first.
+     *
+     * After loading with GPU layers, runs [nativeProbeGpu] to verify the Vulkan
+     * backend actually works. If the probe fails (Adreno driver SIGSEGV), the
+     * GPU context is freed and the model is reloaded in CPU-only mode.
      */
     override suspend fun loadModel(
         modelPath: String,
         nThreads: Int,
-        contextSize: Int
+        contextSize: Int,
+        nGpuLayers: Int
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             if (_isLoaded.get()) {
@@ -91,20 +110,50 @@ class LlamaCppEngine : InferenceEngine {
                 unload()
             }
 
-            Log.i(TAG, "loadModel: $modelPath  threads=$nThreads  ctx=$contextSize")
-            val ptr = nativeLoadModel(modelPath, nThreads, contextSize)
+            Log.i(TAG, "loadModel: $modelPath  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
 
+            // --- Step 1: load with requested GPU layers ---
+            val ptr = nativeLoadModel(modelPath, nThreads, contextSize, nGpuLayers)
             if (ptr == 0L) {
-                Result.failure(IllegalStateException(
+                return@withContext Result.failure(IllegalStateException(
                     "nativeLoadModel returned null — check logcat for details"))
-            } else {
-                contextPtr.set(ptr)
-                _isLoaded.set(true)
-                _modelPath.set(modelPath)
-                Log.i(TAG, "Model loaded, ptr=$ptr")
-                Log.i(TAG, "System info: ${nativeGetSystemInfo()}")
-                Result.success(Unit)
             }
+
+            // --- Step 2: probe GPU if any layers were offloaded ---
+            val requestedGpu = nGpuLayers != 0
+            val gpuProbeOk = if (requestedGpu) {
+                Log.i(TAG, "Probing GPU (Vulkan) backend...")
+                nativeProbeGpu(ptr)
+            } else {
+                true  // CPU-only requested explicitly, skip probe
+            }
+
+            val activePtr: Long
+            if (!gpuProbeOk) {
+                // GPU probe failed — free GPU context and reload CPU-only
+                Log.w(TAG, "GPU probe FAILED — Vulkan driver crash detected. Reloading in CPU-only mode.")
+                nativeUnloadModel(ptr)
+
+                val cpuPtr = nativeLoadModel(modelPath, nThreads, contextSize, 0)
+                if (cpuPtr == 0L) {
+                    return@withContext Result.failure(IllegalStateException(
+                        "nativeLoadModel (CPU fallback) returned null — check logcat"))
+                }
+                activePtr = cpuPtr
+                _activeGpuLayers.set(0)
+                Log.i(TAG, "Model loaded in CPU-only fallback mode")
+            } else {
+                activePtr = ptr
+                _activeGpuLayers.set(nativeGetActiveGpuLayers(ptr))
+                Log.i(TAG, "GPU probe OK — using ${_activeGpuLayers.get()} GPU layers")
+            }
+
+            contextPtr.set(activePtr)
+            _isLoaded.set(true)
+            _modelPath.set(modelPath)
+            Log.i(TAG, "Model loaded, ptr=$activePtr  activeGpuLayers=${_activeGpuLayers.get()}")
+            Log.i(TAG, "System info: ${nativeGetSystemInfo()}")
+            Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "loadModel exception", e)
             Result.failure(e)
@@ -183,6 +232,7 @@ class LlamaCppEngine : InferenceEngine {
             Log.i(TAG, "Unloading model, ptr=$ptr")
             _isLoaded.set(false)
             _modelPath.set(null)
+            _activeGpuLayers.set(-1)
             nativeUnloadModel(ptr)
         }
     }
@@ -190,6 +240,8 @@ class LlamaCppEngine : InferenceEngine {
     override fun isLoaded(): Boolean = _isLoaded.get()
 
     override fun getModelPath(): String? = _modelPath.get()
+
+    override fun getActiveGpuLayers(): Int = _activeGpuLayers.get()
 
     override fun getStats(): InferenceStats = InferenceStats(
         tokensPerSecond = lastTokensPerSec,

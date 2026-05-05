@@ -20,7 +20,7 @@ android {
 
         ndk {
             // arm64-v8a for real devices; x86_64 for emulator
-            abiFilters += listOf("arm64-v8a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
 
         externalNativeBuild {
@@ -33,7 +33,9 @@ android {
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
                     "-DLLAMA_BUILD_SERVER=OFF",
                     "-DGGML_OPENMP=OFF",
-                    "-DGGML_LLAMAFILE=OFF"
+                    "-DGGML_LLAMAFILE=OFF",
+                    "-DGGML_OPENCL=ON",
+                    "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON"
                 )
             }
         }
@@ -42,7 +44,7 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+            version = "3.27.1"
         }
     }
 
@@ -78,6 +80,8 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/io.netty.versions.properties"
         }
     }
 

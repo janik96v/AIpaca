@@ -24,7 +24,8 @@ interface InferenceEngine {
     suspend fun loadModel(
         modelPath: String,
         nThreads: Int    = 4,
-        contextSize: Int = 2048
+        contextSize: Int = 2048,
+        nGpuLayers: Int  = -1   // -1 = all layers; 0 = CPU only
     ): Result<Unit>
 
     /**
@@ -43,4 +44,10 @@ interface InferenceEngine {
     fun isLoaded(): Boolean
     fun getModelPath(): String?
     fun getStats(): InferenceStats
+
+    /**
+     * Returns the number of GPU layers actually used by the loaded model.
+     * -1 = no model loaded, 0 = CPU-only (GPU probe failed or disabled), >0 = GPU layers.
+     */
+    fun getActiveGpuLayers(): Int
 }

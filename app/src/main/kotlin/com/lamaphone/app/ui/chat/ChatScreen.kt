@@ -146,6 +146,7 @@ fun ChatScreen(
     val isGenerating  by chatViewModel.isGenerating.collectAsState()
     val isLoaded  by EngineState.isLoaded.collectAsState()
     val modelPath by EngineState.modelPath.collectAsState()
+    val gpuLayers by EngineState.gpuLayers.collectAsState()
 
     val listState      = rememberLazyListState()
     val snackbarState  = remember { SnackbarHostState() }
@@ -198,6 +199,7 @@ fun ChatScreen(
             ChatHeaderBar(
                 modelPath    = modelPath,
                 isLoaded     = isLoaded,
+                gpuLayers    = gpuLayers,
                 onClear      = { chatViewModel.clearChat() },
                 onModelSelected = { path ->
                     EngineState.scope.launch { EngineState.loadModel(path) }
@@ -236,6 +238,7 @@ fun ChatScreen(
 private fun ChatHeaderBar(
     modelPath: String?,
     isLoaded: Boolean,
+    gpuLayers: Int,
     onClear: () -> Unit,
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -266,6 +269,19 @@ private fun ChatHeaderBar(
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1
                     )
+                    // GPU / CPU backend badge
+                    val (badgeText, badgeColor) = when {
+                        gpuLayers > 0  -> "GPU · $gpuLayers layers" to MaterialTheme.colorScheme.tertiary
+                        gpuLayers == 0 -> "CPU fallback" to MaterialTheme.colorScheme.error
+                        else           -> null to null
+                    }
+                    if (badgeText != null && badgeColor != null) {
+                        Text(
+                            text  = badgeText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = badgeColor
+                        )
+                    }
                 }
             } else {
                 Text(
