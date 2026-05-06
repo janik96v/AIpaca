@@ -52,7 +52,7 @@ class LlamaCppEngine : InferenceEngine {
     ): Long
 
     /**
-     * Probes whether the GPU (Vulkan) backend works for this context by running a
+     * Probes whether the GPU backend works for this context by running a
      * single 1-token decode guarded by a POSIX signal handler (sigsetjmp/siglongjmp).
      * Returns true if the decode completes without a SIGSEGV/SIGBUS, false otherwise.
      * Must be called immediately after [nativeLoadModel] before any other decode.
@@ -71,11 +71,27 @@ class LlamaCppEngine : InferenceEngine {
         callback: TokenCallback
     )
 
+    private external fun nativeGenerateChat(
+        ctxPtr: Long,
+        roles: Array<String>,
+        contents: Array<String>,
+        temperature: Float,
+        topP: Float,
+        repeatPenalty: Float,
+        maxTokens: Int,
+        callback: TokenCallback
+    )
+
+    private external fun nativeBench(ctxPtr: Long, pp: Int, tg: Int, pl: Int, nr: Int): String
+
     private external fun nativeStopGeneration(ctxPtr: Long)
 
     private external fun nativeUnloadModel(ctxPtr: Long)
 
     private external fun nativeGetSystemInfo(): String
+
+    /** Returns JSON model info: {"quant":"Q4_K_M","ftype":15,"gpuCompatible":false} */
+    private external fun nativeGetModelInfo(ctxPtr: Long): String
 
     // ---- Mutable state -----------------------------------------------------
 
@@ -94,7 +110,7 @@ class LlamaCppEngine : InferenceEngine {
      * Load a GGUF model file. Runs the blocking native call on [Dispatchers.IO].
      * Any previously-loaded model is unloaded first.
      *
-     * After loading with GPU layers, runs [nativeProbeGpu] to verify the Vulkan
+     * After loading with GPU layers, runs [nativeProbeGpu] to verify the GPU
      * backend actually works. If the probe fails (Adreno driver SIGSEGV), the
      * GPU context is freed and the model is reloaded in CPU-only mode.
      */
@@ -122,7 +138,7 @@ class LlamaCppEngine : InferenceEngine {
             // --- Step 2: probe GPU if any layers were offloaded ---
             val requestedGpu = nGpuLayers != 0
             val gpuProbeOk = if (requestedGpu) {
-                Log.i(TAG, "Probing GPU (Vulkan) backend...")
+                Log.i(TAG, "Probing GPU backend...")
                 nativeProbeGpu(ptr)
             } else {
                 true  // CPU-only requested explicitly, skip probe
@@ -131,7 +147,7 @@ class LlamaCppEngine : InferenceEngine {
             val activePtr: Long
             if (!gpuProbeOk) {
                 // GPU probe failed — free GPU context and reload CPU-only
-                Log.w(TAG, "GPU probe FAILED — Vulkan driver crash detected. Reloading in CPU-only mode.")
+                Log.w(TAG, "GPU probe FAILED — backend crash detected. Reloading in CPU-only mode.")
                 nativeUnloadModel(ptr)
 
                 val cpuPtr = nativeLoadModel(modelPath, nThreads, contextSize, 0)
@@ -171,10 +187,34 @@ class LlamaCppEngine : InferenceEngine {
     override fun generate(
         userPrompt: String,
         params: GenerateParams
+    ): Flow<String> {
+        val turns = buildList {
+            if (params.systemPrompt.isNotBlank()) add(ChatTurn("system", params.systemPrompt))
+            add(ChatTurn("user", userPrompt))
+        }
+        return generateChat(turns, params)
+    }
+
+    override fun generateChat(
+        turns: List<ChatTurn>,
+        params: GenerateParams
     ): Flow<String> = callbackFlow {
         val ptr = contextPtr.get()
         if (ptr == 0L) {
             close(IllegalStateException("No model loaded"))
+            return@callbackFlow
+        }
+        val cleanTurns = turns
+            .filter { it.content.isNotBlank() }
+            .map { turn ->
+                val role = when (turn.role.lowercase()) {
+                    "system", "assistant", "user" -> turn.role.lowercase()
+                    else -> "user"
+                }
+                ChatTurn(role, turn.content)
+            }
+        if (cleanTurns.isEmpty()) {
+            close(IllegalArgumentException("No chat turns provided"))
             return@callbackFlow
         }
 
@@ -190,11 +230,13 @@ class LlamaCppEngine : InferenceEngine {
 
         try {
             withContext(Dispatchers.IO) {
-                nativeGenerate(
+                nativeGenerateChat(
                     ctxPtr       = ptr,
-                    systemPrompt = params.systemPrompt,
-                    userPrompt   = userPrompt,
+                    roles        = cleanTurns.map { it.role }.toTypedArray(),
+                    contents     = cleanTurns.map { it.content }.toTypedArray(),
                     temperature  = params.temperature,
+                    topP         = params.topP,
+                    repeatPenalty = params.repeatPenalty,
                     maxTokens    = params.maxTokens,
                     callback     = callback
                 )
@@ -215,6 +257,34 @@ class LlamaCppEngine : InferenceEngine {
         // Called when the downstream collector cancels the flow
         awaitClose { nativeStopGeneration(ptr) }
     }
+
+    override suspend fun benchmark(pp: Int, tg: Int, pl: Int, nr: Int): Result<BenchResult> =
+        withContext(Dispatchers.IO) {
+            val ptr = contextPtr.get()
+            if (ptr == 0L) {
+                return@withContext Result.failure(IllegalStateException("No model loaded"))
+            }
+            try {
+                val json = nativeBench(ptr, pp, tg, pl, nr)
+                if (json.contains("\"error\"")) {
+                    return@withContext Result.failure(IllegalStateException(json))
+                }
+                Result.success(
+                    BenchResult(
+                        ppAvg = Regex("\"ppAvg\":([0-9.Ee+-]+)").find(json)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f,
+                        tgAvg = Regex("\"tgAvg\":([0-9.Ee+-]+)").find(json)?.groupValues?.get(1)?.toFloatOrNull() ?: 0f,
+                        ppRuns = Regex("\"ppRuns\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+                        tgRuns = Regex("\"tgRuns\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+                        gpuLayers = Regex("\"gpuLayers\":(-?\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: -1,
+                        pureQ4_0 = json.contains("\"pureQ4_0\":true"),
+                        tensorHistogram = Regex("\"tensorHistogram\":(\\{[^}]*})").find(json)?.groupValues?.get(1) ?: "{}"
+                    )
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "benchmark failed", e)
+                Result.failure(e)
+            }
+        }
 
     /** Signal the native loop to stop. Safe to call from any thread. */
     override fun stopGeneration() {
@@ -258,4 +328,30 @@ class LlamaCppEngine : InferenceEngine {
      */
     fun getSystemInfo(): String =
         if (_isLoaded.get()) nativeGetSystemInfo() else "model not loaded"
+
+    override fun getModelInfo(): ModelInfo {
+        val ptr = contextPtr.get()
+        if (ptr == 0L) return ModelInfo()
+        return try {
+            val json = nativeGetModelInfo(ptr)
+            // Simple parse: {"quant":"Q4_K_M","ftype":15,"gpuCompatible":false}
+            val quant = Regex("\"quant\":\"([^\"]+)\"").find(json)?.groupValues?.get(1) ?: "unknown"
+            val ftype = Regex("\"ftype\":(-?\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: -1
+            val gpuCompatible = json.contains("\"gpuCompatible\":true")
+            val pureQ4 = json.contains("\"pureQ4_0\":true")
+            val histogram = Regex("\"tensorHistogram\":(\\{[^}]*})").find(json)?.groupValues?.get(1) ?: "{}"
+            val devices = Regex("\"backendDevices\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            ModelInfo(
+                quant = quant,
+                ftype = ftype,
+                gpuCompatible = gpuCompatible,
+                pureQ4_0 = pureQ4,
+                tensorHistogram = histogram,
+                backendDevices = devices
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "getModelInfo failed", e)
+            ModelInfo()
+        }
+    }
 }

@@ -2,6 +2,7 @@ package com.lamaphone.app.server
 
 import android.util.Log
 import com.lamaphone.app.EngineState
+import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.server.models.*
 import io.ktor.http.*
@@ -167,12 +168,8 @@ object ApiServer {
                     return@post
                 }
 
-                val (systemPrompt, conversationText) = buildPromptFromMessages(request.messages)
-
-                // Pass systemPrompt via GenerateParams so the JNI layer can apply
-                // the model's built-in chat template rather than manual string concat.
+                val chatTurns = buildTurnsFromMessages(request.messages)
                 val params = GenerateParams(
-                    systemPrompt = systemPrompt ?: "You are a helpful assistant.",
                     temperature  = request.temperature.toFloat(),
                     maxTokens    = request.maxTokens,
                     topP         = request.topP.toFloat()
@@ -190,7 +187,7 @@ object ApiServer {
                     val fullText = StringBuilder()
                     try {
                         generateMutex.withLock {
-                            engineState.engine.generate(conversationText, params).collect { token ->
+                            engineState.engine.generateChat(chatTurns, params).collect { token ->
                                 fullText.append(token)
                             }
                         }
@@ -208,7 +205,7 @@ object ApiServer {
 
                     val completionText = fullText.toString()
                     val completionTokens = completionText.split("\\s+".toRegex()).filter { it.isNotEmpty() }.size
-                    val promptTokens = conversationText.split("\\s+".toRegex()).filter { it.isNotEmpty() }.size
+                    val promptTokens = chatTurns.sumOf { it.content.split("\\s+".toRegex()).count { token -> token.isNotEmpty() } }
 
                     val response = ChatCompletionResponse(
                         id = completionId,
@@ -256,7 +253,7 @@ object ApiServer {
 
                         try {
                             generateMutex.withLock {
-                                engineState.engine.generate(conversationText, params).collect { token ->
+                                engineState.engine.generateChat(chatTurns, params).collect { token ->
                                     val chunk = ChatCompletionChunk(
                                         id = completionId,
                                         created = createdAt,
@@ -303,25 +300,19 @@ object ApiServer {
     // Helpers
     // -------------------------------------------------------------------------
 
-    private fun buildPromptFromMessages(messages: List<OpenAIMessage>): Pair<String?, String> {
-        val systemPrompt = messages.firstOrNull { it.role == "system" }?.content
-        // Pass non-system messages as plain text; llama_jni.cpp will apply the
-        // model's own chat template via llama_chat_apply_template.
-        // For multi-turn conversations we concatenate turns so the template sees them.
-        val nonSystem = messages.filter { it.role != "system" }
-        val conversationText = if (nonSystem.size == 1) {
-            nonSystem.first().content
-        } else {
-            // Flatten multi-turn into a single user message; the JNI layer wraps
-            // it in the model's template. This is a simplification until the JNI
-            // layer gains proper multi-turn support.
-            nonSystem.joinToString("\n") { msg ->
-                when (msg.role) {
-                    "assistant" -> "Assistant: ${msg.content}"
-                    else -> msg.content
-                }
+    private fun buildTurnsFromMessages(messages: List<OpenAIMessage>): List<ChatTurn> {
+        val turns = messages.mapNotNull { msg ->
+            if (msg.content.isBlank()) return@mapNotNull null
+            val role = when (msg.role.lowercase()) {
+                "system", "assistant", "user" -> msg.role.lowercase()
+                else -> "user"
             }
+            ChatTurn(role = role, content = msg.content)
         }
-        return Pair(systemPrompt, conversationText)
+        return if (turns.none { it.role == "system" }) {
+            listOf(ChatTurn("system", "You are a helpful assistant.")) + turns
+        } else {
+            turns
+        }
     }
 }

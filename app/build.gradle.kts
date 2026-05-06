@@ -83,6 +83,11 @@ android {
             excludes += "META-INF/INDEX.LIST"
             excludes += "META-INF/io.netty.versions.properties"
         }
+        jniLibs {
+            // OpenCL is linked against a local stub at build time, but runtime
+            // must resolve to the device vendor library declared in the manifest.
+            excludes += "**/libOpenCL.so"
+        }
     }
 
     sourceSets {

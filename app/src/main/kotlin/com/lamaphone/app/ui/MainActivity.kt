@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -35,6 +37,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.lamaphone.app.EngineState
+import com.lamaphone.app.ui.chat.ChatHistoryBus
 import com.lamaphone.app.ui.chat.ChatScreen
 import com.lamaphone.app.ui.server.ServerScreen
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
@@ -70,6 +73,9 @@ private fun LamaPhoneApp() {
 
     val modelPath by EngineState.modelPath.collectAsState()
     val isLoaded  by EngineState.isLoaded.collectAsState()
+    val isLoadingModel by EngineState.isLoadingModel.collectAsState()
+    val isChatSelected = currentDestination?.hierarchy
+        ?.any { it.route == Screen.Chat.route } == true
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -83,7 +89,13 @@ private fun LamaPhoneApp() {
                             style = MaterialTheme.typography.titleMedium,
                             color = RetroCliColors.Cyan
                         )
-                        if (isLoaded && modelPath != null) {
+                        if (isLoadingModel) {
+                            Text(
+                                text = "MODEL: LOADING",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RetroCliColors.Warning
+                            )
+                        } else if (isLoaded && modelPath != null) {
                             Text(
                                 text  = "MODEL: ${modelPath!!.substringAfterLast('/')}",
                                 style = MaterialTheme.typography.labelSmall,
@@ -101,7 +113,18 @@ private fun LamaPhoneApp() {
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor    = RetroCliColors.Void,
                     titleContentColor = RetroCliColors.Cyan
-                )
+                ),
+                actions = {
+                    if (isChatSelected) {
+                        IconButton(onClick = { ChatHistoryBus.requestOpen() }) {
+                            Icon(
+                                imageVector = Icons.Filled.Menu,
+                                contentDescription = "Open chat history",
+                                tint = RetroCliColors.Cyan
+                            )
+                        }
+                    }
+                }
             )
         },
         bottomBar = {

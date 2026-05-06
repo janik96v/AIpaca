@@ -10,6 +10,35 @@ data class GenerateParams(
     val repeatPenalty: Float    = 1.1f
 )
 
+data class ChatTurn(
+    val role: String,
+    val content: String
+)
+
+/**
+ * Quantization and GPU compatibility info for a loaded model.
+ * [gpuCompatible] is true only for Q4_0 and Q6_K — the quant types with
+ * optimised Adreno OpenCL kernels. All others silently fall back to CPU.
+ */
+data class ModelInfo(
+    val quant: String       = "unknown",
+    val ftype: Int          = -1,
+    val gpuCompatible: Boolean = false,
+    val pureQ4_0: Boolean = false,
+    val tensorHistogram: String = "{}",
+    val backendDevices: String = ""
+)
+
+data class BenchResult(
+    val ppAvg: Float = 0f,
+    val tgAvg: Float = 0f,
+    val ppRuns: Int = 0,
+    val tgRuns: Int = 0,
+    val gpuLayers: Int = -1,
+    val pureQ4_0: Boolean = false,
+    val tensorHistogram: String = "{}"
+)
+
 data class InferenceStats(
     val tokensPerSecond: Float  = 0f,
     val totalTokens: Int        = 0,
@@ -35,6 +64,15 @@ interface InferenceEngine {
      */
     fun generate(userPrompt: String, params: GenerateParams = GenerateParams()): Flow<String>
 
+    /**
+     * Stream generated tokens for structured chat turns. This preserves role
+     * boundaries so llama.cpp can apply the model's chat template directly.
+     */
+    fun generateChat(turns: List<ChatTurn>, params: GenerateParams = GenerateParams()): Flow<String>
+
+    /** Run a native prefill/generation benchmark similar to llama.rn's ctx.bench(). */
+    suspend fun benchmark(pp: Int = 128, tg: Int = 128, pl: Int = 1, nr: Int = 3): Result<BenchResult>
+
     /** Request cancellation of any in-progress generation. Thread-safe. */
     fun stopGeneration()
 
@@ -50,4 +88,11 @@ interface InferenceEngine {
      * -1 = no model loaded, 0 = CPU-only (GPU probe failed or disabled), >0 = GPU layers.
      */
     fun getActiveGpuLayers(): Int
+
+    /**
+     * Returns quantization info for the loaded model.
+     * [ModelInfo.gpuCompatible] is false for quant types not optimised for Adreno OpenCL
+     * (anything other than Q4_0 or Q6_K), which will silently fall back to CPU.
+     */
+    fun getModelInfo(): ModelInfo
 }

@@ -1,8 +1,11 @@
 package com.lamaphone.app
 
 import android.util.Log
+import com.lamaphone.app.engine.BenchResult
+import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.engine.LlamaCppEngine
+import com.lamaphone.app.engine.ModelInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +50,9 @@ object EngineState {
     private val _isLoaded     = MutableStateFlow(false)
     val isLoaded: StateFlow<Boolean> = _isLoaded.asStateFlow()
 
+    private val _isLoadingModel = MutableStateFlow(false)
+    val isLoadingModel: StateFlow<Boolean> = _isLoadingModel.asStateFlow()
+
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
@@ -59,6 +65,20 @@ object EngineState {
      */
     private val _gpuLayers = MutableStateFlow(-1)
     val gpuLayers: StateFlow<Int> = _gpuLayers.asStateFlow()
+
+    /**
+     * Model quantization info. [ModelInfo.gpuCompatible] is false when the quant type
+     * (e.g. Q4_K_M) lacks optimised Adreno OpenCL kernels and will silently fall back
+     * to CPU — causing dramatically reduced inference speed.
+     */
+    private val _modelInfo = MutableStateFlow(ModelInfo())
+    val modelInfo: StateFlow<ModelInfo> = _modelInfo.asStateFlow()
+
+    private val _lastBenchmark = MutableStateFlow(BenchResult())
+    val lastBenchmark: StateFlow<BenchResult> = _lastBenchmark.asStateFlow()
+
+    private val _isBenchmarking = MutableStateFlow(false)
+    val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
 
     // ---- Actions -----------------------------------------------------------
 
@@ -74,31 +94,41 @@ object EngineState {
     suspend fun loadModel(
         path: String,
         nThreads: Int    = Runtime.getRuntime().availableProcessors().coerceAtMost(6),
-        contextSize: Int = 512,
+        contextSize: Int = 2048,
         nGpuLayers: Int  = -1   // -1 = all layers (full GPU offload)
     ): Result<Unit> {
         _errorMessage.value = null
+        _isLoadingModel.value = true
         _isLoaded.value     = false
         _modelPath.value    = null
 
         Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
-        val result = engine.loadModel(path, nThreads, contextSize, nGpuLayers)
+        return try {
+            val result = engine.loadModel(path, nThreads, contextSize, nGpuLayers)
 
-        result.fold(
-            onSuccess = {
-                _isLoaded.value  = true
-                _modelPath.value = path
-                _gpuLayers.value = engine.getActiveGpuLayers()
-                val gpuInfo = if (_gpuLayers.value > 0) "GPU (${_gpuLayers.value} layers)" else "CPU only"
-                Log.i(TAG, "Model ready — backend: $gpuInfo")
-            },
-            onFailure = { e ->
-                _gpuLayers.value = -1
-                _errorMessage.value = e.message ?: "Unknown load error"
-                Log.e(TAG, "loadModel failed", e)
-            }
-        )
-        return result
+            result.fold(
+                onSuccess = {
+                    _isLoaded.value  = true
+                    _modelPath.value = path
+                    _gpuLayers.value = engine.getActiveGpuLayers()
+                    _modelInfo.value = engine.getModelInfo()
+                    val gpuInfo = if (_gpuLayers.value > 0) "GPU (${_gpuLayers.value} layers)" else "CPU only"
+                    val quantInfo = _modelInfo.value.quant
+                    val gpuCompat = if (_gpuLayers.value > 0 && !_modelInfo.value.gpuCompatible)
+                        " [WARNING: $quantInfo not GPU-optimised — expect slow inference]" else ""
+                    Log.i(TAG, "Model ready — backend: $gpuInfo  quant: $quantInfo$gpuCompat")
+                },
+                onFailure = { e ->
+                    _gpuLayers.value = -1
+                    _modelInfo.value = ModelInfo()
+                    _errorMessage.value = e.message ?: "Unknown load error"
+                    Log.e(TAG, "loadModel failed", e)
+                }
+            )
+            result
+        } finally {
+            _isLoadingModel.value = false
+        }
     }
 
     /**
@@ -111,8 +141,12 @@ object EngineState {
             engine.unload()
             _isLoaded.value     = false
             _modelPath.value    = null
+            _isLoadingModel.value = false
             _isGenerating.value = false
             _gpuLayers.value    = -1
+            _modelInfo.value    = ModelInfo()
+            _lastBenchmark.value = BenchResult()
+            _isBenchmarking.value = false
         }
     }
 
@@ -135,6 +169,43 @@ object EngineState {
                 .onCompletion { _isGenerating.value = false; onDone() }
                 .catch        { e -> _errorMessage.value = e.message; onError(e) }
                 .collect      { token -> onToken(token) }
+        }
+    }
+
+    fun generateChat(
+        turns: List<ChatTurn>,
+        params: GenerateParams        = GenerateParams(),
+        onToken: (String) -> Unit,
+        onDone: () -> Unit            = {},
+        onError: (Throwable) -> Unit  = {}
+    ) {
+        scope.launch {
+            engine.generateChat(turns, params)
+                .onStart      { _isGenerating.value = true }
+                .onCompletion { _isGenerating.value = false; onDone() }
+                .catch        { e -> _errorMessage.value = e.message; onError(e) }
+                .collect      { token -> onToken(token) }
+        }
+    }
+
+    suspend fun benchmark(pp: Int = 128, tg: Int = 128, pl: Int = 1, nr: Int = 3): Result<BenchResult> {
+        _isBenchmarking.value = true
+        _errorMessage.value = null
+        return try {
+            val result = engine.benchmark(pp, tg, pl, nr)
+            result.fold(
+                onSuccess = {
+                    _lastBenchmark.value = it
+                    Log.i(TAG, "Benchmark: pp=${it.ppAvg} tok/s tg=${it.tgAvg} tok/s gpuLayers=${it.gpuLayers}")
+                },
+                onFailure = { e ->
+                    _errorMessage.value = e.message
+                    Log.e(TAG, "Benchmark failed", e)
+                }
+            )
+            result
+        } finally {
+            _isBenchmarking.value = false
         }
     }
 }

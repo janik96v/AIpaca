@@ -6,10 +6,13 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -18,7 +21,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
 import com.lamaphone.app.ui.theme.RetroCliColors
@@ -39,7 +41,8 @@ private const val TAG = "ModelPickerButton"
 @Composable
 fun ModelPickerButton(
     onModelSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isLoading: Boolean = false
 ) {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
@@ -61,18 +64,29 @@ fun ModelPickerButton(
     Button(
         onClick   = { launcher.launch(arrayOf("*/*")) },
         modifier  = modifier,
+        enabled = !isLoading,
         shape = RoundedCornerShape(4.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = RetroCliColors.Magenta,
-            contentColor = RetroCliColors.Void
+            contentColor = RetroCliColors.Void,
+            disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.55f),
+            disabledContentColor = RetroCliColors.Text
         )
     ) {
-        Icon(
-            imageVector        = Icons.Filled.FolderOpen,
-            contentDescription = null
-        )
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                color = RetroCliColors.Text,
+                strokeWidth = 2.dp
+            )
+        } else {
+            Icon(
+                imageVector        = Icons.Filled.FolderOpen,
+                contentDescription = null
+            )
+        }
         Text(
-            text = " LOAD_MODEL",
+            text = if (isLoading) " LOADING_MODEL" else " LOAD_MODEL",
             style = MaterialTheme.typography.labelMedium
         )
     }

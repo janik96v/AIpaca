@@ -1,5 +1,6 @@
 package com.lamaphone.app.ui.chat
 
+import android.app.Application
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -27,15 +29,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -43,6 +50,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -59,13 +68,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lamaphone.app.EngineState
+import com.lamaphone.app.data.ChatConversationStore
+import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.model.ChatMessage
 import com.lamaphone.app.model.Role
+import com.lamaphone.app.model.StoredConversation
 import com.lamaphone.app.ui.components.ModelPickerButton
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
 import com.lamaphone.app.ui.theme.RetroCliColors
@@ -75,34 +87,61 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
 
 // ---- ViewModel --------------------------------------------------------------
 
-class ChatViewModel : ViewModel() {
+class ChatViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val conversationStore = ChatConversationStore(application)
+    private var activeConversationId: String? = null
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
+
+    private val _conversations = MutableStateFlow<List<StoredConversation>>(emptyList())
+    val conversations: StateFlow<List<StoredConversation>> = _conversations.asStateFlow()
+
+    private val _activeConversationId = MutableStateFlow<String?>(null)
+    val currentConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
     private var generationJob: Job? = null
 
+    init {
+        val storedConversations = conversationStore.loadConversations()
+        _conversations.value = storedConversations
+        storedConversations.firstOrNull()?.let { conversation ->
+            activeConversationId = conversation.id
+            _activeConversationId.value = conversation.id
+            _messages.value = conversation.messages
+        }
+    }
+
     fun sendMessage(userText: String) {
         if (userText.isBlank()) return
+        if (activeConversationId == null) {
+            activeConversationId = UUID.randomUUID().toString()
+            _activeConversationId.value = activeConversationId
+        }
 
         val userMsg = ChatMessage(role = Role.USER, content = userText.trim())
         val assistantMsg = ChatMessage(role = Role.ASSISTANT, content = "")
 
         _messages.value = _messages.value + userMsg + assistantMsg
+        persistCurrentConversation()
         _isGenerating.value = true
 
         generationJob = viewModelScope.launch {
             try {
-                // Build a simple prompt from the full conversation history
-                val prompt = buildPrompt(_messages.value.dropLast(1))
+                val turns = buildTurns(_messages.value.dropLast(1))
 
-                EngineState.engine.generate(prompt, GenerateParams())
+                EngineState.engine.generateChat(turns, GenerateParams())
                     .collect { token ->
                         val current = _messages.value
                         if (current.isNotEmpty()) {
@@ -113,6 +152,7 @@ class ChatViewModel : ViewModel() {
                     }
             } finally {
                 _isGenerating.value = false
+                persistCurrentConversation()
             }
         }
     }
@@ -126,16 +166,63 @@ class ChatViewModel : ViewModel() {
     fun clearChat() {
         stopGeneration()
         _messages.value = emptyList()
+        activeConversationId = null
+        _activeConversationId.value = null
     }
 
-    private fun buildPrompt(messages: List<ChatMessage>): String {
-        return messages.joinToString(separator = "\n") { msg ->
-            when (msg.role) {
-                Role.USER      -> "User: ${msg.content}"
-                Role.ASSISTANT -> "Assistant: ${msg.content}"
-                Role.SYSTEM    -> msg.content
+    fun selectConversation(conversationId: String) {
+        stopGeneration()
+        val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
+        activeConversationId = conversation.id
+        _activeConversationId.value = conversation.id
+        _messages.value = conversation.messages
+    }
+
+    fun deleteConversation(conversationId: String) {
+        if (activeConversationId == conversationId) {
+            stopGeneration()
+        }
+        _conversations.value = conversationStore.delete(conversationId)
+        if (activeConversationId == conversationId) {
+            activeConversationId = null
+            _activeConversationId.value = null
+            _messages.value = emptyList()
+        }
+    }
+
+    private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
+        return messages.mapNotNull { msg ->
+            if (msg.content.isBlank()) return@mapNotNull null
+            val role = when (msg.role) {
+                Role.USER      -> "user"
+                Role.ASSISTANT -> "assistant"
+                Role.SYSTEM    -> "system"
             }
-        } + "\nAssistant:"
+            ChatTurn(role = role, content = msg.content)
+        }
+    }
+
+    private fun persistCurrentConversation() {
+        val conversationId = activeConversationId ?: return
+        val currentMessages = _messages.value
+        if (currentMessages.isEmpty()) return
+
+        val title = currentMessages
+            .firstOrNull { it.role == Role.USER }
+            ?.content
+            ?.replace(Regex("\\s+"), " ")
+            ?.take(42)
+            ?.ifBlank { null }
+            ?: "Untitled chat"
+
+        _conversations.value = conversationStore.upsert(
+            StoredConversation(
+                id = conversationId,
+                title = title,
+                messages = currentMessages,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
     }
 }
 
@@ -147,13 +234,18 @@ fun ChatScreen(
     chatViewModel: ChatViewModel = viewModel()
 ) {
     val messages      by chatViewModel.messages.collectAsState()
+    val conversations by chatViewModel.conversations.collectAsState()
+    val currentConversationId by chatViewModel.currentConversationId.collectAsState()
     val isGenerating  by chatViewModel.isGenerating.collectAsState()
     val isLoaded  by EngineState.isLoaded.collectAsState()
+    val isLoadingModel by EngineState.isLoadingModel.collectAsState()
     val modelPath by EngineState.modelPath.collectAsState()
     val gpuLayers by EngineState.gpuLayers.collectAsState()
+    val modelInfo by EngineState.modelInfo.collectAsState()
 
     val listState      = rememberLazyListState()
     val snackbarState  = remember { SnackbarHostState() }
+    val drawerState    = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope          = rememberCoroutineScope()
     var inputText      by remember { mutableStateOf("") }
 
@@ -172,64 +264,96 @@ fun ChatScreen(
         }
     }
 
-    Scaffold(
-        modifier    = modifier,
-        containerColor = androidx.compose.ui.graphics.Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarState) },
-        bottomBar   = {
-            ChatInputBar(
-                text         = inputText,
-                onTextChange = { inputText = it },
-                isGenerating = isGenerating,
-                onSend       = {
-                    if (!isLoaded) {
-                        scope.launch {
-                            snackbarState.showSnackbar("Please load a model first")
-                        }
-                    } else if (inputText.isNotBlank()) {
-                        chatViewModel.sendMessage(inputText)
-                        inputText = ""
-                    }
-                },
-                onStop       = { chatViewModel.stopGeneration() }
-            )
+    LaunchedEffect(drawerState) {
+        ChatHistoryBus.openRequests.collect {
+            drawerState.open()
         }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
-            // Header bar: model info + action buttons
-            ChatHeaderBar(
-                modelPath    = modelPath,
-                isLoaded     = isLoaded,
-                gpuLayers    = gpuLayers,
-                onClear      = { chatViewModel.clearChat() },
-                onModelSelected = { path ->
-                    EngineState.scope.launch { EngineState.loadModel(path) }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ChatHistoryDrawer(
+                conversations = conversations,
+                currentConversationId = currentConversationId,
+                onNewChat = {
+                    chatViewModel.clearChat()
+                    scope.launch { drawerState.close() }
+                },
+                onSelectConversation = { conversationId ->
+                    chatViewModel.selectConversation(conversationId)
+                    scope.launch { drawerState.close() }
+                },
+                onDeleteConversation = { conversationId ->
+                    chatViewModel.deleteConversation(conversationId)
                 }
             )
-
-            if (messages.isEmpty()) {
-                EmptyChatPlaceholder(
-                    isLoaded    = isLoaded,
-                    modifier    = Modifier.fillMaxSize()
+        }
+    ) {
+        Scaffold(
+            modifier    = modifier,
+            containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            snackbarHost = { SnackbarHost(snackbarState) },
+            bottomBar   = {
+                ChatInputBar(
+                    text         = inputText,
+                    onTextChange = { inputText = it },
+                    isGenerating = isGenerating,
+                    onSend       = {
+                        if (!isLoaded) {
+                            scope.launch {
+                                snackbarState.showSnackbar("Please load a model first")
+                            }
+                        } else if (inputText.isNotBlank()) {
+                            chatViewModel.sendMessage(inputText)
+                            inputText = ""
+                        }
+                    },
+                    onStop       = { chatViewModel.stopGeneration() }
                 )
-            } else {
-                LazyColumn(
-                    state           = listState,
-                    modifier        = Modifier.fillMaxSize(),
-                    contentPadding  = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(messages, key = { it.id }) { message ->
-                        val isLastAssistant = message.id == messages.lastOrNull()?.id &&
-                            message.role == Role.ASSISTANT
-                        MessageBubble(
-                            message     = message,
-                            isStreaming = isGenerating && isLastAssistant
-                        )
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                ChatHeaderBar(
+                    modelPath    = modelPath,
+                    isLoaded     = isLoaded,
+                    isLoadingModel = isLoadingModel,
+                    gpuLayers    = gpuLayers,
+                    onClear      = { chatViewModel.clearChat() },
+                    onModelSelected = { path ->
+                        EngineState.scope.launch { EngineState.loadModel(path) }
+                    }
+                )
+
+                if (isLoaded && gpuLayers > 0 && !modelInfo.pureQ4_0) {
+                    GpuQuantWarningBanner(quantName = modelInfo.quant)
+                }
+
+                if (messages.isEmpty()) {
+                    EmptyChatPlaceholder(
+                        isLoaded    = isLoaded,
+                        isLoadingModel = isLoadingModel,
+                        modifier    = Modifier.fillMaxSize()
+                    )
+                } else {
+                    LazyColumn(
+                        state           = listState,
+                        modifier        = Modifier.fillMaxSize(),
+                        contentPadding  = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(messages, key = { it.id }) { message ->
+                            val isLastAssistant = message.id == messages.lastOrNull()?.id &&
+                                message.role == Role.ASSISTANT
+                            MessageBubble(
+                                message     = message,
+                                isStreaming = isGenerating && isLastAssistant
+                            )
+                        }
                     }
                 }
             }
@@ -243,6 +367,7 @@ fun ChatScreen(
 private fun ChatHeaderBar(
     modelPath: String?,
     isLoaded: Boolean,
+    isLoadingModel: Boolean,
     gpuLayers: Int,
     onClear: () -> Unit,
     onModelSelected: (String) -> Unit,
@@ -261,7 +386,31 @@ private fun ChatHeaderBar(
             verticalAlignment   = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (isLoaded && modelPath != null) {
+            if (isLoadingModel) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = RetroCliColors.Magenta,
+                        strokeWidth = 2.dp
+                    )
+                    Column {
+                        Text(
+                            text = "STATUS: LOADING_MODEL",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = RetroCliColors.Warning
+                        )
+                        Text(
+                            text = "BACKGROUND_PROCESS ACTIVE",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RetroCliColors.Muted
+                        )
+                    }
+                }
+            } else if (isLoaded && modelPath != null) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text  = "STATUS: ONLINE",
@@ -308,16 +457,46 @@ private fun ChatHeaderBar(
                 }
                 ModelPickerButton(
                     onModelSelected = onModelSelected,
-                    modifier        = Modifier.height(36.dp)
+                    modifier        = Modifier.height(36.dp),
+                    isLoading = isLoadingModel
                 )
             }
         }
     }
 }
 
+/**
+ * Inline warning strip shown when a GPU-offloaded model is not pure Q4_0.
+ * Adreno OpenCL can load mixed quants, but the S24 Ultra speed preset is built
+ * around pure Q4_0 tensors with repacking enabled.
+ */
+@Composable
+private fun GpuQuantWarningBanner(
+    quantName: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        color = androidx.compose.ui.graphics.Color(0xFF3D2400),
+        shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFFFF8C00))
+    ) {
+        Text(
+            text = "GPU WARN: $quantName is not Adreno-optimised. " +
+                    "Use a pure Q4_0 GGUF for the fast S24 Ultra path.",
+            style = MaterialTheme.typography.labelSmall,
+            color = androidx.compose.ui.graphics.Color(0xFFFF8C00),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+        )
+    }
+}
+
 @Composable
 private fun EmptyChatPlaceholder(
     isLoaded: Boolean,
+    isLoadingModel: Boolean,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -338,7 +517,11 @@ private fun EmptyChatPlaceholder(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text  = if (isLoaded) "> READY. TYPE A PROMPT." else "> LOAD_MODEL REQUIRED.",
+                text  = when {
+                    isLoadingModel -> "> LOADING_MODEL. PLEASE WAIT."
+                    isLoaded -> "> READY. TYPE A PROMPT."
+                    else -> "> LOAD_MODEL REQUIRED."
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (isLoaded) RetroCliColors.Success else RetroCliColors.Warning
             )
@@ -349,6 +532,138 @@ private fun EmptyChatPlaceholder(
             )
         }
     }
+}
+
+@Composable
+private fun ChatHistoryDrawer(
+    conversations: List<StoredConversation>,
+    currentConversationId: String?,
+    onNewChat: () -> Unit,
+    onSelectConversation: (String) -> Unit,
+    onDeleteConversation: (String) -> Unit
+) {
+    ModalDrawerSheet(
+        modifier = Modifier.width(320.dp),
+        drawerContainerColor = RetroCliColors.Void,
+        drawerContentColor = RetroCliColors.Text
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            TerminalPanel(
+                modifier = Modifier.fillMaxWidth(),
+                title = "HISTORY",
+                accent = RetroCliColors.Magenta
+            ) {
+                Text(
+                    text = "STORED_CONVERSATIONS",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = RetroCliColors.Cyan
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onNewChat,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(4.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RetroCliColors.Cyan,
+                        contentColor = RetroCliColors.Void
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Add,
+                        contentDescription = null
+                    )
+                    Text(
+                        text = " NEW_CHAT",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+
+            if (conversations.isEmpty()) {
+                TerminalPanel(
+                    modifier = Modifier.fillMaxWidth(),
+                    title = "EMPTY",
+                    accent = RetroCliColors.Purple
+                ) {
+                    Text(
+                        text = "> No saved conversations yet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RetroCliColors.Muted
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(conversations, key = { it.id }) { conversation ->
+                        ConversationHistoryRow(
+                            conversation = conversation,
+                            isSelected = conversation.id == currentConversationId,
+                            onSelect = { onSelectConversation(conversation.id) },
+                            onDelete = { onDeleteConversation(conversation.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationHistoryRow(
+    conversation: StoredConversation,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit
+) {
+    TerminalPanel(
+        modifier = Modifier.fillMaxWidth(),
+        title = if (isSelected) "ACTIVE" else "CHAT",
+        accent = if (isSelected) RetroCliColors.Cyan else RetroCliColors.Purple
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            TextButton(
+                onClick = onSelect,
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = conversation.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (isSelected) RetroCliColors.Cyan else RetroCliColors.Text,
+                        maxLines = 2
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "${conversation.messages.size} lines · ${formatConversationTime(conversation.updatedAt)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = RetroCliColors.Muted
+                    )
+                }
+            }
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Filled.Delete,
+                    contentDescription = "Delete conversation",
+                    tint = RetroCliColors.Error
+                )
+            }
+        }
+    }
+}
+
+private fun formatConversationTime(timestamp: Long): String {
+    return SimpleDateFormat("MMM d HH:mm", Locale.getDefault()).format(Date(timestamp))
 }
 
 @Composable
