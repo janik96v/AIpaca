@@ -61,55 +61,51 @@ The model loads in the background (~5-15 seconds depending on size).
 
 ### 6. Start the API server
 
-**Server tab** → tap **"Start Server"**
+**Server tab** → tap **"START\_SERVER"**
 
-The notification shows: `LamaPhone Server • 192.168.x.x:8080`
+The notification shows: `LamaPhone Server • https://192.168.x.x:8443`
 
-### 7. Connect OpenClaw
+### 7. Pair your client device
 
-In your OpenClaw config (`~/.openclaw/config.yml` or equivalent):
+**Server tab** → tap **"PAIR\_NEW\_DEVICE"** → scan the QR code or enter the 6-digit PIN.
 
-```yaml
-model: local
-provider: openai
-baseUrl: http://192.168.1.XX:8080/v1
-apiKey: none
-```
+Authentication uses **Ed25519 asymmetric keys** (SSH-style). Your private key never leaves your device.
 
-Replace `192.168.1.XX` with your phone's IP shown in the Server tab.
+See **[docs/api-client-guide.md](docs/api-client-guide.md)** for complete instructions for Python, curl, Android, iOS, and the OpenAI SDK.
 
-### 8. Test with curl
+### 8. Test with curl (after pairing)
 
 ```bash
-# Health check
-curl http://192.168.1.XX:8080/health
+# Health check — no auth needed
+curl -k https://192.168.1.XX:8443/health
 
-# Non-streaming
-curl -X POST http://192.168.1.XX:8080/v1/chat/completions \
+# Chat — requires signed Authorization header (see docs/api-client-guide.md)
+curl -k -X POST https://192.168.1.XX:8443/v1/chat/completions \
+  -H "Authorization: LamaPhone-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
-
-# Streaming
-curl -X POST http://192.168.1.XX:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":true}'
 ```
 
 ---
 
 ## API Reference
 
-### `GET /health`
+> **Full client guide** (Python, curl, Android, iOS, OpenAI SDK): [docs/api-client-guide.md](docs/api-client-guide.md)
+
+### `GET /health` — public, no auth
 ```json
 {"status": "ok", "model": "Qwen2.5-3B-Instruct-Q4_K_M", "loaded": true}
 ```
 
-### `GET /v1/models`
+### `POST /v1/pair` — public, PIN protected
+Registers a client's Ed25519 public key. Requires the 6-digit PIN shown in the app.
+
+### `GET /v1/models` — requires auth
 ```json
 {"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model"}]}
 ```
 
-### `POST /v1/chat/completions`
+### `POST /v1/chat/completions` — requires auth
 
 **Request** (OpenAI-compatible):
 ```json
@@ -156,7 +152,7 @@ GGUF model (on-device storage)
 
 ─── parallel ───
 
-Ktor HTTP Server (port 8080)
+Ktor HTTPS Server (port 8443, TLS + Ed25519 auth)
     ↓ calls same EngineState
 OpenAI-compatible REST API
     ↓ SSE streaming
@@ -175,7 +171,13 @@ app/src/main/
 │   │   └── LlamaCppEngine.kt       ← JNI wrapper + Flow streaming
 │   ├── server/
 │   │   ├── models/OpenAIModels.kt  ← OpenAI wire-format data classes
-│   │   ├── ApiServer.kt            ← Ktor embedded server
+│   │   ├── security/
+│   │   │   ├── TlsManager.kt       ← self-signed cert generation (PKCS12)
+│   │   │   ├── AuthorizedKeysStore.kt ← EncryptedSharedPreferences key store
+│   │   │   ├── PairingManager.kt   ← one-time PIN sessions
+│   │   │   ├── Ed25519Verifier.kt  ← request signature verification
+│   │   │   └── AuthPlugin.kt       ← Ktor authentication plugin
+│   │   ├── ApiServer.kt            ← Ktor HTTPS embedded server
 │   │   ├── ApiService.kt           ← Android Foreground Service
 │   │   └── ServerManager.kt        ← Observable state (StateFlow)
 │   ├── ui/
@@ -198,10 +200,11 @@ app/src/main/
 ## Roadmap
 
 - [ ] In-app HuggingFace model browser (no manual download)
-- [ ] API key authentication for the server
+- [x] API key authentication for the server (Ed25519 asymmetric keys)
+- [x] TLS / HTTPS transport encryption
+- [x] QR code for one-tap device pairing
 - [ ] Chat history persistence (Room DB)
 - [ ] GPU acceleration (OpenCL / Vulkan)
-- [ ] QR code for one-tap connection
 - [ ] Multi-request queuing
 - [ ] Multimodal / vision support (LLaVA)
 - [ ] iOS port (shared llama.cpp core + SwiftUI)
