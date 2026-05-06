@@ -5,7 +5,7 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.server.models.*
-import com.lamaphone.app.server.security.AuthPlugin
+import com.lamaphone.app.server.security.LamaPhoneAuth
 import com.lamaphone.app.server.security.AuthorizedKeysAttrKey
 import com.lamaphone.app.server.security.AuthorizedKeysStore
 import com.lamaphone.app.server.security.PairingManager
@@ -29,7 +29,7 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
-private const val MAX_REQUEST_BYTES = 1_048_576L   // 1 MB
+private const val MAX_REQUEST_BYTES = 1_048_576L   // 1 MB — enforced both at connector and handler level
 private const val GENERATE_TIMEOUT_MS = 120_000L   // 2 minutes max per request
 private const val TAG = "ApiServer"
 
@@ -72,7 +72,7 @@ object ApiServer {
 
     private val json = Json {
         ignoreUnknownKeys = true
-        isLenient = true
+        // isLenient intentionally OFF — strict parsing reduces parser confusion attack surface
         encodeDefaults = true
         explicitNulls = false
     }
@@ -84,22 +84,25 @@ object ApiServer {
     fun start(
         engineState: EngineState,
         tlsConfig: TlsManager.TlsConfig,
-        authorizedKeys: AuthorizedKeysStore
+        authorizedKeys: AuthorizedKeysStore,
+        bindAddress: String = "0.0.0.0"
     ) {
         if (server != null) {
             Log.w(TAG, "Server already running — ignoring start()")
             return
         }
-        Log.i(TAG, "Starting Ktor HTTPS server on 0.0.0.0:$port")
+        Log.i(TAG, "Starting Ktor HTTPS server on $bindAddress:$port")
 
         val env = applicationEngineEnvironment {
             sslConnector(
                 keyStore          = tlsConfig.keyStore,
                 keyAlias          = "lamaphone_tls",
-                keyStorePassword  = { charArrayOf() },
-                privateKeyPassword = { charArrayOf() }
+                keyStorePassword  = { tlsConfig.keystorePassword.toCharArray() },
+                privateKeyPassword = { tlsConfig.keystorePassword.toCharArray() }
             ) {
-                host = "0.0.0.0"
+                // Bind to the resolved local WiFi/eth address to avoid exposing the server
+                // on hotspot, VPN, or other unexpected network interfaces.
+                host = bindAddress
                 port = this@ApiServer.port
             }
             module {
@@ -132,7 +135,7 @@ object ApiServer {
         }
         // CORS intentionally NOT installed — API clients are not browsers.
         // Removing anyHost() means no browser can make cross-origin requests (CSRF protection).
-        install(AuthPlugin)
+        install(LamaPhoneAuth)
     }
 
     private fun Application.configureRouting(
@@ -188,7 +191,7 @@ object ApiServer {
                 authorizedKeys.add(
                     AuthorizedKeysStore.AuthorizedKey(
                         fingerprint    = fingerprint,
-                        displayName    = req.displayName.take(64),
+                        displayName    = sanitizeDisplayName(req.displayName),
                         publicKeyBase64 = req.clientPublicKey
                     )
                 )
@@ -394,6 +397,20 @@ object ApiServer {
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Strips control characters and Unicode bidirectional override codepoints from a
+     * display name to prevent spoofing in the UI (e.g. RTL overrides, null bytes).
+     * Limits to 64 printable characters.
+     */
+    private fun sanitizeDisplayName(raw: String): String =
+        raw.filter { c ->
+            c.code >= 0x20 &&           // no C0 controls / null
+            c.category != CharCategory.FORMAT &&  // no Unicode format chars (e.g. U+202E RLO)
+            c.category != CharCategory.CONTROL &&
+            c.category != CharCategory.PRIVATE_USE &&
+            c.category != CharCategory.SURROGATE
+        }.take(64).ifBlank { "Unknown Device" }
 
     private fun buildTurnsFromMessages(messages: List<OpenAIMessage>): List<ChatTurn> {
         val turns = messages.mapNotNull { msg ->
