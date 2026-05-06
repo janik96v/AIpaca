@@ -5,6 +5,11 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.server.models.*
+import com.lamaphone.app.server.security.AuthPlugin
+import com.lamaphone.app.server.security.AuthorizedKeysAttrKey
+import com.lamaphone.app.server.security.AuthorizedKeysStore
+import com.lamaphone.app.server.security.PairingManager
+import com.lamaphone.app.server.security.TlsManager
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -12,19 +17,21 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.utils.io.*
 import io.ktor.server.plugins.contentnegotiation.*
-import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
+
+private const val MAX_REQUEST_BYTES = 1_048_576L   // 1 MB
+private const val GENERATE_TIMEOUT_MS = 120_000L   // 2 minutes max per request
+private const val TAG = "ApiServer"
 
 // Simple response types for endpoints that don't use the OpenAI models
 @Serializable
@@ -40,11 +47,22 @@ private data class ApiError(val message: String, val type: String)
 @Serializable
 private data class ApiErrorWrapper(val error: ApiError)
 
-private const val TAG = "ApiServer"
+@Serializable
+private data class PairRequest(
+    val clientPublicKey: String,
+    val pin: String,
+    val displayName: String = "Unknown Device"
+)
+
+@Serializable
+private data class PairResponse(
+    val status: String,
+    val serverCertFingerprint: String
+)
 
 object ApiServer {
 
-    val port = 8080
+    const val port = 8443
     val requestCount = AtomicLong(0L)
 
     private var server: ApplicationEngine? = null
@@ -63,17 +81,36 @@ object ApiServer {
     // Lifecycle
     // -------------------------------------------------------------------------
 
-    fun start(engineState: EngineState) {
+    fun start(
+        engineState: EngineState,
+        tlsConfig: TlsManager.TlsConfig,
+        authorizedKeys: AuthorizedKeysStore
+    ) {
         if (server != null) {
             Log.w(TAG, "Server already running — ignoring start()")
             return
         }
-        Log.i(TAG, "Starting Ktor server on 0.0.0.0:$port")
-        server = embeddedServer(Netty, port = port, host = "0.0.0.0") {
-            configurePlugins()
-            configureRouting(engineState)
-        }.also { it.start(wait = false) }
-        Log.i(TAG, "Ktor server started")
+        Log.i(TAG, "Starting Ktor HTTPS server on 0.0.0.0:$port")
+
+        val env = applicationEngineEnvironment {
+            sslConnector(
+                keyStore          = tlsConfig.keyStore,
+                keyAlias          = "lamaphone_tls",
+                keyStorePassword  = { charArrayOf() },
+                privateKeyPassword = { charArrayOf() }
+            ) {
+                host = "0.0.0.0"
+                port = this@ApiServer.port
+            }
+            module {
+                attributes.put(AuthorizedKeysAttrKey, authorizedKeys)
+                configurePlugins()
+                configureRouting(engineState, authorizedKeys, tlsConfig)
+            }
+        }
+
+        server = embeddedServer(Netty, env).also { it.start(wait = false) }
+        Log.i(TAG, "Ktor HTTPS server started on port $port")
     }
 
     fun stop() {
@@ -93,37 +130,76 @@ object ApiServer {
         install(ContentNegotiation) {
             json(json)
         }
-        install(CORS) {
-            anyHost()
-            allowHeader(HttpHeaders.ContentType)
-            allowHeader(HttpHeaders.Authorization)
-            allowMethod(HttpMethod.Post)
-            allowMethod(HttpMethod.Get)
-            allowMethod(HttpMethod.Options)
-        }
+        // CORS intentionally NOT installed — API clients are not browsers.
+        // Removing anyHost() means no browser can make cross-origin requests (CSRF protection).
+        install(AuthPlugin)
     }
 
-    private fun Application.configureRouting(engineState: EngineState) {
+    private fun Application.configureRouting(
+        engineState: EngineState,
+        authorizedKeys: AuthorizedKeysStore,
+        tlsConfig: TlsManager.TlsConfig
+    ) {
         routing {
 
             // ------------------------------------------------------------------
-            // GET /health
+            // GET /health  (public — no auth required)
             // ------------------------------------------------------------------
             get("/health") {
-                requestCount.incrementAndGet()
                 val modelName = engineState.modelPath.value?.substringAfterLast('/')?.substringBeforeLast('.')
                 call.respond(
                     HttpStatusCode.OK,
                     HealthResponse(
-                        status  = "ok",
-                        model   = modelName,
-                        loaded  = engineState.isLoaded.value
+                        status = "ok",
+                        model  = modelName,
+                        loaded = engineState.isLoaded.value
                     )
                 )
             }
 
             // ------------------------------------------------------------------
-            // GET /v1/models
+            // POST /v1/pair  (public — protected by PIN, not auth header)
+            // ------------------------------------------------------------------
+            post("/v1/pair") {
+                val contentLength = call.request.contentLength() ?: 0L
+                if (contentLength > MAX_REQUEST_BYTES) {
+                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorWrapper(ApiError("Request body too large", "invalid_request_error")))
+                    return@post
+                }
+
+                val req = try {
+                    call.receive<PairRequest>()
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorWrapper(ApiError("Invalid request body: ${e.message}", "invalid_request_error")))
+                    return@post
+                }
+
+                if (!PairingManager.validateAndConsume(req.pin)) {
+                    call.respond(HttpStatusCode.Unauthorized, ApiErrorWrapper(ApiError("Invalid or expired pairing PIN", "auth_error")))
+                    return@post
+                }
+
+                val fingerprint = AuthorizedKeysStore.fingerprintOf(req.clientPublicKey)
+                if (fingerprint == null) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorWrapper(ApiError("Invalid public key encoding", "invalid_request_error")))
+                    return@post
+                }
+
+                authorizedKeys.add(
+                    AuthorizedKeysStore.AuthorizedKey(
+                        fingerprint    = fingerprint,
+                        displayName    = req.displayName.take(64),
+                        publicKeyBase64 = req.clientPublicKey
+                    )
+                )
+                call.respond(HttpStatusCode.OK, PairResponse(
+                    status               = "paired",
+                    serverCertFingerprint = tlsConfig.certFingerprint
+                ))
+            }
+
+            // ------------------------------------------------------------------
+            // GET /v1/models  (requires auth)
             // ------------------------------------------------------------------
             get("/v1/models") {
                 requestCount.incrementAndGet()
@@ -138,10 +214,16 @@ object ApiServer {
             }
 
             // ------------------------------------------------------------------
-            // POST /v1/chat/completions
+            // POST /v1/chat/completions  (requires auth)
             // ------------------------------------------------------------------
             post("/v1/chat/completions") {
                 requestCount.incrementAndGet()
+
+                val contentLength = call.request.contentLength() ?: 0L
+                if (contentLength > MAX_REQUEST_BYTES) {
+                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorWrapper(ApiError("Request body too large (max 1 MB)", "invalid_request_error")))
+                    return@post
+                }
 
                 val request = try {
                     call.receive<ChatCompletionRequest>()
@@ -170,9 +252,9 @@ object ApiServer {
 
                 val chatTurns = buildTurnsFromMessages(request.messages)
                 val params = GenerateParams(
-                    temperature  = request.temperature.toFloat(),
-                    maxTokens    = request.maxTokens,
-                    topP         = request.topP.toFloat()
+                    temperature = request.temperature.toFloat(),
+                    maxTokens   = request.maxTokens,
+                    topP        = request.topP.toFloat()
                 )
 
                 val modelName = engineState.modelPath.value
@@ -185,20 +267,24 @@ object ApiServer {
                 if (!request.stream) {
                     // ---- Non-streaming path ----------------------------------
                     val fullText = StringBuilder()
-                    try {
-                        generateMutex.withLock {
-                            engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                fullText.append(token)
+                    val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
+                        try {
+                            generateMutex.withLock {
+                                engineState.engine.generateChat(chatTurns, params).collect { token ->
+                                    fullText.append(token)
+                                }
                             }
+                            true
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Generation error", e)
+                            null
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Generation error", e)
+                    }
+
+                    if (acquired == null) {
                         call.respond(
-                            HttpStatusCode.InternalServerError,
-                            ApiErrorWrapper(ApiError(
-                                message = "Generation failed: ${e.message}",
-                                type    = "internal_error"
-                            ))
+                            HttpStatusCode.ServiceUnavailable,
+                            ApiErrorWrapper(ApiError("Server busy or generation timed out. Try again.", "server_busy"))
                         )
                         return@post
                     }
@@ -251,27 +337,36 @@ object ApiServer {
                         writeStringUtf8("data: ${json.encodeToString(roleDelta)}\n\n")
                         flush()
 
-                        try {
-                            generateMutex.withLock {
-                                engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                    val chunk = ChatCompletionChunk(
-                                        id = completionId,
-                                        created = createdAt,
-                                        model = modelName,
-                                        choices = listOf(
-                                            ChunkChoice(
-                                                index = 0,
-                                                delta = DeltaContent(content = token),
-                                                finishReason = null
+                        val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
+                            try {
+                                generateMutex.withLock {
+                                    engineState.engine.generateChat(chatTurns, params).collect { token ->
+                                        val chunk = ChatCompletionChunk(
+                                            id = completionId,
+                                            created = createdAt,
+                                            model = modelName,
+                                            choices = listOf(
+                                                ChunkChoice(
+                                                    index = 0,
+                                                    delta = DeltaContent(content = token),
+                                                    finishReason = null
+                                                )
                                             )
                                         )
-                                    )
-                                    writeStringUtf8("data: ${json.encodeToString(chunk)}\n\n")
-                                    flush()
+                                        writeStringUtf8("data: ${json.encodeToString(chunk)}\n\n")
+                                        flush()
+                                    }
                                 }
+                                true
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Streaming generation error", e)
+                                null
                             }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Streaming generation error", e)
+                        }
+
+                        if (acquired == null) {
+                            writeStringUtf8("data: {\"error\":\"server_busy\"}\n\n")
+                            flush()
                         }
 
                         // Final stop chunk

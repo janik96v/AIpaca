@@ -1,5 +1,7 @@
 package com.lamaphone.app.ui.server
 
+import android.graphics.Bitmap
+import android.graphics.Color
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.LinearEasing
@@ -7,6 +9,7 @@ import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +27,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -36,8 +41,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -54,14 +63,21 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import com.lamaphone.app.EngineState
 import com.lamaphone.app.engine.BenchResult
 import com.lamaphone.app.engine.ModelInfo
 import com.lamaphone.app.server.ServerManager
+import com.lamaphone.app.server.security.AuthorizedKeysStore
+import com.lamaphone.app.server.security.PairingManager
+import com.lamaphone.app.server.security.TlsManager
 import com.lamaphone.app.ui.components.ModelPickerButton
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
 import com.lamaphone.app.ui.theme.RetroCliColors
 import com.lamaphone.app.ui.theme.TerminalPanel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
@@ -95,7 +111,13 @@ fun ServerScreen(
     val clipboardManager = LocalClipboardManager.current
     val scrollState      = rememberScrollState()
 
-    var showQrDialog by remember { mutableStateOf(false) }
+    var showPairingDialog by remember { mutableStateOf(false) }
+    var pairedClients by remember { mutableStateOf(listOf<AuthorizedKeysStore.AuthorizedKey>()) }
+
+    // Refresh paired client list whenever the screen is visible
+    LaunchedEffect(isRunning) {
+        pairedClients = AuthorizedKeysStore(context).getAll()
+    }
 
     Column(
         modifier            = modifier
@@ -125,7 +147,7 @@ fun ServerScreen(
                 onCopy  = {
                     clipboardManager.setText(AnnotatedString(serverUrl!!))
                 },
-                onQrCode = { showQrDialog = true }
+                onQrCode = { showPairingDialog = true }
             )
         }
 
@@ -144,6 +166,18 @@ fun ServerScreen(
         // ---- Connect with section ------------------------------------------
         if (isRunning && serverUrl != null) {
             ConnectWithSection(url = serverUrl!!)
+        }
+
+        // ---- Paired clients -------------------------------------------------
+        if (isRunning) {
+            PairedClientsCard(
+                clients   = pairedClients,
+                onPairNew = { showPairingDialog = true },
+                onRemove  = { fingerprint ->
+                    AuthorizedKeysStore(context).remove(fingerprint)
+                    pairedClients = AuthorizedKeysStore(context).getAll()
+                }
+            )
         }
 
         // ---- Start / Stop button -------------------------------------------
@@ -171,11 +205,17 @@ fun ServerScreen(
         }
     }
 
-    // ---- QR code dialog -----------------------------------------------------
-    if (showQrDialog && serverUrl != null) {
-        QrCodeDialog(
-            url      = serverUrl!!,
-            onDismiss = { showQrDialog = false }
+    // ---- Pairing dialog -----------------------------------------------------
+    if (showPairingDialog && serverUrl != null) {
+        val certFingerprint = remember { TlsManager.getCertFingerprint(context) }
+        PairingDialog(
+            serverUrl          = serverUrl!!,
+            certFingerprint    = certFingerprint,
+            onDismiss          = {
+                showPairingDialog = false
+                PairingManager.cancel()
+                pairedClients = AuthorizedKeysStore(context).getAll()
+            }
         )
     }
 }
@@ -274,7 +314,7 @@ private fun ServerUrlCard(
                     IconButton(onClick = onQrCode) {
                         Icon(
                             imageVector        = Icons.Filled.QrCode,
-                            contentDescription = "Show QR code",
+                            contentDescription = "Pair new device",
                             tint               = RetroCliColors.Magenta
                         )
                     }
@@ -282,6 +322,176 @@ private fun ServerUrlCard(
             }
         }
     }
+}
+
+@Composable
+private fun PairedClientsCard(
+    clients: List<AuthorizedKeysStore.AuthorizedKey>,
+    onPairNew: () -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "AUTHORIZED_CLIENTS",
+        accent = RetroCliColors.Magenta
+    ) {
+        Column {
+            if (clients.isEmpty()) {
+                Text(
+                    text  = "> No devices paired yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RetroCliColors.Muted
+                )
+            } else {
+                clients.forEach { client ->
+                    Row(
+                        modifier            = Modifier.fillMaxWidth(),
+                        verticalAlignment   = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text  = client.displayName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RetroCliColors.Cyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text  = client.fingerprint.take(16) + "...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RetroCliColors.Muted,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        IconButton(onClick = { onRemove(client.fingerprint) }) {
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = "Remove ${client.displayName}",
+                                tint               = RetroCliColors.Error,
+                                modifier           = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick  = onPairNew,
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = RetroCliColors.Magenta,
+                    contentColor   = RetroCliColors.Void
+                )
+            ) {
+                Icon(Icons.Filled.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("PAIR_NEW_DEVICE", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingDialog(
+    serverUrl: String,
+    certFingerprint: String,
+    onDismiss: () -> Unit
+) {
+    var pin by remember { mutableStateOf(PairingManager.generatePin()) }
+    var remainingSec by remember { mutableIntStateOf((PairingManager.remainingMs() / 1000).toInt()) }
+
+    // Countdown timer — refreshes every second
+    LaunchedEffect(pin) {
+        while (remainingSec > 0) {
+            delay(1000)
+            remainingSec = (PairingManager.remainingMs() / 1000).toInt()
+        }
+    }
+
+    // Build QR payload JSON: { endpoint, pin, fingerprint }
+    val qrPayload = remember(pin, serverUrl, certFingerprint) {
+        """{"endpoint":"$serverUrl","pin":"$pin","fingerprint":"$certFingerprint"}"""
+    }
+
+    val qrBitmap = remember(qrPayload) { generateQrBitmap(qrPayload, 512) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("PAIR_NEW_DEVICE", style = MaterialTheme.typography.titleMedium)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (qrBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(220.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(androidx.compose.ui.graphics.Color.White)
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap             = qrBitmap.asImageBitmap(),
+                            contentDescription = "Pairing QR code",
+                            modifier           = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier.size(220.dp).clip(RoundedCornerShape(8.dp)).background(RetroCliColors.TerminalSoft),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.QrCode, contentDescription = null, modifier = Modifier.size(80.dp), tint = RetroCliColors.Cyan)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Text("PIN_CODE", style = MaterialTheme.typography.labelMedium, color = RetroCliColors.Muted)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text       = pin,
+                    style      = MaterialTheme.typography.headlineMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color      = RetroCliColors.Cyan
+                )
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text  = if (remainingSec > 0) "Expires in ${remainingSec}s" else "EXPIRED",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (remainingSec > 30) RetroCliColors.Success else RetroCliColors.Warning
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text  = "Scan the QR code with your client app, or use the PIN manually.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RetroCliColors.Muted
+                )
+
+                if (remainingSec <= 0) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        pin = PairingManager.generatePin()
+                        remainingSec = (PairingManager.remainingMs() / 1000).toInt()
+                    }) {
+                        Text("REGENERATE_PIN", color = RetroCliColors.Cyan)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("CLOSE") }
+        }
+    )
 }
 
 @Composable
@@ -438,8 +648,9 @@ private fun ConnectWithSection(
         Spacer(Modifier.height(8.dp))
         ConnectCard(
             title   = "curl",
-            description = "Test from your computer:",
-            code    = """curl $url/v1/chat/completions \
+            description = "Test from your computer (--insecure skips cert check for self-signed cert):",
+            code    = """curl $url/v1/chat/completions --insecure \
+  -H "Authorization: LamaPhone-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hi!"}]}'"""
         )
@@ -490,48 +701,22 @@ private fun ConnectCard(
     }
 }
 
-@Composable
-private fun QrCodeDialog(
-    url: String,
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("CONNECT VIA QR") },
-        text  = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier         = Modifier
-                        .size(180.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(RetroCliColors.TerminalSoft),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.QrCode,
-                        contentDescription = null,
-                        modifier           = Modifier.size(80.dp),
-                        tint               = RetroCliColors.Cyan
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text  = url,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontFamily = FontFamily.Monospace
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text  = "Scan with your camera app to connect",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = RetroCliColors.Muted
-                )
+// ---- QR code generation -----------------------------------------------------
+
+private fun generateQrBitmap(content: String, sizePx: Int): Bitmap? {
+    return try {
+        val hints = mapOf(EncodeHintType.MARGIN to 1)
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+        for (x in 0 until sizePx) {
+            for (y in 0 until sizePx) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("CLOSE") }
         }
-    )
+        bmp
+    } catch (e: Exception) {
+        null
+    }
 }
 
 // ---- Previews ---------------------------------------------------------------
@@ -559,7 +744,7 @@ private fun ConnectCardPreview() {
         ConnectCard(
             title       = "curl",
             description = "Test with:",
-            code        = "curl http://192.168.1.42:8080/v1/models",
+            code        = "curl https://192.168.1.42:8443/v1/models --insecure",
             modifier    = Modifier.padding(16.dp)
         )
     }

@@ -125,12 +125,15 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
-    implementation(libs.ktor.server.cors)
     implementation(libs.ktor.server.status.pages)
 
     // Kotlinx
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+
+    // Security
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.zxing.core)
 
     // Coil
     implementation(libs.coil.compose)

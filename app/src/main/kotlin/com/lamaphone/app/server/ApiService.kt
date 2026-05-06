@@ -10,6 +10,8 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.lamaphone.app.EngineState
+import com.lamaphone.app.server.security.AuthorizedKeysStore
+import com.lamaphone.app.server.security.TlsManager
 import java.net.NetworkInterface
 
 class ApiService : Service() {
@@ -45,7 +47,9 @@ class ApiService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(ip))
 
         if (!ApiServer.isRunning()) {
-            ApiServer.start(EngineState)
+            val tlsConfig = TlsManager.getOrCreate(applicationContext)
+            val authorizedKeys = AuthorizedKeysStore(applicationContext)
+            ApiServer.start(EngineState, tlsConfig, authorizedKeys)
         }
 
         // Keep ServerManager state in sync
@@ -90,7 +94,7 @@ class ApiService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("LamaPhone Server")
-            .setContentText("$ip:${ApiServer.port}")
+            .setContentText("https://$ip:${ApiServer.port}")
             .setSmallIcon(android.R.drawable.ic_menu_upload)
             .setOngoing(true)
             .addAction(

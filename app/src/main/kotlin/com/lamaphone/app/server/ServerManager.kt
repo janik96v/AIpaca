@@ -82,5 +82,5 @@ object ServerManager {
         return "0.0.0.0"
     }
 
-    private fun buildUrl(ip: String) = "http://$ip:${ApiServer.port}"
+    private fun buildUrl(ip: String) = "https://$ip:${ApiServer.port}"
 }

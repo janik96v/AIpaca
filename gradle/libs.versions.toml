@@ -10,6 +10,8 @@ androidxLifecycle = "2.8.6"
 androidxActivityCompose = "1.9.2"
 androidxNavigationCompose = "2.8.3"
 coilCompose = "2.7.0"
+androidxSecurityCrypto = "1.1.0-alpha06"
+zxingCore = "3.5.3"
 
 [libraries]
 # AndroidX Core
@@ -41,8 +43,11 @@ ktor-server-core = { group = "io.ktor", name = "ktor-server-core-jvm", version.r
 ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty-jvm", version.ref = "ktor" }
 ktor-server-content-negotiation = { group = "io.ktor", name = "ktor-server-content-negotiation-jvm", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json-jvm", version.ref = "ktor" }
-ktor-server-cors = { group = "io.ktor", name = "ktor-server-cors-jvm", version.ref = "ktor" }
 ktor-server-status-pages = { group = "io.ktor", name = "ktor-server-status-pages-jvm", version.ref = "ktor" }
+
+# Security
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "androidxSecurityCrypto" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
 
 # Kotlinx
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
