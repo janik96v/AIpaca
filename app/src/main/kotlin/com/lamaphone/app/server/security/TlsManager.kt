@@ -2,6 +2,8 @@ package com.lamaphone.app.server.security
 
 import android.content.Context
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -11,13 +13,15 @@ import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
+import java.util.Base64
 import java.util.Date
 import javax.security.auth.x500.X500Principal
 import android.security.keystore.KeyProperties
 
 private const val TAG = "TlsManager"
 private const val KEYSTORE_FILE = "tls/server.p12"
-private const val KEYSTORE_PASSWORD = ""
+private const val KEYSTORE_PASSWORD_PREFS = "tls_keystore_password"
+private const val KEYSTORE_PASSWORD_PREFS_FILE = "lamaphone_tls_meta"
 private const val CERT_ALIAS = "lamaphone_tls"
 private const val CERT_VALIDITY_DAYS = 3650L
 
@@ -25,36 +29,65 @@ object TlsManager {
 
     data class TlsConfig(
         val keyStore: KeyStore,
-        val certFingerprint: String   // SHA-256 hex, colon-separated (AA:BB:CC:...)
+        val keystorePassword: String,  // random per-device password, protected by Android Keystore
+        val certFingerprint: String    // SHA-256 hex, colon-separated (AA:BB:CC:...)
     )
 
     fun getOrCreate(context: Context): TlsConfig {
         val ksFile = File(context.filesDir, KEYSTORE_FILE)
+        val password = getOrCreateKeystorePassword(context)
         if (ksFile.exists()) {
             return try {
-                load(ksFile)
+                load(ksFile, password)
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to load existing keystore, regenerating: ${e.message}")
                 ksFile.delete()
-                generate(ksFile)
+                generate(ksFile, password)
             }
         }
-        return generate(ksFile)
+        return generate(ksFile, password)
     }
 
     fun getCertFingerprint(context: Context): String {
         val ksFile = File(context.filesDir, KEYSTORE_FILE)
-        return if (ksFile.exists()) load(ksFile).certFingerprint else "NOT_GENERATED"
+        if (!ksFile.exists()) return "NOT_GENERATED"
+        val password = getOrCreateKeystorePassword(context)
+        return try { load(ksFile, password).certFingerprint } catch (e: Exception) { "NOT_GENERATED" }
     }
 
-    private fun load(ksFile: File): TlsConfig {
+    /**
+     * Returns the keystore password stored in EncryptedSharedPreferences, creating
+     * a random 32-byte (256-bit) password on first call.  The password is protected
+     * by the Android Keystore-backed AES-256-GCM master key.
+     */
+    private fun getOrCreateKeystorePassword(context: Context): String {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        val prefs = EncryptedSharedPreferences.create(
+            context,
+            KEYSTORE_PASSWORD_PREFS_FILE,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+        val stored = prefs.getString(KEYSTORE_PASSWORD_PREFS, null)
+        if (stored != null) return stored
+        // Generate a random 32-byte password, base64-encoded
+        val passwordBytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val password = Base64.getEncoder().encodeToString(passwordBytes)
+        prefs.edit().putString(KEYSTORE_PASSWORD_PREFS, password).apply()
+        return password
+    }
+
+    private fun load(ksFile: File, password: String): TlsConfig {
         val ks = KeyStore.getInstance("PKCS12")
-        FileInputStream(ksFile).use { ks.load(it, KEYSTORE_PASSWORD.toCharArray()) }
+        FileInputStream(ksFile).use { ks.load(it, password.toCharArray()) }
         val cert = ks.getCertificate(CERT_ALIAS) as X509Certificate
-        return TlsConfig(keyStore = ks, certFingerprint = cert.sha256Fingerprint())
+        return TlsConfig(keyStore = ks, keystorePassword = password, certFingerprint = cert.sha256Fingerprint())
     }
 
-    private fun generate(ksFile: File): TlsConfig {
+    private fun generate(ksFile: File, password: String): TlsConfig {
         Log.i(TAG, "Generating new TLS self-signed certificate")
 
         // Generate RSA-2048 key pair
@@ -74,15 +107,15 @@ object TlsManager {
 
         // Store in PKCS12 keystore
         val ks = KeyStore.getInstance("PKCS12")
-        ks.load(null, KEYSTORE_PASSWORD.toCharArray())
-        ks.setKeyEntry(CERT_ALIAS, keyPair.private, KEYSTORE_PASSWORD.toCharArray(), arrayOf(cert))
+        ks.load(null, password.toCharArray())
+        ks.setKeyEntry(CERT_ALIAS, keyPair.private, password.toCharArray(), arrayOf(cert))
 
         ksFile.parentFile?.mkdirs()
-        FileOutputStream(ksFile).use { ks.store(it, KEYSTORE_PASSWORD.toCharArray()) }
+        FileOutputStream(ksFile).use { ks.store(it, password.toCharArray()) }
 
         val fingerprint = cert.sha256Fingerprint()
         Log.i(TAG, "TLS cert generated, fingerprint: $fingerprint")
-        return TlsConfig(keyStore = ks, certFingerprint = fingerprint)
+        return TlsConfig(keyStore = ks, keystorePassword = password, certFingerprint = fingerprint)
     }
 
     private fun buildSelfSignedCert(
@@ -99,9 +132,16 @@ object TlsManager {
             val converterClass = Class.forName("org.bouncycastle.cert.jcajce.JcaX509CertificateConverter")
 
             val serial = BigInteger(64, SecureRandom())
+            // BouncyCastle's JcaX509v3CertificateBuilder has two constructors:
+            // one taking X500Principal, one taking org.bouncycastle.asn1.x500.X500Name.
+            // Android's bundled BouncyCastle may not expose the X500Principal constructor,
+            // so convert to BC X500Name first.
+            val bcX500NameClass = Class.forName("org.bouncycastle.asn1.x500.X500Name")
+            val bcSubject = bcX500NameClass.getMethod("getInstance", Any::class.java)
+                .invoke(null, subject.encoded)
             val certBuilder = bcCertGenClass
-                .getConstructor(X500Principal::class.java, BigInteger::class.java, Date::class.java, Date::class.java, X500Principal::class.java, java.security.PublicKey::class.java)
-                .newInstance(subject, serial, notBefore, notAfter, subject, keyPair.public)
+                .getConstructor(bcX500NameClass, BigInteger::class.java, Date::class.java, Date::class.java, bcX500NameClass, java.security.PublicKey::class.java)
+                .newInstance(bcSubject, serial, notBefore, notAfter, bcSubject, keyPair.public)
 
             val signer = contentSignerClass
                 .getConstructor(String::class.java)
@@ -142,8 +182,8 @@ object TlsManager {
             val certsNumClass = Class.forName("sun.security.x509.CertificateSerialNumber")
             val algIdClass = Class.forName("sun.security.x509.AlgorithmId")
             val certAlgClass = Class.forName("sun.security.x509.CertificateAlgorithmId")
-            val certSubjClass = Class.forName("sun.security.x509.CertificateSubjectName")
-            val certIssClass = Class.forName("sun.security.x509.CertificateIssuerName")
+            // CertificateSubjectName/CertificateIssuerName no longer needed —
+            // we set subject.value/issuer.value directly with X500Name
             val certKeyClass = Class.forName("sun.security.x509.CertificateX509Key")
 
             val serial = BigInteger(64, SecureRandom())
@@ -156,8 +196,11 @@ object TlsManager {
             val setMethod = certInfoClass.getMethod("set", String::class.java, Any::class.java)
             setMethod.invoke(info, "validity", validity)
             setMethod.invoke(info, "serialNumber", certsNumClass.getConstructor(BigInteger::class.java).newInstance(serial))
-            setMethod.invoke(info, "subject", certSubjClass.getConstructor(x500NameClass).newInstance(x500name))
-            setMethod.invoke(info, "issuer", certIssClass.getConstructor(x500NameClass).newInstance(x500name))
+            // Use dotted paths "subject.value" / "issuer.value" to set the X500Name directly,
+            // avoiding CertificateSubjectName/CertificateIssuerName wrappers which cause
+            // "Subject class type invalid" on some Android versions.
+            setMethod.invoke(info, "subject.value", x500name)
+            setMethod.invoke(info, "issuer.value", x500name)
             setMethod.invoke(info, "key", certKeyClass.getConstructor(java.security.PublicKey::class.java).newInstance(keyPair.public))
             setMethod.invoke(info, "algorithmID", certAlgClass.getConstructor(algIdClass).newInstance(algOid))
 

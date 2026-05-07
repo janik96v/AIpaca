@@ -2,6 +2,8 @@ package com.lamaphone.app.data
 
 import android.content.Context
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.lamaphone.app.model.StoredConversation
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -11,7 +13,19 @@ private const val PREFS_NAME = "chat_conversations"
 private const val KEY_CONVERSATIONS = "conversations_json"
 
 class ChatConversationStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    // Conversation history may contain sensitive content — store encrypted.
+    private val prefs = run {
+        val masterKey = MasterKey.Builder(context.applicationContext)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context.applicationContext,
+            PREFS_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true

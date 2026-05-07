@@ -22,7 +22,9 @@ class AuthorizedKeysStore(context: Context) {
         val publicKeyBase64: String    // Base64 of raw 32-byte Ed25519 public key
     )
 
-    private val prefs = try {
+    // Fail-secure: throw rather than silently storing authorized keys in plaintext.
+    // If the Android Keystore is unavailable the server must not start.
+    private val prefs = run {
         val masterKey = MasterKey.Builder(context)
             .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
             .build()
@@ -33,9 +35,6 @@ class AuthorizedKeysStore(context: Context) {
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
-    } catch (e: Exception) {
-        Log.e(TAG, "Failed to create EncryptedSharedPreferences, falling back to plain", e)
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     private val json = Json { ignoreUnknownKeys = true }

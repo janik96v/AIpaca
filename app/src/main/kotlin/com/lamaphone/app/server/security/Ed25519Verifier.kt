@@ -48,7 +48,8 @@ object Ed25519Verifier {
             ?: return Result.Invalid("Non-numeric timestamp")
         val now = System.currentTimeMillis() / 1000L
         if (abs(now - timestamp) > TIMESTAMP_WINDOW_SEC) {
-            return Result.Invalid("Timestamp outside ±${TIMESTAMP_WINDOW_SEC}s window (skew: ${now - timestamp}s)")
+            // Do not reveal the exact skew — it helps attackers calibrate replays
+            return Result.Invalid("Timestamp outside allowed window")
         }
 
         // Decode public key: raw 32 bytes → prepend DER header for X509EncodedKeySpec

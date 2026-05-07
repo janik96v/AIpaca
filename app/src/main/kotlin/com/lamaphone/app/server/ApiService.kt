@@ -49,7 +49,8 @@ class ApiService : Service() {
         if (!ApiServer.isRunning()) {
             val tlsConfig = TlsManager.getOrCreate(applicationContext)
             val authorizedKeys = AuthorizedKeysStore(applicationContext)
-            ApiServer.start(EngineState, tlsConfig, authorizedKeys)
+            // Bind only to the local WiFi/eth interface to avoid exposing on hotspot or VPN
+            ApiServer.start(EngineState, tlsConfig, authorizedKeys, bindAddress = ip)
         }
 
         // Keep ServerManager state in sync
