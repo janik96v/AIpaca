@@ -7,11 +7,13 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ModelTraining
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -28,6 +30,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -39,6 +44,7 @@ import androidx.navigation.compose.rememberNavController
 import com.lamaphone.app.EngineState
 import com.lamaphone.app.ui.chat.ChatHistoryBus
 import com.lamaphone.app.ui.chat.ChatScreen
+import com.lamaphone.app.ui.models.ModelScreen
 import com.lamaphone.app.ui.server.ServerScreen
 import com.lamaphone.app.ui.theme.LamaPhoneTheme
 import com.lamaphone.app.ui.theme.RetroCliColors
@@ -46,10 +52,11 @@ import com.lamaphone.app.ui.theme.TerminalBackground
 
 private sealed class Screen(val route: String, val label: String) {
     object Chat   : Screen("chat",   "CHAT")
+    object Models : Screen("models", "MODEL")
     object Server : Screen("server", "SERVER")
 }
 
-private val bottomNavItems = listOf(Screen.Chat, Screen.Server)
+private val bottomNavItems = listOf(Screen.Chat, Screen.Models, Screen.Server)
 
 class MainActivity : ComponentActivity() {
 
@@ -77,8 +84,10 @@ private fun LamaPhoneApp() {
     val isChatSelected = currentDestination?.hierarchy
         ?.any { it.route == Screen.Chat.route } == true
 
+    val isKeyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
     Scaffold(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().imePadding(),
         containerColor = RetroCliColors.Void,
         topBar   = {
             TopAppBar(
@@ -128,6 +137,7 @@ private fun LamaPhoneApp() {
             )
         },
         bottomBar = {
+            if (!isKeyboardOpen) {
             Surface(
                 color = RetroCliColors.Void,
                 border = BorderStroke(1.dp, RetroCliColors.Cyan.copy(alpha = 0.36f))
@@ -150,8 +160,9 @@ private fun LamaPhoneApp() {
                             },
                             icon  = {
                                 when (screen) {
-                                    Screen.Chat   -> Icon(Icons.Filled.Chat, contentDescription = "Chat")
-                                    Screen.Server -> Icon(Icons.Filled.Dns,  contentDescription = "Server")
+                                    Screen.Chat   -> Icon(Icons.Filled.Chat,          contentDescription = "Chat")
+                                    Screen.Models -> Icon(Icons.Filled.ModelTraining, contentDescription = "Models")
+                                    Screen.Server -> Icon(Icons.Filled.Dns,           contentDescription = "Server")
                                 }
                             },
                             label = { Text(if (selected) "[${screen.label}]" else screen.label) },
@@ -166,6 +177,7 @@ private fun LamaPhoneApp() {
                     }
                 }
             }
+            }
         }
     ) { innerPadding ->
         TerminalBackground(
@@ -178,6 +190,7 @@ private fun LamaPhoneApp() {
                 startDestination = Screen.Chat.route
             ) {
                 composable(Screen.Chat.route)   { ChatScreen() }
+                composable(Screen.Models.route) { ModelScreen() }
                 composable(Screen.Server.route) { ServerScreen() }
             }
         }

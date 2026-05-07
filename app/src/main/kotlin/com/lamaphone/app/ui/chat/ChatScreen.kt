@@ -329,9 +329,6 @@ fun ChatScreen(
                     }
                 )
 
-                if (isLoaded && gpuLayers > 0 && !modelInfo.pureQ4_0) {
-                    GpuQuantWarningBanner(quantName = modelInfo.quant)
-                }
 
                 if (messages.isEmpty()) {
                     EmptyChatPlaceholder(
@@ -465,33 +462,6 @@ private fun ChatHeaderBar(
     }
 }
 
-/**
- * Inline warning strip shown when a GPU-offloaded model is not pure Q4_0.
- * Adreno OpenCL can load mixed quants, but the S24 Ultra speed preset is built
- * around pure Q4_0 tensors with repacking enabled.
- */
-@Composable
-private fun GpuQuantWarningBanner(
-    quantName: String,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        color = androidx.compose.ui.graphics.Color(0xFF3D2400),
-        shape = RoundedCornerShape(6.dp),
-        border = BorderStroke(1.dp, androidx.compose.ui.graphics.Color(0xFFFF8C00))
-    ) {
-        Text(
-            text = "GPU WARN: $quantName is not Adreno-optimised. " +
-                    "Use a pure Q4_0 GGUF for the fast S24 Ultra path.",
-            style = MaterialTheme.typography.labelSmall,
-            color = androidx.compose.ui.graphics.Color(0xFFFF8C00),
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-        )
-    }
-}
 
 @Composable
 private fun EmptyChatPlaceholder(

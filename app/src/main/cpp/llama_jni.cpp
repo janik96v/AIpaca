@@ -304,15 +304,9 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
     LOGI("Offload request resolved: requested=%d effective=%d max_all_layers=%d",
          (int)nGpuLayers, (int)effective_gpu_layers, (int)(n_layer + 1));
 
-    if (effective_gpu_layers > 0 && !histogram.pure_q4_0) {
-        LOGW("===========================================================");
-        LOGW("GPU SPEED WARNING: model ftype is '%s' (ftype=%d).", ftype_to_name(ftype_val), ftype_val);
-        LOGW("Tensor histogram: %s", histogram.json.c_str());
-        LOGW("Adreno OpenCL is fastest with pure Q4_0 tensors; mixed quants can fall back or crawl.");
-        LOGW("Use a pure Q4_0 GGUF for the S24 Ultra speed preset.");
-        LOGW("===========================================================");
-    } else if (effective_gpu_layers > 0) {
-        LOGI("Model tensor histogram is pure-Q4_0 compatible for Adreno OpenCL speed path.");
+    if (effective_gpu_layers > 0) {
+        LOGI("Offloaded %d layers to GPU. Tensor histogram: %s",
+             (int)effective_gpu_layers, histogram.json.c_str());
     }
 
     // Context params
