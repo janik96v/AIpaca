@@ -17,10 +17,10 @@ private const val TAG = "LlamaCppEngine"
  * Java interface invoked from the C++ JNI bridge for each generated token.
  *
  * The method name and descriptor must exactly match what llama_jni.cpp looks up:
- *   env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V")
+ *   env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;Ljava/lang/String;)V")
  */
 interface TokenCallback {
-    fun onToken(token: String)
+    fun onToken(content: String, thinking: String)
 }
 
 /**
@@ -191,7 +191,7 @@ class LlamaCppEngine : InferenceEngine {
     override fun generate(
         userPrompt: String,
         params: GenerateParams
-    ): Flow<String> {
+    ): Flow<GenerationChunk> {
         val turns = buildList {
             if (params.systemPrompt.isNotBlank()) add(ChatTurn("system", params.systemPrompt))
             add(ChatTurn("user", userPrompt))
@@ -202,7 +202,7 @@ class LlamaCppEngine : InferenceEngine {
     override fun generateChat(
         turns: List<ChatTurn>,
         params: GenerateParams
-    ): Flow<String> = callbackFlow {
+    ): Flow<GenerationChunk> = callbackFlow {
         val ptr = contextPtr.get()
         if (ptr == 0L) {
             close(IllegalStateException("No model loaded"))
@@ -226,9 +226,9 @@ class LlamaCppEngine : InferenceEngine {
         var tokenCount = 0
 
         val callback = object : TokenCallback {
-            override fun onToken(token: String) {
+            override fun onToken(content: String, thinking: String) {
                 tokenCount++
-                trySend(token)   // non-blocking; callbackFlow provides back-pressure
+                trySend(GenerationChunk(content = content, thinking = thinking))
             }
         }
 
@@ -282,7 +282,7 @@ class LlamaCppEngine : InferenceEngine {
                         tgRuns = Regex("\"tgRuns\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
                         gpuLayers = Regex("\"gpuLayers\":(-?\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: -1,
                         pureQ4_0 = json.contains("\"pureQ4_0\":true"),
-                        tensorHistogram = Regex("\"tensorHistogram\":(\\{[^}]*})").find(json)?.groupValues?.get(1) ?: "{}"
+                        tensorHistogram = Regex("\"tensorHistogram\":(\\{[^}]*\\})").find(json)?.groupValues?.get(1) ?: "{}"
                     )
                 )
             } catch (e: Exception) {
@@ -344,28 +344,13 @@ class LlamaCppEngine : InferenceEngine {
             val ftype = Regex("\"ftype\":(-?\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: -1
             val gpuCompatible = json.contains("\"gpuCompatible\":true")
             val pureQ4 = json.contains("\"pureQ4_0\":true")
-            val histogram = Regex("\"tensorHistogram\":(\\{[^}]*})").find(json)?.groupValues?.get(1) ?: "{}"
+            val histogram = Regex("\"tensorHistogram\":(\\{[^}]*\\})").find(json)?.groupValues?.get(1) ?: "{}"
             val devices = Regex("\"backendDevices\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
 
             val modelName = Regex("\"modelName\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
-
-            val chatTemplate = nativeGetChatTemplate(ptr)
-            val templateSupportsThinking = chatTemplate != null && (
-                chatTemplate.contains("<think>") ||
-                chatTemplate.contains("<|channel>") ||
-                chatTemplate.contains("think") && chatTemplate.contains("role_end")
-            )
-
-            // Name-based fallback for models whose GGUF may lack the chat template
-            val fileNameLower = (_modelPath.get()?.substringAfterLast('/')?.lowercase() ?: "")
-            val nameHint = modelName.lowercase() + " " + fileNameLower
-            val nameSupportsThinking = listOf(
-                "deepseek-r1", "deepseek_r1",
-                "qwen3", "qwen3.5", "qwen3.6",
-                "gemma-4", "gemma4", "gemma_4",
-                "phi-4-mini-reasoning", "phi4-mini-reasoning",
-                "qwq"
-            ).any { nameHint.contains(it) }
+            val supportsThinking = json.contains("\"supportsThinking\":true")
+            val thinkingStartTag = Regex("\"thinkingStartTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            val thinkingEndTag = Regex("\"thinkingEndTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
 
             ModelInfo(
                 quant = quant,
@@ -374,7 +359,9 @@ class LlamaCppEngine : InferenceEngine {
                 pureQ4_0 = pureQ4,
                 tensorHistogram = histogram,
                 backendDevices = devices,
-                supportsThinking = templateSupportsThinking || nameSupportsThinking,
+                supportsThinking = supportsThinking,
+                thinkingStartTag = thinkingStartTag,
+                thinkingEndTag = thinkingEndTag,
                 modelName = modelName
             )
         } catch (e: Exception) {
