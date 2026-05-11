@@ -39,3 +39,7 @@ Thumbs.db
 # (run: git submodule update --init --recursive  to populate)
 app/src/main/cpp/llama.cpp/*
 !app/src/main/cpp/llama.cpp/.git
+
+# Python virtual environments
+.venv/
+venv/
