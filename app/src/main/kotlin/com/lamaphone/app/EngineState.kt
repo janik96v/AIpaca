@@ -170,7 +170,7 @@ object EngineState {
                 .onStart      { _isGenerating.value = true }
                 .onCompletion { _isGenerating.value = false; onDone() }
                 .catch        { e -> _errorMessage.value = e.message; onError(e) }
-                .collect      { token -> onToken(token) }
+                .collect      { chunk -> onToken(chunk.content) }
         }
     }
 
@@ -186,7 +186,7 @@ object EngineState {
                 .onStart      { _isGenerating.value = true }
                 .onCompletion { _isGenerating.value = false; onDone() }
                 .catch        { e -> _errorMessage.value = e.message; onError(e) }
-                .collect      { token -> onToken(token) }
+                .collect      { chunk -> onToken(chunk.content) }
         }
     }
 

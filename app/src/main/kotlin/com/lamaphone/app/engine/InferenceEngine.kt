@@ -16,6 +16,11 @@ data class ChatTurn(
     val content: String
 )
 
+data class GenerationChunk(
+    val content: String = "",
+    val thinking: String = ""
+)
+
 /**
  * Quantization and GPU compatibility info for a loaded model.
  * [gpuCompatible] is true only for Q4_0 and Q6_K — the quant types with
@@ -29,6 +34,8 @@ data class ModelInfo(
     val tensorHistogram: String = "{}",
     val backendDevices: String = "",
     val supportsThinking: Boolean = false,
+    val thinkingStartTag: String = "",
+    val thinkingEndTag: String = "",
     val modelName: String = ""
 )
 
@@ -65,13 +72,13 @@ interface InferenceEngine {
      * The [params] carry the optional system prompt and sampling configuration.
      * Returns a cold [Flow] — collection triggers generation.
      */
-    fun generate(userPrompt: String, params: GenerateParams = GenerateParams()): Flow<String>
+    fun generate(userPrompt: String, params: GenerateParams = GenerateParams()): Flow<GenerationChunk>
 
     /**
      * Stream generated tokens for structured chat turns. This preserves role
      * boundaries so llama.cpp can apply the model's chat template directly.
      */
-    fun generateChat(turns: List<ChatTurn>, params: GenerateParams = GenerateParams()): Flow<String>
+    fun generateChat(turns: List<ChatTurn>, params: GenerateParams = GenerateParams()): Flow<GenerationChunk>
 
     /** Run a native prefill/generation benchmark similar to llama.rn's ctx.bench(). */
     suspend fun benchmark(pp: Int = 128, tg: Int = 128, pl: Int = 1, nr: Int = 3): Result<BenchResult>

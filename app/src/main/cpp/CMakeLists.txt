@@ -66,6 +66,7 @@ set(GGML_NATIVE          OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON   ON  CACHE BOOL "" FORCE)
 set(GGML_OPENMP          OFF CACHE BOOL "" FORCE)  # Not available on Android NDK
 set(GGML_LLAMAFILE       OFF CACHE BOOL "" FORCE)
 set(GGML_OPENCL          ON  CACHE BOOL "" FORCE)
@@ -93,6 +94,7 @@ find_library(android-lib android)
 
 target_link_libraries(lamaphone
     llama
+    llama-common
     ggml
     ${log-lib}
     ${android-lib}
@@ -102,4 +104,5 @@ target_link_libraries(lamaphone
 target_include_directories(lamaphone PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
+    llama.cpp/common
 )

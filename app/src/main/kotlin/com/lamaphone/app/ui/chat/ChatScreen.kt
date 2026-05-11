@@ -232,17 +232,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
                 val thinkEnabled = _thinkingEnabled.value
-                val parser = ThinkTagParser()
 
                 EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
-                    .collect { token ->
+                    .collect { chunk ->
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
-                            val result = parser.feed(token)
-                            val newContent = last.content + result.content
+                            val newContent = last.content + chunk.content
                             val newThinking = if (thinkEnabled)
-                                last.thinkingContent + result.thinking
+                                last.thinkingContent + chunk.thinking
                             else
                                 last.thinkingContent
                             _messages.value = current.dropLast(1) +

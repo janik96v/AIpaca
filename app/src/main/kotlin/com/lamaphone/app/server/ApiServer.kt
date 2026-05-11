@@ -5,7 +5,6 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.server.models.*
-import com.lamaphone.app.ui.chat.ThinkTagParser
 import com.lamaphone.app.server.security.LamaPhoneAuth
 import com.lamaphone.app.server.security.AuthorizedKeysAttrKey
 import com.lamaphone.app.server.security.AuthorizedKeysStore
@@ -272,14 +271,12 @@ object ApiServer {
                     // ---- Non-streaming path ----------------------------------
                     val fullText = StringBuilder()
                     val thinkText = StringBuilder()
-                    val parser = ThinkTagParser()
                     val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                         try {
                             generateMutex.withLock {
-                                engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                    val result = parser.feed(token)
-                                    fullText.append(result.content)
-                                    thinkText.append(result.thinking)
+                                engineState.engine.generateChat(chatTurns, params).collect { chunk ->
+                                    fullText.append(chunk.content)
+                                    thinkText.append(chunk.thinking)
                                 }
                             }
                             true
@@ -348,16 +345,14 @@ object ApiServer {
                         writeStringUtf8("data: ${json.encodeToString(roleDelta)}\n\n")
                         flush()
 
-                        val streamParser = ThinkTagParser()
                         val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                             try {
                                 generateMutex.withLock {
-                                    engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                        val result = streamParser.feed(token)
+                                    engineState.engine.generateChat(chatTurns, params).collect { generationChunk ->
                                         val output = if (request.includeThinking)
-                                            result.thinking + result.content
+                                            generationChunk.thinking + generationChunk.content
                                         else
-                                            result.content
+                                            generationChunk.content
                                         if (output.isNotEmpty()) {
                                             val chunk = ChatCompletionChunk(
                                                 id = completionId,

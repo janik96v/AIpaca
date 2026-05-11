@@ -2,6 +2,7 @@
 #include "ggml.h"
 #include "ggml-backend.h"
 #include "gguf.h"
+#include "chat.h"
 #include <android/log.h>
 #include <jni.h>
 #include <string>
@@ -523,6 +524,100 @@ struct ThinkSuppressor {
     }
 };
 
+struct ThinkingStreamParser {
+    std::string start_tag;
+    std::string end_tag;
+    bool inside_thinking = false;
+    std::string buffer;
+
+    struct Chunk {
+        std::string content;
+        std::string thinking;
+    };
+
+    bool enabled() const {
+        return !start_tag.empty() && !end_tag.empty();
+    }
+
+    static bool could_be_partial_tag(const std::string& text, const std::string& tag) {
+        for (size_t i = 1; i < tag.size(); ++i) {
+            if (text.size() >= i && text.compare(text.size() - i, i, tag, 0, i) == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool should_consume_control_piece(const std::string& piece) const {
+        return enabled() && (inside_thinking ||
+                start_tag.find(piece) != std::string::npos ||
+                end_tag.find(piece) != std::string::npos);
+    }
+
+    Chunk feed(const std::string& piece) {
+        if (!enabled()) {
+            return { piece, "" };
+        }
+
+        buffer += piece;
+        Chunk out;
+
+        while (!buffer.empty()) {
+            if (inside_thinking) {
+                size_t idx = buffer.find(end_tag);
+                if (idx != std::string::npos) {
+                    out.thinking += buffer.substr(0, idx);
+                    buffer.erase(0, idx + end_tag.size());
+                    inside_thinking = false;
+                } else if (could_be_partial_tag(buffer, end_tag)) {
+                    break;
+                } else {
+                    out.thinking += buffer;
+                    buffer.clear();
+                }
+            } else {
+                size_t idx = buffer.find(start_tag);
+                if (idx != std::string::npos) {
+                    out.content += buffer.substr(0, idx);
+                    buffer.erase(0, idx + start_tag.size());
+                    inside_thinking = true;
+                } else if (could_be_partial_tag(buffer, start_tag)) {
+                    break;
+                } else {
+                    out.content += buffer;
+                    buffer.clear();
+                }
+            }
+        }
+
+        return out;
+    }
+};
+
+static common_chat_params format_chat_with_common(
+        const llama_model* model,
+        const std::vector<std::pair<std::string, std::string>>& turns,
+        int thinking_budget) {
+    auto tmpls = common_chat_templates_init(model, "");
+
+    common_chat_templates_inputs inputs;
+    inputs.add_generation_prompt = true;
+    inputs.use_jinja = true;
+    inputs.enable_thinking = thinking_budget != 0;
+    inputs.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+    inputs.messages.reserve(turns.size());
+    for (const auto& turn : turns) {
+        if (!turn.second.empty()) {
+            common_chat_msg msg;
+            msg.role = turn.first;
+            msg.content = turn.second;
+            inputs.messages.push_back(std::move(msg));
+        }
+    }
+
+    return common_chat_templates_apply(tmpls.get(), inputs);
+}
+
 static void run_generate(
         JNIEnv* env,
         LlamaContext* lc,
@@ -541,50 +636,33 @@ static void run_generate(
     const llama_model* model = lc->model;
     const llama_vocab* vocab = llama_model_get_vocab(model);
 
-    std::vector<llama_chat_message> messages;
-    messages.reserve(turns.size());
+    std::vector<std::pair<std::string, std::string>> non_empty_turns;
+    non_empty_turns.reserve(turns.size());
     for (const auto& turn : turns) {
         if (!turn.second.empty()) {
-            messages.push_back({ turn.first.c_str(), turn.second.c_str() });
+            non_empty_turns.push_back(turn);
         }
     }
-    if (messages.empty()) {
+    if (non_empty_turns.empty()) {
         LOGE("run_generate: no messages to generate from");
         return;
     }
 
-    std::vector<char> tmpl_buf(4096);
-    const char* tmpl = llama_model_chat_template(model, nullptr);
-    int tmpl_len = llama_chat_apply_template(
-            tmpl,
-            messages.data(),
-            messages.size(),
-            /*add_ass=*/true,
-            tmpl_buf.data(),
-            (int32_t)tmpl_buf.size());
-
     std::string formatted_prompt;
-    if (tmpl_len > 0) {
-        if (tmpl_len > (int)tmpl_buf.size()) {
-            tmpl_buf.resize(tmpl_len + 1);
-            tmpl_len = llama_chat_apply_template(
-                    tmpl,
-                    messages.data(),
-                    messages.size(),
-                    /*add_ass=*/true,
-                    tmpl_buf.data(),
-                    (int32_t)tmpl_buf.size());
-        }
-        if (tmpl_len <= 0) {
-            LOGE("run_generate: chat template retry failed, tmpl_len=%d", tmpl_len);
-            return;
-        }
-        tmpl_buf[tmpl_len] = '\0';
-        formatted_prompt = std::string(tmpl_buf.data(), tmpl_len);
-        LOGD("Chat template applied to %zu turns, prompt_len=%d", messages.size(), tmpl_len);
-    } else {
+    common_chat_params chat_params;
+    try {
+        chat_params = format_chat_with_common(model, non_empty_turns, thinking_budget);
+        formatted_prompt = chat_params.prompt;
+        LOGD("Common chat template applied to %zu turns, prompt_len=%zu supports_thinking=%d start='%s' end='%s'",
+             non_empty_turns.size(),
+             formatted_prompt.size(),
+             chat_params.supports_thinking ? 1 : 0,
+             chat_params.thinking_start_tag.c_str(),
+             chat_params.thinking_end_tag.c_str());
+    } catch (const std::exception& e) {
+        LOGW("Common chat template failed (%s), using role-labelled fallback", e.what());
         LOGD("Chat template unavailable, using role-labelled fallback");
-        for (const auto& turn : turns) {
+        for (const auto& turn : non_empty_turns) {
             if (turn.first == "system") {
                 formatted_prompt += "System: " + turn.second + "\n";
             } else if (turn.first == "assistant") {
@@ -631,7 +709,7 @@ static void run_generate(
     }
 
     jclass cbClass = env->GetObjectClass(tokenCallback);
-    jmethodID onTokMid = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)V");
+    jmethodID onTokMid = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;Ljava/lang/String;)V");
     if (onTokMid == nullptr) {
         LOGE("run_generate: could not find onToken method on callback");
         return;
@@ -673,20 +751,30 @@ static void run_generate(
             if (n > 0) { toks.resize(n); } else { toks.clear(); }
             return toks;
         };
-        // Standard <think>...</think> format
-        auto std_open = tokenize("<think>");
-        auto std_close = tokenize("</think>");
-        if (!std_open.empty() && !std_close.empty()) {
-            suppressor.tag_pairs.push_back({ std_open, std_close });
+
+        auto add_tag_pair = [&](const std::string& open, const std::string& close) {
+            auto open_tokens = tokenize(open);
+            auto close_tokens = tokenize(close);
+            if (!open_tokens.empty() && !close_tokens.empty()) {
+                suppressor.tag_pairs.push_back({ open_tokens, close_tokens });
+            }
+        };
+
+        if (!chat_params.thinking_start_tag.empty() && !chat_params.thinking_end_tag.empty()) {
+            add_tag_pair(chat_params.thinking_start_tag, chat_params.thinking_end_tag);
         }
-        // Gemma 4 <|channel>thought\n ... <channel|> format
-        auto gemma_open = tokenize("<|channel>thought\n");
-        auto gemma_close = tokenize("<channel|>");
-        if (!gemma_open.empty() && !gemma_close.empty()) {
-            suppressor.tag_pairs.push_back({ gemma_open, gemma_close });
-        }
+        add_tag_pair("<think>", "</think>");
+
         LOGI("ThinkSuppressor: enabled, %zu tag pair(s) registered",
              suppressor.tag_pairs.size());
+    }
+
+    ThinkingStreamParser thinking_parser;
+    if (chat_params.supports_thinking &&
+            !chat_params.thinking_start_tag.empty() &&
+            !chat_params.thinking_end_tag.empty()) {
+        thinking_parser.start_tag = chat_params.thinking_start_tag;
+        thinking_parser.end_tag = chat_params.thinking_end_tag;
     }
 
     int n_generated = 0;
@@ -709,40 +797,42 @@ static void run_generate(
             break;
         }
 
-        // Skip control/special tokens that aren't caught by EOG
-        // (e.g. <end_of_turn> in some Gemma GGUFs marked as NORMAL)
-        if (llama_vocab_is_control(vocab, new_token)) {
-            LOGD("Skipping control token %d", (int)new_token);
-
-            llama_batch next_batch = llama_batch_get_one(&new_token, 1);
-            if (llama_decode(lc->ctx, next_batch) != 0) {
-                LOGE("llama_decode failed for control token %d", (int)new_token);
-                break;
-            }
-            n_generated++;
-            continue;
-        }
-
-        // Track think state for suppression
+        // Track think state for suppression before control-token filtering:
+        // Gemma 4 thought markers include control tokens.
         if (suppress_thinking && suppressor.state != ThinkSuppressor::FORCING_CLOSE) {
             suppressor.should_suppress(new_token);
         }
 
-        char piece_buf[256] = {};
+        const bool is_control = llama_vocab_is_control(vocab, new_token);
+
+        char piece_buf[512] = {};
         int piece_len = llama_token_to_piece(
                 vocab, new_token,
                 piece_buf, sizeof(piece_buf) - 1,
                 /*lstrip=*/0,
-                /*special=*/false);
+                /*special=*/is_control);
+
         if (piece_len < 0) {
             LOGE("llama_token_to_piece failed for token %d", (int)new_token);
             break;
         }
         piece_buf[piece_len] = '\0';
+        std::string piece(piece_buf, piece_len);
 
-        jstring jTok = env->NewStringUTF(piece_buf);
-        env->CallVoidMethod(tokenCallback, onTokMid, jTok);
-        env->DeleteLocalRef(jTok);
+        // Skip unrelated control/special tokens that aren't caught by EOG
+        // while preserving reasoning markers such as Gemma 4's <|channel>.
+        if (is_control && !thinking_parser.should_consume_control_piece(piece)) {
+            LOGD("Skipping control token %d (%s)", (int)new_token, piece.c_str());
+        } else {
+            auto parsed = thinking_parser.feed(piece);
+            if (!parsed.content.empty() || !parsed.thinking.empty()) {
+                jstring jContent = env->NewStringUTF(parsed.content.c_str());
+                jstring jThinking = env->NewStringUTF(parsed.thinking.c_str());
+                env->CallVoidMethod(tokenCallback, onTokMid, jContent, jThinking);
+                env->DeleteLocalRef(jContent);
+                env->DeleteLocalRef(jThinking);
+            }
+        }
 
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
@@ -1016,6 +1106,22 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetModelInfo(
     int ftype_val = get_model_ftype(lc->model);
     bool gpu_compatible = lc->speed_compatible;
     const char* quant_name = ftype_to_name(ftype_val);
+
+    bool supports_thinking = false;
+    std::string thinking_start_tag;
+    std::string thinking_end_tag;
+    try {
+        common_chat_params params = format_chat_with_common(
+                lc->model,
+                { { "user", "test" } },
+                /*thinking_budget=*/-1);
+        supports_thinking = params.supports_thinking;
+        thinking_start_tag = params.thinking_start_tag;
+        thinking_end_tag = params.thinking_end_tag;
+    } catch (const std::exception& e) {
+        LOGW("nativeGetModelInfo: thinking detection failed: %s", e.what());
+    }
+
     std::ostringstream json;
     json << "{"
          << "\"quant\":\"" << json_escape(quant_name) << "\","
@@ -1027,6 +1133,9 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetModelInfo(
          << "\"requestedGpuLayers\":" << lc->requested_gpu_layers << ","
          << "\"nLayer\":" << lc->n_layer << ","
          << "\"backendDevices\":\"" << json_escape(get_backend_devices_summary()) << "\","
+         << "\"supportsThinking\":" << (supports_thinking ? "true" : "false") << ","
+         << "\"thinkingStartTag\":\"" << json_escape(thinking_start_tag) << "\","
+         << "\"thinkingEndTag\":\"" << json_escape(thinking_end_tag) << "\","
          << "\"modelName\":\"";
     char name_buf[256] = {0};
     if (llama_model_meta_val_str(lc->model, "general.name", name_buf, sizeof(name_buf)) >= 0) {
