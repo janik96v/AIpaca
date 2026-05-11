@@ -47,7 +47,8 @@ class ApiService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(ip))
 
         if (!ApiServer.isRunning()) {
-            val tlsConfig = TlsManager.getOrCreate(applicationContext)
+            // Pass local IP so TlsManager can add a SAN — enables proper TLS hostname verification
+            val tlsConfig = TlsManager.getOrCreate(applicationContext, localIp = ip)
             val authorizedKeys = AuthorizedKeysStore(applicationContext)
             // Bind only to the local WiFi/eth interface to avoid exposing on hotspot or VPN
             ApiServer.start(EngineState, tlsConfig, authorizedKeys, bindAddress = ip)

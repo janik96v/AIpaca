@@ -33,19 +33,35 @@ object TlsManager {
         val certFingerprint: String    // SHA-256 hex, colon-separated (AA:BB:CC:...)
     )
 
-    fun getOrCreate(context: Context): TlsConfig {
+    fun getOrCreate(context: Context, localIp: String? = null): TlsConfig {
         val ksFile = File(context.filesDir, KEYSTORE_FILE)
         val password = getOrCreateKeystorePassword(context)
         if (ksFile.exists()) {
             return try {
-                load(ksFile, password)
+                val config = load(ksFile, password)
+                // Regenerate if the local IP changed and the cert has no matching SAN
+                if (localIp != null && !certHasIpSan(config.keyStore, localIp)) {
+                    Log.i(TAG, "Local IP changed to $localIp — regenerating TLS cert with updated SAN")
+                    ksFile.delete()
+                    generate(ksFile, password, localIp)
+                } else {
+                    config
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to load existing keystore, regenerating: ${e.message}")
                 ksFile.delete()
-                generate(ksFile, password)
+                generate(ksFile, password, localIp)
             }
         }
-        return generate(ksFile, password)
+        return generate(ksFile, password, localIp)
+    }
+
+    private fun certHasIpSan(keyStore: KeyStore, ip: String): Boolean {
+        return try {
+            val cert = keyStore.getCertificate(CERT_ALIAS) as X509Certificate
+            val sans = cert.subjectAlternativeNames ?: return false
+            sans.any { it[0] == 7 && it[1] == ip } // type 7 = IP address SAN
+        } catch (e: Exception) { false }
     }
 
     fun getCertFingerprint(context: Context): String {
@@ -87,7 +103,7 @@ object TlsManager {
         return TlsConfig(keyStore = ks, keystorePassword = password, certFingerprint = cert.sha256Fingerprint())
     }
 
-    private fun generate(ksFile: File, password: String): TlsConfig {
+    private fun generate(ksFile: File, password: String, localIp: String? = null): TlsConfig {
         Log.i(TAG, "Generating new TLS self-signed certificate")
 
         // Generate RSA-2048 key pair
@@ -103,7 +119,7 @@ object TlsManager {
 
         // Use reflection to reach sun.security.x509 or android.net.http to build cert.
         // On Android API 28+ we use the Bouncy Castle provider that ships with the platform.
-        val cert = buildSelfSignedCert(keyPair, subject, notBefore, notAfter)
+        val cert = buildSelfSignedCert(keyPair, subject, notBefore, notAfter, localIp)
 
         // Store in PKCS12 keystore
         val ks = KeyStore.getInstance("PKCS12")
@@ -122,7 +138,8 @@ object TlsManager {
         keyPair: java.security.KeyPair,
         subject: X500Principal,
         notBefore: Date,
-        notAfter: Date
+        notAfter: Date,
+        localIp: String? = null
     ): X509Certificate {
         // Use Android's bundled BouncyCastle (org.bouncycastle) to build the cert
         try {
@@ -132,16 +149,38 @@ object TlsManager {
             val converterClass = Class.forName("org.bouncycastle.cert.jcajce.JcaX509CertificateConverter")
 
             val serial = BigInteger(64, SecureRandom())
-            // BouncyCastle's JcaX509v3CertificateBuilder has two constructors:
-            // one taking X500Principal, one taking org.bouncycastle.asn1.x500.X500Name.
-            // Android's bundled BouncyCastle may not expose the X500Principal constructor,
-            // so convert to BC X500Name first.
             val bcX500NameClass = Class.forName("org.bouncycastle.asn1.x500.X500Name")
             val bcSubject = bcX500NameClass.getMethod("getInstance", Any::class.java)
                 .invoke(null, subject.encoded)
             val certBuilder = bcCertGenClass
                 .getConstructor(bcX500NameClass, BigInteger::class.java, Date::class.java, Date::class.java, bcX500NameClass, java.security.PublicKey::class.java)
                 .newInstance(bcSubject, serial, notBefore, notAfter, bcSubject, keyPair.public)
+
+            // Add SAN with local IP so clients can verify the hostname
+            if (localIp != null) {
+                try {
+                    val asn1OidClass    = Class.forName("org.bouncycastle.asn1.ASN1ObjectIdentifier")
+                    val asn1EncClass    = Class.forName("org.bouncycastle.asn1.ASN1Encodable")
+                    val generalNameClass  = Class.forName("org.bouncycastle.asn1.x509.GeneralName")
+                    val generalNamesClass = Class.forName("org.bouncycastle.asn1.x509.GeneralNames")
+                    val extensionClass    = Class.forName("org.bouncycastle.asn1.x509.Extension")
+                    val derOctetClass     = Class.forName("org.bouncycastle.asn1.DEROctetString")
+
+                    val inetAddress = java.net.InetAddress.getByName(localIp)
+                    val ipBytes   = derOctetClass.getConstructor(ByteArray::class.java).newInstance(inetAddress.address)
+                    val iPAddress = generalNameClass.getField("iPAddress").getInt(null)
+                    val generalName  = generalNameClass.getConstructor(Int::class.java, asn1EncClass).newInstance(iPAddress, ipBytes)
+                    val generalNames = generalNamesClass.getConstructor(generalNameClass).newInstance(generalName)
+                    val sanOid       = extensionClass.getField("subjectAlternativeName").get(null)
+
+                    certBuilder.javaClass
+                        .getMethod("addExtension", asn1OidClass, Boolean::class.java, asn1EncClass)
+                        .invoke(certBuilder, sanOid, false, generalNames)
+                    Log.i(TAG, "Added SAN IP: $localIp")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not add SAN to cert: ${e.message}")
+                }
+            }
 
             val signer = contentSignerClass
                 .getConstructor(String::class.java)

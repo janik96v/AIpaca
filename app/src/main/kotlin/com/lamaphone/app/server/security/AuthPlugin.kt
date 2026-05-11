@@ -26,6 +26,7 @@ val LamaPhoneAuth = createApplicationPlugin("LamaPhoneAuth") {
         when (val result = Ed25519Verifier.verify(authHeader)) {
             is Ed25519Verifier.Result.Invalid -> {
                 call.respond(HttpStatusCode.Unauthorized, AuthErrorResponse(result.reason))
+                return@onCall
             }
             is Ed25519Verifier.Result.Valid -> {
                 val key = authorizedKeys.findByPublicKey(result.publicKeyBase64)
@@ -34,6 +35,7 @@ val LamaPhoneAuth = createApplicationPlugin("LamaPhoneAuth") {
                         HttpStatusCode.Unauthorized,
                         AuthErrorResponse("Public key not registered. Pair this device first via /v1/pair.")
                     )
+                    return@onCall
                 }
                 // Authorized — continue to route handler
             }

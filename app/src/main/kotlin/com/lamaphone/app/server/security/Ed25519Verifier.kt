@@ -14,8 +14,10 @@ private const val TIMESTAMP_WINDOW_SEC = 30L
 
 // DER prefix for a raw 32-byte Ed25519 public key (SubjectPublicKeyInfo wrapper)
 // OID 1.3.101.112 (id-EdDSA / Ed25519)
+// RFC 8410: parameters MUST be absent for Ed25519 — no NULL bytes after the OID.
+// Full structure: SEQUENCE { SEQUENCE { OID 1.3.101.112 }, BIT STRING { 0x00 || key } }
 private val ED25519_DER_PREFIX = byteArrayOf(
-    0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x05, 0x00, 0x03, 0x21, 0x00
+    0x30, 0x2A, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x03, 0x21, 0x00
 )
 
 /**
