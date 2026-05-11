@@ -17,7 +17,8 @@ data class ChatCompletionRequest(
     @SerialName("top_p") val topP: Double = 0.9,
     @SerialName("frequency_penalty") val frequencyPenalty: Double = 0.0,
     @SerialName("presence_penalty") val presencePenalty: Double = 0.0,
-    val stop: List<String>? = null
+    val stop: List<String>? = null,
+    @SerialName("include_thinking") val includeThinking: Boolean = false
 )
 
 @Serializable

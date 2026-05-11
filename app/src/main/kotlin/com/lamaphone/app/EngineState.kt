@@ -101,6 +101,8 @@ object EngineState {
         _isLoadingModel.value = true
         _isLoaded.value     = false
         _modelPath.value    = null
+        _gpuLayers.value    = -1
+        _modelInfo.value    = ModelInfo()
 
         Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
         return try {
@@ -135,18 +137,18 @@ object EngineState {
      * Unload the current model and free all native resources.
      */
     fun unload() {
+        Log.i(TAG, "Unloading model")
+        _isLoaded.value       = false
+        _modelPath.value      = null
+        _isLoadingModel.value = false
+        _isGenerating.value   = false
+        _gpuLayers.value      = -1
+        _modelInfo.value      = ModelInfo()
+        _lastBenchmark.value  = BenchResult()
+        _isBenchmarking.value = false
         scope.launch {
-            Log.i(TAG, "Unloading model")
             engine.stopGeneration()
             engine.unload()
-            _isLoaded.value     = false
-            _modelPath.value    = null
-            _isLoadingModel.value = false
-            _isGenerating.value = false
-            _gpuLayers.value    = -1
-            _modelInfo.value    = ModelInfo()
-            _lastBenchmark.value = BenchResult()
-            _isBenchmarking.value = false
         }
     }
 

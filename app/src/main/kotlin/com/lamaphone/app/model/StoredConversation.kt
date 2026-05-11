@@ -7,5 +7,6 @@ data class StoredConversation(
     val id: String,
     val title: String,
     val messages: List<ChatMessage>,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val systemPrompt: String = ""
 )

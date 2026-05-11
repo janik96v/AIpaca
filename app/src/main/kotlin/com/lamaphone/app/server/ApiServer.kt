@@ -5,6 +5,7 @@ import com.lamaphone.app.EngineState
 import com.lamaphone.app.engine.ChatTurn
 import com.lamaphone.app.engine.GenerateParams
 import com.lamaphone.app.server.models.*
+import com.lamaphone.app.ui.chat.ThinkTagParser
 import com.lamaphone.app.server.security.LamaPhoneAuth
 import com.lamaphone.app.server.security.AuthorizedKeysAttrKey
 import com.lamaphone.app.server.security.AuthorizedKeysStore
@@ -270,11 +271,15 @@ object ApiServer {
                 if (!request.stream) {
                     // ---- Non-streaming path ----------------------------------
                     val fullText = StringBuilder()
+                    val thinkText = StringBuilder()
+                    val parser = ThinkTagParser()
                     val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                         try {
                             generateMutex.withLock {
                                 engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                    fullText.append(token)
+                                    val result = parser.feed(token)
+                                    fullText.append(result.content)
+                                    thinkText.append(result.thinking)
                                 }
                             }
                             true
@@ -292,7 +297,10 @@ object ApiServer {
                         return@post
                     }
 
-                    val completionText = fullText.toString()
+                    val completionText = if (request.includeThinking && thinkText.isNotEmpty())
+                        "<think>${thinkText}</think>${fullText}"
+                    else
+                        fullText.toString()
                     val completionTokens = completionText.split("\\s+".toRegex()).filter { it.isNotEmpty() }.size
                     val promptTokens = chatTurns.sumOf { it.content.split("\\s+".toRegex()).count { token -> token.isNotEmpty() } }
 
@@ -340,24 +348,32 @@ object ApiServer {
                         writeStringUtf8("data: ${json.encodeToString(roleDelta)}\n\n")
                         flush()
 
+                        val streamParser = ThinkTagParser()
                         val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                             try {
                                 generateMutex.withLock {
                                     engineState.engine.generateChat(chatTurns, params).collect { token ->
-                                        val chunk = ChatCompletionChunk(
-                                            id = completionId,
-                                            created = createdAt,
-                                            model = modelName,
-                                            choices = listOf(
-                                                ChunkChoice(
-                                                    index = 0,
-                                                    delta = DeltaContent(content = token),
-                                                    finishReason = null
+                                        val result = streamParser.feed(token)
+                                        val output = if (request.includeThinking)
+                                            result.thinking + result.content
+                                        else
+                                            result.content
+                                        if (output.isNotEmpty()) {
+                                            val chunk = ChatCompletionChunk(
+                                                id = completionId,
+                                                created = createdAt,
+                                                model = modelName,
+                                                choices = listOf(
+                                                    ChunkChoice(
+                                                        index = 0,
+                                                        delta = DeltaContent(content = output),
+                                                        finishReason = null
+                                                    )
                                                 )
                                             )
-                                        )
-                                        writeStringUtf8("data: ${json.encodeToString(chunk)}\n\n")
-                                        flush()
+                                            writeStringUtf8("data: ${json.encodeToString(chunk)}\n\n")
+                                            flush()
+                                        }
                                     }
                                 }
                                 true

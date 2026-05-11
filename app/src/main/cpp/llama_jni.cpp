@@ -429,6 +429,100 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
     return (jint)lc->gpu_layers;
 }
 
+// ---------------------------------------------------------------------------
+// Minimal think-suppression sampler.
+// When thinking_budget == 0 and the model emits <think>, this sampler forces
+// the </think> token sequence immediately, skipping reasoning entirely.
+// ---------------------------------------------------------------------------
+struct ThinkSuppressor {
+    enum State { IDLE, MATCHING_OPEN, FORCING_CLOSE, DONE };
+
+    struct TagPair {
+        std::vector<llama_token> open_tokens;
+        std::vector<llama_token> close_tokens;
+    };
+
+    std::vector<TagPair> tag_pairs;
+    int active_pair = -1;  // which tag pair matched
+
+    State state = IDLE;
+    size_t match_pos = 0;
+    size_t force_pos = 0;
+
+    void should_suppress(llama_token token) {
+        switch (state) {
+            case IDLE:
+                for (int p = 0; p < (int)tag_pairs.size(); p++) {
+                    auto& pair = tag_pairs[p];
+                    if (!pair.open_tokens.empty() && token == pair.open_tokens[0]) {
+                        active_pair = p;
+                        match_pos = 1;
+                        if (match_pos >= pair.open_tokens.size()) {
+                            state = FORCING_CLOSE;
+                            force_pos = 0;
+                            LOGI("ThinkSuppressor: open tag detected (pair %d), forcing close", p);
+                        } else {
+                            state = MATCHING_OPEN;
+                        }
+                        return;
+                    }
+                }
+                break;
+
+            case MATCHING_OPEN: {
+                auto& pair = tag_pairs[active_pair];
+                if (match_pos < pair.open_tokens.size() && token == pair.open_tokens[match_pos]) {
+                    match_pos++;
+                    if (match_pos >= pair.open_tokens.size()) {
+                        state = FORCING_CLOSE;
+                        force_pos = 0;
+                        LOGI("ThinkSuppressor: open tag complete (pair %d), forcing close", active_pair);
+                    }
+                } else {
+                    state = IDLE;
+                    match_pos = 0;
+                    active_pair = -1;
+                }
+                break;
+            }
+
+            case FORCING_CLOSE:
+                break;
+
+            case DONE:
+                // Re-arm on any open tag
+                for (int p = 0; p < (int)tag_pairs.size(); p++) {
+                    auto& pair = tag_pairs[p];
+                    if (!pair.open_tokens.empty() && token == pair.open_tokens[0]) {
+                        active_pair = p;
+                        match_pos = 1;
+                        if (match_pos >= pair.open_tokens.size()) {
+                            state = FORCING_CLOSE;
+                            force_pos = 0;
+                        } else {
+                            state = MATCHING_OPEN;
+                        }
+                        return;
+                    }
+                }
+                break;
+        }
+    }
+
+    llama_token get_forced_token() {
+        if (state != FORCING_CLOSE || active_pair < 0) return -1;
+        auto& close = tag_pairs[active_pair].close_tokens;
+        if (force_pos >= close.size()) return -1;
+        llama_token tok = close[force_pos];
+        force_pos++;
+        if (force_pos >= close.size()) {
+            state = DONE;
+            LOGI("ThinkSuppressor: close tag forced (pair %d), done", active_pair);
+        }
+        return tok;
+    }
+};
+
 static void run_generate(
         JNIEnv* env,
         LlamaContext* lc,
@@ -437,6 +531,7 @@ static void run_generate(
         float top_p,
         float repeat_penalty,
         int max_tokens,
+        int thinking_budget,
         jobject tokenCallback) {
     lc->stop_flag.store(false);
 
@@ -509,7 +604,7 @@ static void run_generate(
             tokens.data(),
             (int32_t)tokens.size(),
             /*add_special=*/true,
-            /*parse_special=*/false);
+            /*parse_special=*/true);
 
     if (n_tokens < 0) {
         tokens.resize(-n_tokens + 4);
@@ -520,7 +615,7 @@ static void run_generate(
                 tokens.data(),
                 (int32_t)tokens.size(),
                 /*add_special=*/true,
-                /*parse_special=*/false);
+                /*parse_special=*/true);
     }
     if (n_tokens <= 0) {
         LOGE("run_generate: tokenisation failed, n_tokens=%d", n_tokens);
@@ -566,15 +661,71 @@ static void run_generate(
             /*penalty_present=*/0.0f));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
+    // Set up think suppression when thinking_budget == 0
+    ThinkSuppressor suppressor;
+    bool suppress_thinking = (thinking_budget == 0);
+    if (suppress_thinking) {
+        auto tokenize = [&](const std::string& text) -> std::vector<llama_token> {
+            std::vector<llama_token> toks(text.size() + 4);
+            int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
+                                   toks.data(), (int32_t)toks.size(),
+                                   /*add_special=*/false, /*parse_special=*/true);
+            if (n > 0) { toks.resize(n); } else { toks.clear(); }
+            return toks;
+        };
+        // Standard <think>...</think> format
+        auto std_open = tokenize("<think>");
+        auto std_close = tokenize("</think>");
+        if (!std_open.empty() && !std_close.empty()) {
+            suppressor.tag_pairs.push_back({ std_open, std_close });
+        }
+        // Gemma 4 <|channel>thought\n ... <channel|> format
+        auto gemma_open = tokenize("<|channel>thought\n");
+        auto gemma_close = tokenize("<channel|>");
+        if (!gemma_open.empty() && !gemma_close.empty()) {
+            suppressor.tag_pairs.push_back({ gemma_open, gemma_close });
+        }
+        LOGI("ThinkSuppressor: enabled, %zu tag pair(s) registered",
+             suppressor.tag_pairs.size());
+    }
+
     int n_generated = 0;
     double t_start_ms = (double)ggml_time_ms();
 
     while (n_generated < max_tokens && !lc->stop_flag.load()) {
-        llama_token new_token = llama_sampler_sample(sampler, lc->ctx, -1);
+        llama_token new_token;
+
+        if (suppress_thinking && suppressor.state == ThinkSuppressor::FORCING_CLOSE) {
+            // Force the next close token directly — skip sampling
+            new_token = suppressor.get_forced_token();
+            // Accept the forced token in the sampler chain for state consistency
+            llama_sampler_accept(sampler, new_token);
+        } else {
+            new_token = llama_sampler_sample(sampler, lc->ctx, -1);
+        }
 
         if (llama_vocab_is_eog(vocab, new_token)) {
             LOGD("EOS reached after %d tokens", n_generated);
             break;
+        }
+
+        // Skip control/special tokens that aren't caught by EOG
+        // (e.g. <end_of_turn> in some Gemma GGUFs marked as NORMAL)
+        if (llama_vocab_is_control(vocab, new_token)) {
+            LOGD("Skipping control token %d", (int)new_token);
+
+            llama_batch next_batch = llama_batch_get_one(&new_token, 1);
+            if (llama_decode(lc->ctx, next_batch) != 0) {
+                LOGE("llama_decode failed for control token %d", (int)new_token);
+                break;
+            }
+            n_generated++;
+            continue;
+        }
+
+        // Track think state for suppression
+        if (suppress_thinking && suppressor.state != ThinkSuppressor::FORCING_CLOSE) {
+            suppressor.should_suppress(new_token);
         }
 
         char piece_buf[256] = {};
@@ -656,7 +807,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
         messages.push_back({ "system", systemPrompt });
     }
     messages.push_back({ "user", userPrompt });
-    run_generate(env, lc, messages, temperature, 0.95f, 1.1f, (int)maxTokens, tokenCallback);
+    run_generate(env, lc, messages, temperature, 0.95f, 1.1f, (int)maxTokens, /*thinking_budget=*/-1, tokenCallback);
 }
 
 extern "C"
@@ -671,6 +822,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerateChat(
         jfloat   topP,
         jfloat   repeatPenalty,
         jint     maxTokens,
+        jint     thinkingBudget,
         jobject  tokenCallback)
 {
     if (ctxPtr == 0L) {
@@ -693,7 +845,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerateChat(
         turns.push_back({ role, contents[i] });
     }
 
-    run_generate(env, lc, turns, temperature, topP, repeatPenalty, (int)maxTokens, tokenCallback);
+    run_generate(env, lc, turns, temperature, topP, repeatPenalty, (int)maxTokens, (int)thinkingBudget, tokenCallback);
 }
 
 extern "C"
@@ -874,7 +1026,31 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetModelInfo(
          << "\"gpuLayers\":" << lc->gpu_layers << ","
          << "\"requestedGpuLayers\":" << lc->requested_gpu_layers << ","
          << "\"nLayer\":" << lc->n_layer << ","
-         << "\"backendDevices\":\"" << json_escape(get_backend_devices_summary()) << "\""
-         << "}";
+         << "\"backendDevices\":\"" << json_escape(get_backend_devices_summary()) << "\","
+         << "\"modelName\":\"";
+    char name_buf[256] = {0};
+    if (llama_model_meta_val_str(lc->model, "general.name", name_buf, sizeof(name_buf)) >= 0) {
+        json << json_escape(name_buf);
+    }
+    json << "\"" << "}";
     return env->NewStringUTF(json.str().c_str());
+}
+
+// ---------------------------------------------------------------------------
+// 9. nativeGetChatTemplate
+//    Returns the model's chat template string, or null if unavailable.
+//    Used to detect whether the model supports thinking/reasoning.
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetChatTemplate(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    if (ctxPtr == 0L) return nullptr;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    const char* tmpl = llama_model_chat_template(lc->model, nullptr);
+    if (tmpl == nullptr) return nullptr;
+    return env->NewStringUTF(tmpl);
 }

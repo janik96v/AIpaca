@@ -7,7 +7,8 @@ data class GenerateParams(
     val temperature: Float      = 0.7f,
     val maxTokens: Int          = 512,
     val topP: Float             = 0.95f,
-    val repeatPenalty: Float    = 1.1f
+    val repeatPenalty: Float    = 1.1f,
+    val thinkingEnabled: Boolean = true
 )
 
 data class ChatTurn(
@@ -26,7 +27,9 @@ data class ModelInfo(
     val gpuCompatible: Boolean = false,
     val pureQ4_0: Boolean = false,
     val tensorHistogram: String = "{}",
-    val backendDevices: String = ""
+    val backendDevices: String = "",
+    val supportsThinking: Boolean = false,
+    val modelName: String = ""
 )
 
 data class BenchResult(

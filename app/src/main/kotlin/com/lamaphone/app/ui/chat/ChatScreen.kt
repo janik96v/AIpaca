@@ -1,6 +1,9 @@
 package com.lamaphone.app.ui.chat
 
 import android.app.Application
+import androidx.compose.ui.res.painterResource
+import com.lamaphone.app.R
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.InfiniteRepeatableSpec
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -10,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
@@ -92,6 +97,81 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+// ---- Think-tag stream parser ------------------------------------------------
+
+data class ThinkParseResult(val content: String, val thinking: String)
+
+class ThinkTagParser {
+    // Supported tag pairs: standard <think>/</ think> and Gemma 4 <|channel>thought\n / <channel|>
+    private data class TagPair(val open: String, val close: String)
+    private val tagPairs = listOf(
+        TagPair("<think>", "</think>"),
+        TagPair("<|channel>thought\n", "<channel|>")
+    )
+
+    private var insideThink = false
+    private var activeClose: String? = null  // which close tag to look for
+    private var buffer = ""
+
+    private fun couldBePartialTag(text: String, tag: String): Boolean {
+        for (i in 1 until tag.length) {
+            if (text.endsWith(tag.substring(0, i))) return true
+        }
+        return false
+    }
+
+    private fun couldBeAnyPartialOpen(text: String): Boolean {
+        return tagPairs.any { couldBePartialTag(text, it.open) }
+    }
+
+    fun feed(token: String): ThinkParseResult {
+        buffer += token
+        val contentParts = StringBuilder()
+        val thinkParts = StringBuilder()
+
+        while (buffer.isNotEmpty()) {
+            if (insideThink) {
+                val closeTag = activeClose ?: break
+                val idx = buffer.indexOf(closeTag)
+                if (idx >= 0) {
+                    thinkParts.append(buffer.substring(0, idx))
+                    buffer = buffer.substring(idx + closeTag.length)
+                    insideThink = false
+                    activeClose = null
+                } else if (couldBePartialTag(buffer, closeTag)) {
+                    break
+                } else {
+                    thinkParts.append(buffer)
+                    buffer = ""
+                }
+            } else {
+                // Try to find any open tag
+                var bestIdx = -1
+                var bestPair: TagPair? = null
+                for (pair in tagPairs) {
+                    val idx = buffer.indexOf(pair.open)
+                    if (idx >= 0 && (bestIdx < 0 || idx < bestIdx)) {
+                        bestIdx = idx
+                        bestPair = pair
+                    }
+                }
+                if (bestPair != null && bestIdx >= 0) {
+                    contentParts.append(buffer.substring(0, bestIdx))
+                    buffer = buffer.substring(bestIdx + bestPair.open.length)
+                    insideThink = true
+                    activeClose = bestPair.close
+                } else if (couldBeAnyPartialOpen(buffer)) {
+                    break
+                } else {
+                    contentParts.append(buffer)
+                    buffer = ""
+                }
+            }
+        }
+        return ThinkParseResult(contentParts.toString(), thinkParts.toString())
+    }
+}
+
 // ---- ViewModel --------------------------------------------------------------
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
@@ -108,10 +188,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _activeConversationId = MutableStateFlow<String?>(null)
     val currentConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
 
+    private val _systemPrompt = MutableStateFlow("")
+    val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
+
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    private val _thinkingEnabled = MutableStateFlow(true)
+    val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
+
     private var generationJob: Job? = null
+
+    fun toggleThinking() {
+        _thinkingEnabled.value = !_thinkingEnabled.value
+    }
 
     init {
         val storedConversations = conversationStore.loadConversations()
@@ -120,6 +210,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             activeConversationId = conversation.id
             _activeConversationId.value = conversation.id
             _messages.value = conversation.messages
+            _systemPrompt.value = conversation.systemPrompt
         }
     }
 
@@ -140,14 +231,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         generationJob = viewModelScope.launch {
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
+                val thinkEnabled = _thinkingEnabled.value
+                val parser = ThinkTagParser()
 
-                EngineState.engine.generateChat(turns, GenerateParams())
+                EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
                     .collect { token ->
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
+                            val result = parser.feed(token)
+                            val newContent = last.content + result.content
+                            val newThinking = if (thinkEnabled)
+                                last.thinkingContent + result.thinking
+                            else
+                                last.thinkingContent
                             _messages.value = current.dropLast(1) +
-                                last.copy(content = last.content + token)
+                                last.copy(content = newContent, thinkingContent = newThinking)
                         }
                     }
             } finally {
@@ -163,9 +262,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = false
     }
 
+    fun updateSystemPrompt(text: String) {
+        _systemPrompt.value = text
+        if (activeConversationId == null) {
+            activeConversationId = UUID.randomUUID().toString()
+            _activeConversationId.value = activeConversationId
+        }
+        persistCurrentConversation()
+    }
+
     fun clearChat() {
         stopGeneration()
         _messages.value = emptyList()
+        _systemPrompt.value = ""
         activeConversationId = null
         _activeConversationId.value = null
     }
@@ -176,6 +285,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         activeConversationId = conversation.id
         _activeConversationId.value = conversation.id
         _messages.value = conversation.messages
+        _systemPrompt.value = conversation.systemPrompt
     }
 
     fun deleteConversation(conversationId: String) {
@@ -191,7 +301,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
-        return messages.mapNotNull { msg ->
+        val turns = messages.mapNotNull { msg ->
             if (msg.content.isBlank()) return@mapNotNull null
             val role = when (msg.role) {
                 Role.USER      -> "user"
@@ -200,12 +310,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
             ChatTurn(role = role, content = msg.content)
         }
+        val prompt = _systemPrompt.value
+        return if (prompt.isNotBlank()) {
+            listOf(ChatTurn(role = "system", content = prompt)) + turns
+        } else {
+            turns
+        }
     }
 
     private fun persistCurrentConversation() {
         val conversationId = activeConversationId ?: return
         val currentMessages = _messages.value
-        if (currentMessages.isEmpty()) return
+        if (currentMessages.isEmpty() && _systemPrompt.value.isBlank()) return
 
         val title = currentMessages
             .firstOrNull { it.role == Role.USER }
@@ -220,7 +336,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 id = conversationId,
                 title = title,
                 messages = currentMessages,
-                updatedAt = System.currentTimeMillis()
+                updatedAt = System.currentTimeMillis(),
+                systemPrompt = _systemPrompt.value
             )
         )
     }
@@ -236,7 +353,9 @@ fun ChatScreen(
     val messages      by chatViewModel.messages.collectAsState()
     val conversations by chatViewModel.conversations.collectAsState()
     val currentConversationId by chatViewModel.currentConversationId.collectAsState()
+    val systemPrompt  by chatViewModel.systemPrompt.collectAsState()
     val isGenerating  by chatViewModel.isGenerating.collectAsState()
+    val thinkingEnabled by chatViewModel.thinkingEnabled.collectAsState()
     val isLoaded  by EngineState.isLoaded.collectAsState()
     val isLoadingModel by EngineState.isLoadingModel.collectAsState()
     val modelPath by EngineState.modelPath.collectAsState()
@@ -299,6 +418,9 @@ fun ChatScreen(
                     text         = inputText,
                     onTextChange = { inputText = it },
                     isGenerating = isGenerating,
+                    supportsThinking = modelInfo.supportsThinking,
+                    thinkingEnabled  = thinkingEnabled,
+                    onThinkingToggle = { chatViewModel.toggleThinking() },
                     onSend       = {
                         if (!isLoaded) {
                             scope.launch {
@@ -323,12 +445,16 @@ fun ChatScreen(
                     isLoaded     = isLoaded,
                     isLoadingModel = isLoadingModel,
                     gpuLayers    = gpuLayers,
-                    onClear      = { chatViewModel.clearChat() },
+                    onUnload     = { EngineState.unload() },
                     onModelSelected = { path ->
                         EngineState.scope.launch { EngineState.loadModel(path) }
                     }
                 )
 
+                SystemPromptBar(
+                    systemPrompt = systemPrompt,
+                    onSystemPromptChange = { chatViewModel.updateSystemPrompt(it) }
+                )
 
                 if (messages.isEmpty()) {
                     EmptyChatPlaceholder(
@@ -366,7 +492,7 @@ private fun ChatHeaderBar(
     isLoaded: Boolean,
     isLoadingModel: Boolean,
     gpuLayers: Int,
-    onClear: () -> Unit,
+    onUnload: () -> Unit,
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -401,7 +527,7 @@ private fun ChatHeaderBar(
                             color = RetroCliColors.Warning
                         )
                         Text(
-                            text = "BACKGROUND_PROCESS ACTIVE",
+                            text = "BACKGROUND PROCESS ACTIVE",
                             style = MaterialTheme.typography.bodySmall,
                             color = RetroCliColors.Muted
                         )
@@ -444,24 +570,99 @@ private fun ChatHeaderBar(
 
             Row {
                 if (isLoaded) {
-                    IconButton(onClick = onClear) {
+                    Button(
+                        onClick  = onUnload,
+                        modifier = Modifier.height(36.dp),
+                        shape    = RoundedCornerShape(4.dp),
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = RetroCliColors.Error,
+                            contentColor   = RetroCliColors.Void
+                        )
+                    ) {
                         Icon(
-                            imageVector        = Icons.Filled.Clear,
-                            contentDescription = "Clear chat",
-                            tint               = RetroCliColors.Magenta
+                            imageVector        = Icons.Filled.Close,
+                            contentDescription = null,
+                            modifier           = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text  = " UNLOAD_MODEL",
+                            style = MaterialTheme.typography.labelMedium
                         )
                     }
+                } else {
+                    ModelPickerButton(
+                        onModelSelected = onModelSelected,
+                        modifier        = Modifier.height(36.dp),
+                        isLoading       = isLoadingModel
+                    )
                 }
-                ModelPickerButton(
-                    onModelSelected = onModelSelected,
-                    modifier        = Modifier.height(36.dp),
-                    isLoading = isLoadingModel
-                )
             }
         }
     }
 }
 
+@Composable
+private fun SystemPromptBar(
+    systemPrompt: String,
+    onSystemPromptChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    TerminalPanel(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp)
+            .padding(bottom = 4.dp),
+        title = "SYSTEM_PROMPT",
+        accent = RetroCliColors.Purple
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = if (systemPrompt.isBlank()) "> none" else "> ${systemPrompt.take(50)}${if (systemPrompt.length > 50) "..." else ""}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (systemPrompt.isBlank()) RetroCliColors.Muted else RetroCliColors.Text,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = if (expanded) "[-]" else "[+]",
+                style = MaterialTheme.typography.labelSmall,
+                color = RetroCliColors.Purple
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Column(modifier = Modifier.padding(top = 8.dp)) {
+                OutlinedTextField(
+                    value = systemPrompt,
+                    onValueChange = onSystemPromptChange,
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("> set system instructions...") },
+                    minLines = 2,
+                    maxLines = 6,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(4.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = RetroCliColors.Text,
+                        unfocusedTextColor = RetroCliColors.Text,
+                        cursorColor = RetroCliColors.Cyan,
+                        focusedBorderColor = RetroCliColors.Purple,
+                        unfocusedBorderColor = RetroCliColors.Purple.copy(alpha = 0.5f),
+                        focusedPlaceholderColor = RetroCliColors.Muted,
+                        unfocusedPlaceholderColor = RetroCliColors.Muted
+                    )
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun EmptyChatPlaceholder(
@@ -641,6 +842,9 @@ private fun ChatInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     isGenerating: Boolean,
+    supportsThinking: Boolean = false,
+    thinkingEnabled: Boolean = false,
+    onThinkingToggle: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier
@@ -651,17 +855,17 @@ private fun ChatInputBar(
         contentColor = RetroCliColors.Text,
         border = BorderStroke(1.dp, RetroCliColors.Magenta.copy(alpha = 0.55f))
     ) {
-        Row(
-            modifier          = Modifier
+        Column(
+            modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Top row: text input
             OutlinedTextField(
                 value         = text,
                 onValueChange = onTextChange,
-                modifier      = Modifier.weight(1f),
+                modifier      = Modifier.fillMaxWidth(),
                 placeholder   = { Text("> enter prompt") },
                 enabled       = !isGenerating,
                 maxLines      = 4,
@@ -687,34 +891,67 @@ private fun ChatInputBar(
                 )
             )
 
-            if (isGenerating) {
-                Button(
-                    onClick  = onStop,
-                    colors   = ButtonDefaults.buttonColors(
-                        containerColor = RetroCliColors.Error,
-                        contentColor = RetroCliColors.Void
-                    )
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.Stop,
-                        contentDescription = "Stop generation"
-                    )
+            // Bottom row: think toggle (left) + send/stop (right)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                if (supportsThinking) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable { onThinkingToggle() }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .alpha(if (thinkingEnabled) 1f else 0.35f)
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_atom),
+                            contentDescription = "Toggle thinking",
+                            modifier = Modifier.size(20.dp),
+                            tint = RetroCliColors.Cyan
+                        )
+                        Text(
+                            text = "Think",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = RetroCliColors.Cyan
+                        )
+                    }
+                } else {
+                    Spacer(Modifier.weight(1f))
                 }
-            } else {
-                Button(
-                    onClick  = onSend,
-                    enabled  = text.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = RetroCliColors.Cyan,
-                        contentColor = RetroCliColors.Void,
-                        disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
-                        disabledContentColor = RetroCliColors.Muted
-                    )
-                ) {
-                    Icon(
-                        imageVector        = Icons.Filled.Send,
-                        contentDescription = "Send message"
-                    )
+
+                if (isGenerating) {
+                    Button(
+                        onClick  = onStop,
+                        colors   = ButtonDefaults.buttonColors(
+                            containerColor = RetroCliColors.Error,
+                            contentColor = RetroCliColors.Void
+                        )
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Filled.Stop,
+                            contentDescription = "Stop generation"
+                        )
+                    }
+                } else {
+                    Button(
+                        onClick  = onSend,
+                        enabled  = text.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = RetroCliColors.Cyan,
+                            contentColor = RetroCliColors.Void,
+                            disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
+                            disabledContentColor = RetroCliColors.Muted
+                        )
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Filled.Send,
+                            contentDescription = "Send message"
+                        )
+                    }
                 }
             }
         }
@@ -762,9 +999,7 @@ fun MessageBubble(
                 .border(1.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(4.dp))
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
-            val displayContent = if (isStreaming) message.content else message.content
-
-            if (isStreaming && message.content.isEmpty()) {
+            if (isStreaming && message.content.isEmpty() && message.thinkingContent.isEmpty()) {
                 CircularProgressIndicator(
                     modifier  = Modifier.size(16.dp),
                     color     = RetroCliColors.Cyan,
@@ -777,10 +1012,19 @@ fun MessageBubble(
                         style = MaterialTheme.typography.labelSmall,
                         color = accent
                     )
+
+                    if (message.thinkingContent.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        ThinkingBlock(
+                            thinkingContent = message.thinkingContent,
+                            isStreaming = isStreaming && message.content.isEmpty()
+                        )
+                    }
+
                     Spacer(Modifier.height(6.dp))
                     Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        text  = displayContent,
+                        text  = message.content,
                         style = MaterialTheme.typography.bodyMedium,
                         color = RetroCliColors.Text
                     )
@@ -795,6 +1039,51 @@ fun MessageBubble(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ThinkingBlock(
+    thinkingContent: String,
+    isStreaming: Boolean = false
+) {
+    var expanded by remember { mutableStateOf(isStreaming) }
+
+    // Auto-expand while streaming thinking content
+    LaunchedEffect(isStreaming) {
+        if (isStreaming) expanded = true
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .background(RetroCliColors.Void.copy(alpha = 0.5f))
+            .border(1.dp, RetroCliColors.Warning.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = if (expanded) "v THINKING" else "> THINKING",
+                style = MaterialTheme.typography.labelSmall,
+                color = RetroCliColors.Warning
+            )
+        }
+
+        AnimatedVisibility(visible = expanded) {
+            Text(
+                text = thinkingContent,
+                style = MaterialTheme.typography.bodySmall,
+                color = RetroCliColors.Muted,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
         }
     }
 }
