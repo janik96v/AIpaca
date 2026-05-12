@@ -16,6 +16,22 @@
 -keep class io.ktor.** { *; }
 -dontwarn io.ktor.**
 
+# Netty — keep channel/handler classes instantiated via reflection
+-keep class io.netty.** { *; }
+-dontwarn io.netty.**
+-keepclassmembers class * extends io.netty.channel.ChannelHandler {
+    public <init>(...);
+}
+-keepclassmembers class * extends io.netty.channel.ChannelHandlerAdapter {
+    public <init>(...);
+}
+-keepclassmembers class * extends io.netty.channel.SimpleChannelInboundHandler {
+    public <init>(...);
+}
+-keepnames class io.netty.channel.nio.NioEventLoopGroup
+-keepnames class io.netty.channel.socket.nio.NioServerSocketChannel
+-keepnames class io.netty.channel.socket.nio.NioSocketChannel
+
 # kotlinx.serialization
 -keep class kotlinx.serialization.** { *; }
 -dontwarn kotlinx.serialization.**
