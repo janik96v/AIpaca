@@ -55,6 +55,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -365,6 +366,8 @@ fun ChatScreen(
     val drawerState    = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope          = rememberCoroutineScope()
     var inputText      by remember { mutableStateOf("") }
+    var showSystemPromptDialog by remember { mutableStateOf(false) }
+    var editingSystemPrompt by remember(systemPrompt) { mutableStateOf(systemPrompt) }
 
     // Auto-scroll to bottom when messages change
     LaunchedEffect(messages.size) {
@@ -419,6 +422,8 @@ fun ChatScreen(
                     supportsThinking = modelInfo.supportsThinking,
                     thinkingEnabled  = thinkingEnabled,
                     onThinkingToggle = { chatViewModel.toggleThinking() },
+                    systemPrompt = systemPrompt,
+                    onSystemPromptClick = { showSystemPromptDialog = true },
                     onSend       = {
                         if (!isLoaded) {
                             scope.launch {
@@ -449,11 +454,6 @@ fun ChatScreen(
                     }
                 )
 
-                SystemPromptBar(
-                    systemPrompt = systemPrompt,
-                    onSystemPromptChange = { chatViewModel.updateSystemPrompt(it) }
-                )
-
                 if (messages.isEmpty()) {
                     EmptyChatPlaceholder(
                         isLoaded    = isLoaded,
@@ -479,6 +479,62 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    if (showSystemPromptDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                chatViewModel.updateSystemPrompt(editingSystemPrompt)
+                showSystemPromptDialog = false
+            },
+            containerColor = RetroCliColors.Void,
+            titleContentColor = RetroCliColors.Purple,
+            title = {
+                Text(
+                    text = "> SYSTEM_PROMPT",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = RetroCliColors.Purple
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = editingSystemPrompt,
+                    onValueChange = { editingSystemPrompt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("> set system instructions...") },
+                    minLines = 3,
+                    maxLines = 8,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    shape = RoundedCornerShape(4.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = RetroCliColors.Text,
+                        unfocusedTextColor = RetroCliColors.Text,
+                        cursorColor = RetroCliColors.Cyan,
+                        focusedBorderColor = RetroCliColors.Purple,
+                        unfocusedBorderColor = RetroCliColors.Purple.copy(alpha = 0.5f),
+                        focusedPlaceholderColor = RetroCliColors.Muted,
+                        unfocusedPlaceholderColor = RetroCliColors.Muted
+                    )
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    editingSystemPrompt = ""
+                    chatViewModel.updateSystemPrompt("")
+                    showSystemPromptDialog = false
+                }) {
+                    Text("CLEAR", color = RetroCliColors.Error)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    chatViewModel.updateSystemPrompt(editingSystemPrompt)
+                    showSystemPromptDialog = false
+                }) {
+                    Text("DONE", color = RetroCliColors.Cyan)
+                }
+            }
+        )
     }
 }
 
@@ -594,69 +650,6 @@ private fun ChatHeaderBar(
                         isLoading       = isLoadingModel
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SystemPromptBar(
-    systemPrompt: String,
-    onSystemPromptChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    TerminalPanel(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .padding(bottom = 4.dp),
-        title = "SYSTEM_PROMPT",
-        accent = RetroCliColors.Purple
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = if (systemPrompt.isBlank()) "> none" else "> ${systemPrompt.take(50)}${if (systemPrompt.length > 50) "..." else ""}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (systemPrompt.isBlank()) RetroCliColors.Muted else RetroCliColors.Text,
-                maxLines = 1,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = if (expanded) "[-]" else "[+]",
-                style = MaterialTheme.typography.labelSmall,
-                color = RetroCliColors.Purple
-            )
-        }
-
-        AnimatedVisibility(visible = expanded) {
-            Column(modifier = Modifier.padding(top = 8.dp)) {
-                OutlinedTextField(
-                    value = systemPrompt,
-                    onValueChange = onSystemPromptChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("> set system instructions...") },
-                    minLines = 2,
-                    maxLines = 6,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = RetroCliColors.Text,
-                        unfocusedTextColor = RetroCliColors.Text,
-                        cursorColor = RetroCliColors.Cyan,
-                        focusedBorderColor = RetroCliColors.Purple,
-                        unfocusedBorderColor = RetroCliColors.Purple.copy(alpha = 0.5f),
-                        focusedPlaceholderColor = RetroCliColors.Muted,
-                        unfocusedPlaceholderColor = RetroCliColors.Muted
-                    )
-                )
             }
         }
     }
@@ -843,6 +836,8 @@ private fun ChatInputBar(
     supportsThinking: Boolean = false,
     thinkingEnabled: Boolean = false,
     onThinkingToggle: () -> Unit = {},
+    systemPrompt: String = "",
+    onSystemPromptClick: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier
@@ -889,36 +884,60 @@ private fun ChatInputBar(
                 )
             )
 
-            // Bottom row: think toggle (left) + send/stop (right)
+            // Bottom row: sys prompt + think toggle (left) + send/stop (right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                if (supportsThinking) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // System prompt button (always visible)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
-                            .clickable { onThinkingToggle() }
+                            .clickable { onSystemPromptClick() }
                             .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .alpha(if (thinkingEnabled) 1f else 0.35f)
+                            .alpha(if (systemPrompt.isNotBlank()) 1f else 0.35f)
                     ) {
                         Icon(
-                            painter = painterResource(R.drawable.ic_atom),
-                            contentDescription = "Toggle thinking",
+                            painter = painterResource(R.drawable.ic_robot),
+                            contentDescription = "System prompt",
                             modifier = Modifier.size(20.dp),
-                            tint = RetroCliColors.Cyan
+                            tint = RetroCliColors.Purple
                         )
                         Text(
-                            text = "Think",
+                            text = "Sys",
                             style = MaterialTheme.typography.labelSmall,
-                            color = RetroCliColors.Cyan
+                            color = RetroCliColors.Purple
                         )
                     }
-                } else {
-                    Spacer(Modifier.weight(1f))
+
+                    // Thinking toggle (conditional)
+                    if (supportsThinking) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onThinkingToggle() }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .alpha(if (thinkingEnabled) 1f else 0.35f)
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_atom),
+                                contentDescription = "Toggle thinking",
+                                modifier = Modifier.size(20.dp),
+                                tint = RetroCliColors.Cyan
+                            )
+                            Text(
+                                text = "Think",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RetroCliColors.Cyan
+                            )
+                        }
+                    }
                 }
 
                 if (isGenerating) {
