@@ -24,7 +24,7 @@ jobs:
           cache: gradle
 
       - name: Set up Android NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install CMake
         run: sudo apt-get install -y cmake
