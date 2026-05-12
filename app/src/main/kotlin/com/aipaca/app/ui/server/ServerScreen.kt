@@ -488,7 +488,7 @@ private fun ConnectWithSection(
             .fillMaxWidth()
             .padding(horizontal = 24.dp, vertical = 20.dp)
     ) {
-        MonoLabel("PYTHON QUICKSTART")
+        MonoLabel("PYTHON QUICKSTART · scripts/ IN REPO")
         Spacer(Modifier.height(16.dp))
 
         ConnectEntry(
