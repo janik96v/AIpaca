@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-chat.py — Send a message to your LamaPhone server.
+chat.py — Send a message to your AIpaca server.
 
 Usage:
     python3 chat.py "What is the capital of Switzerland?"
@@ -24,13 +24,13 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
 )
 
-KEY_FILE = os.path.expanduser("~/.lamaphone/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.lamaphone/config.json")
+KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
 
 
 class PinnedCertAdapter(HTTPAdapter):
     """Verify TLS cert against pinned file but skip hostname check.
-    LamaPhone's self-signed cert has CN=LamaPhone (no IP SAN), so hostname
+    AIpaca's self-signed cert has CN=AIpaca (no IP SAN), so hostname
     verification always fails. Security is maintained via fingerprint pinning.
 
     Note: urllib3 1.x has TWO hostname checks — one in ssl.SSLContext and one
@@ -70,9 +70,9 @@ def auth_header(private_key) -> str:
         private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     ).decode()
     ts = str(int(time.time()))
-    message = f"LamaPhone-Ed25519:{ts}".encode()
+    message = f"AIpaca-Ed25519:{ts}".encode()
     sig = base64.b64encode(private_key.sign(message)).decode()
-    return f"LamaPhone-Ed25519 {pubkey_b64} {sig} {ts}"
+    return f"AIpaca-Ed25519 {pubkey_b64} {sig} {ts}"
 
 
 def chat(prompt: str, stream: bool = False):
@@ -120,7 +120,7 @@ def chat(prompt: str, stream: bool = False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Send a message to LamaPhone")
+    parser = argparse.ArgumentParser(description="Send a message to AIpaca")
     parser.add_argument("prompt", help="The message to send")
     parser.add_argument("--stream", action="store_true", help="Stream the response")
     args = parser.parse_args()

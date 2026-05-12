@@ -1,16 +1,16 @@
-# LamaPhone API Client Guide
+# AIpaca API Client Guide
 
-How to connect to and use the LamaPhone AI server from a laptop, another app, or any HTTP client.
+How to connect to and use the AIpaca AI server from a laptop, another app, or any HTTP client.
 
 ---
 
 ## Overview
 
-LamaPhone runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
+AIpaca runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
 Every client must **pair once** before it can make API calls.
 
 ```
-Client                          LamaPhone (your phone)
+Client                          AIpaca (your phone)
 ──────                          ──────────────────────
 Pair once   ──── /v1/pair ────► Register your public key
 API calls   ── signed header ►  Verify signature → respond
@@ -23,7 +23,7 @@ Your private key never leaves your device. The phone stores only your public key
 
 ## Step 1 — Start the server on your phone
 
-1. Open LamaPhone → **Server tab**
+1. Open AIpaca → **Server tab**
 2. Load a GGUF model if you haven't already
 3. Tap **START\_SERVER**
 
@@ -58,7 +58,7 @@ pip install cryptography requests
 Run the pairing script once per device:
 ```python
 #!/usr/bin/env python3
-"""pair.py — run once to register this machine with LamaPhone"""
+"""pair.py — run once to register this machine with AIpaca"""
 
 import base64, json, os, requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -66,8 +66,8 @@ from cryptography.hazmat.primitives.serialization import (
     Encoding, PublicFormat, PrivateFormat, NoEncryption
 )
 
-KEY_FILE = os.path.expanduser("~/.lamaphone/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.lamaphone/config.json")
+KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
 os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
 
 # --- Generate key pair (skipped if already exists) ---
@@ -138,12 +138,12 @@ Every request after pairing must include a signed `Authorization` header.
 ### Header format
 
 ```
-Authorization: LamaPhone-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
+Authorization: AIpaca-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
 ```
 
 The **signed message** is exactly:
 ```
-LamaPhone-Ed25519:<unix-timestamp-seconds>
+AIpaca-Ed25519:<unix-timestamp-seconds>
 ```
 
 The timestamp must be within **±30 seconds** of the phone's clock.
@@ -154,14 +154,14 @@ The timestamp must be within **±30 seconds** of the phone's clock.
 
 ```python
 #!/usr/bin/env python3
-"""chat.py — send a message to LamaPhone"""
+"""chat.py — send a message to AIpaca"""
 
 import base64, json, os, time, requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
-KEY_FILE = os.path.expanduser("~/.lamaphone/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.lamaphone/config.json")
+KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
 
 # Load key and config
 with open(KEY_FILE, "rb") as f:
@@ -176,9 +176,9 @@ PUBKEY_B64 = base64.b64encode(
 
 def auth_header() -> str:
     ts = str(int(time.time()))
-    message = f"LamaPhone-Ed25519:{ts}".encode()
+    message = f"AIpaca-Ed25519:{ts}".encode()
     sig = base64.b64encode(private_key.sign(message)).decode()
-    return f"LamaPhone-Ed25519 {PUBKEY_B64} {sig} {ts}"
+    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
 
 def chat(messages: list, stream: bool = False) -> str:
     resp = requests.post(
@@ -231,12 +231,12 @@ Generate the header values manually:
 ```bash
 # Requires openssl and python3
 TIMESTAMP=$(date +%s)
-MESSAGE="LamaPhone-Ed25519:$TIMESTAMP"
-SIG=$(echo -n "$MESSAGE" | openssl pkeyutl -sign -inkey ~/.lamaphone/client_key.pem -out - | base64 | tr -d '\n')
-PUBKEY=$(openssl pkey -in ~/.lamaphone/client_key.pem -pubout -outform DER 2>/dev/null | tail -c 32 | base64 | tr -d '\n')
+MESSAGE="AIpaca-Ed25519:$TIMESTAMP"
+SIG=$(echo -n "$MESSAGE" | openssl pkeyutl -sign -inkey ~/.aipaca/client_key.pem -out - | base64 | tr -d '\n')
+PUBKEY=$(openssl pkey -in ~/.aipaca/client_key.pem -pubout -outform DER 2>/dev/null | tail -c 32 | base64 | tr -d '\n')
 
 curl -k -X POST "https://192.168.1.42:8443/v1/chat/completions" \
-  -H "Authorization: LamaPhone-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
+  -H "Authorization: AIpaca-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
@@ -247,7 +247,7 @@ curl -k -X POST "https://192.168.1.42:8443/v1/chat/completions" \
 
 ## Connecting from another app on the same phone
 
-If your client app runs on the **same Android device** as LamaPhone, use `localhost` or `127.0.0.1` as the host — no WiFi required.
+If your client app runs on the **same Android device** as AIpaca, use `localhost` or `127.0.0.1` as the host — no WiFi required.
 
 ```
 https://127.0.0.1:8443
@@ -269,9 +269,9 @@ import android.security.keystore.KeyProperties
 import java.security.*
 import java.util.Base64
 
-object LamaPhoneClient {
+object AIpacaClient {
 
-    private const val KEY_ALIAS = "lamaphone_client"
+    private const val KEY_ALIAS = "aipaca_client"
     private const val SERVER = "https://127.0.0.1:8443"
 
     // Call once at app start — generates key in Android Keystore if not present
@@ -303,7 +303,7 @@ object LamaPhoneClient {
 
     fun buildAuthHeader(): String {
         val ts = (System.currentTimeMillis() / 1000L).toString()
-        val message = "LamaPhone-Ed25519:$ts".toByteArray(Charsets.UTF_8)
+        val message = "AIpaca-Ed25519:$ts".toByteArray(Charsets.UTF_8)
         val ks = KeyStore.getInstance("AndroidKeyStore").also { it.load(null) }
         val privateKey = ks.getKey(KEY_ALIAS, null) as PrivateKey
         val sig = Signature.getInstance("Ed25519").run {
@@ -311,7 +311,7 @@ object LamaPhoneClient {
             update(message)
             Base64.getEncoder().encodeToString(sign())
         }
-        return "LamaPhone-Ed25519 ${getPublicKeyBase64()} $sig $ts"
+        return "AIpaca-Ed25519 ${getPublicKeyBase64()} $sig $ts"
     }
 }
 ```
@@ -342,7 +342,7 @@ val client = buildUnsafeOkHttpClient()
 val body = """{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}"""
 val request = Request.Builder()
     .url("https://127.0.0.1:8443/v1/chat/completions")
-    .header("Authorization", LamaPhoneClient.buildAuthHeader())
+    .header("Authorization", AIpacaClient.buildAuthHeader())
     .header("Content-Type", "application/json")
     .post(body.toRequestBody("application/json".toMediaType()))
     .build()
@@ -365,9 +365,9 @@ let publicKeyBase64 = privateKey.publicKey.rawRepresentation.base64EncodedString
 
 func authHeader() -> String {
     let ts = String(Int(Date().timeIntervalSince1970))
-    let message = "LamaPhone-Ed25519:\(ts)".data(using: .utf8)!
+    let message = "AIpaca-Ed25519:\(ts)".data(using: .utf8)!
     let signature = try! privateKey.signature(for: message).base64EncodedString()
-    return "LamaPhone-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
+    return "AIpaca-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
 }
 
 var request = URLRequest(url: URL(string: "https://192.168.1.42:8443/v1/chat/completions")!)
@@ -385,7 +385,7 @@ request.httpBody = try! JSONSerialization.data(withJSONObject: [
 
 ## TLS / Certificate handling
 
-LamaPhone uses a **self-signed certificate** generated on first launch. Clients need to either:
+AIpaca uses a **self-signed certificate** generated on first launch. Clients need to either:
 
 ### Option A — Skip verification (development only)
 Use `-k` with curl, `verify=False` in Python requests, or a trust-all TrustManager in Android. Only acceptable for local testing.
@@ -411,11 +411,11 @@ def fetch_cert_der(host: str, port: int) -> bytes:
 
 # Save on first connection
 cert_der = fetch_cert_der("192.168.1.42", 8443)
-with open(os.path.expanduser("~/.lamaphone/server.der"), "wb") as f:
+with open(os.path.expanduser("~/.aipaca/server.der"), "wb") as f:
     f.write(cert_der)
 
 # Then in future requests, use the saved cert:
-requests.post(url, ..., verify=os.path.expanduser("~/.lamaphone/server.der"))
+requests.post(url, ..., verify=os.path.expanduser("~/.aipaca/server.der"))
 ```
 
 ---
@@ -456,7 +456,7 @@ curl -k -X POST https://192.168.1.42:8443/v1/pair \
 
 ```bash
 curl -k https://192.168.1.42:8443/v1/models \
-  -H "Authorization: LamaPhone-Ed25519 <pubkey> <sig> <timestamp>"
+  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>"
 ```
 ```json
 {"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model"}]}
@@ -468,7 +468,7 @@ curl -k https://192.168.1.42:8443/v1/models \
 
 ```bash
 curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
-  -H "Authorization: LamaPhone-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local",
@@ -536,7 +536,7 @@ You only need a small auth adapter to inject the signed header.
 import time, base64, openai
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
 
-with open(os.path.expanduser("~/.lamaphone/client_key.pem"), "rb") as f:
+with open(os.path.expanduser("~/.aipaca/client_key.pem"), "rb") as f:
     private_key = load_pem_private_key(f.read(), password=None)
 PUBKEY_B64 = base64.b64encode(
     private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
@@ -544,8 +544,8 @@ PUBKEY_B64 = base64.b64encode(
 
 def make_auth_header():
     ts = str(int(time.time()))
-    sig = base64.b64encode(private_key.sign(f"LamaPhone-Ed25519:{ts}".encode())).decode()
-    return f"LamaPhone-Ed25519 {PUBKEY_B64} {sig} {ts}"
+    sig = base64.b64encode(private_key.sign(f"AIpaca-Ed25519:{ts}".encode())).decode()
+    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
 
 client = openai.OpenAI(
     base_url="https://192.168.1.42:8443/v1",
@@ -599,7 +599,7 @@ Go to Server tab → PAIR\_NEW\_DEVICE and pair again.
 Check the IP shown in the Server tab notification matches what you're connecting to.
 
 **SSL error / certificate verify failed**
-→ Expected — LamaPhone uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
+→ Expected — AIpaca uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
 
 **`503 model_not_loaded`**
-→ Open LamaPhone and load a GGUF model from the Chat or Server tab first.
+→ Open AIpaca and load a GGUF model from the Chat or Server tab first.

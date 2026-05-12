@@ -1,4 +1,4 @@
-# LamaPhone 🦙📡
+# AIpaca 🦙📡
 
 **Turn your Android phone into a portable OpenAI-compatible AI server.**
 
@@ -34,7 +34,7 @@ Install NDK and CMake via **Android Studio → SDK Manager → SDK Tools**.
 
 ```bash
 git clone <your-repo-url>
-cd LamaPhone
+cd AIpaca
 git submodule update --init --recursive   # pulls llama.cpp
 ```
 
@@ -63,7 +63,7 @@ The model loads in the background (~5-15 seconds depending on size).
 
 **Server tab** → tap **"START\_SERVER"**
 
-The notification shows: `LamaPhone Server • https://192.168.x.x:8443`
+The notification shows: `AIpaca Server • https://192.168.x.x:8443`
 
 ### 7. Pair your client device
 
@@ -81,7 +81,7 @@ curl -k https://192.168.1.XX:8443/health
 
 # Chat — requires signed Authorization header (see docs/api-client-guide.md)
 curl -k -X POST https://192.168.1.XX:8443/v1/chat/completions \
-  -H "Authorization: LamaPhone-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
@@ -165,7 +165,7 @@ OpenClaw / Open WebUI / curl
 
 ```
 app/src/main/
-├── kotlin/com/lamaphone/app/
+├── kotlin/com/aipaca/app/
 │   ├── engine/
 │   │   ├── InferenceEngine.kt      ← interface + data classes
 │   │   └── LlamaCppEngine.kt       ← JNI wrapper + Flow streaming
@@ -188,7 +188,7 @@ app/src/main/
 │   │   └── theme/                  ← Material 3 dark theme
 │   ├── model/ChatMessage.kt
 │   ├── EngineState.kt              ← Process-scoped engine singleton
-│   └── LamaPhoneApp.kt
+│   └── AIpacaApp.kt
 └── cpp/
     ├── CMakeLists.txt
     ├── llama_jni.cpp               ← 5 JNI functions
@@ -211,9 +211,9 @@ app/src/main/
 
 ---
 
-## Why LamaPhone?
+## Why AIpaca?
 
 PocketPal, SmolChat, Off Grid — all great apps, but none expose a local API.
 Termux + llama-server works but it's a developer hack, not a product.
 
-LamaPhone is the first **polished Play Store app** that turns your phone into a portable AI server — usable as an Ollama replacement for OpenClaw, Open WebUI, and anything that speaks the OpenAI API.
+AIpaca is the first **polished Play Store app** that turns your phone into a portable AI server — usable as an Ollama replacement for OpenClaw, Open WebUI, and anything that speaks the OpenAI API.

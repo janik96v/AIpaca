@@ -2,4 +2,4 @@
     path = app/src/main/cpp/llama.cpp
     url = https://github.com/janik96v/llama.cpp.git
     shallow = true
-    branch = lamaphone/android-vulkan-build
+    branch = aipaca/android-vulkan-build

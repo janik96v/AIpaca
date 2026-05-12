@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("lamaphone" CXX C)
+project("aipaca" CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
@@ -87,12 +87,12 @@ endif()
 add_subdirectory(llama.cpp)
 
 # Our JNI bridge library
-add_library(lamaphone SHARED llama_jni.cpp)
+add_library(aipaca SHARED llama_jni.cpp)
 
 find_library(log-lib     log)
 find_library(android-lib android)
 
-target_link_libraries(lamaphone
+target_link_libraries(aipaca
     llama
     llama-common
     ggml
@@ -101,7 +101,7 @@ target_link_libraries(lamaphone
     OpenCL::OpenCL
 )
 
-target_include_directories(lamaphone PRIVATE
+target_include_directories(aipaca PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
     llama.cpp/common

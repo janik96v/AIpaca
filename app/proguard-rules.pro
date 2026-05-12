@@ -1,14 +1,14 @@
 # Add project specific ProGuard rules here.
 
 # Keep JNI bridge class and all its native methods
--keep class com.lamaphone.app.engine.LlamaCppEngine { *; }
--keepclassmembers class com.lamaphone.app.engine.LlamaCppEngine {
+-keep class com.aipaca.app.engine.LlamaCppEngine { *; }
+-keepclassmembers class com.aipaca.app.engine.LlamaCppEngine {
     native <methods>;
 }
 
 # Keep TokenCallback — called from C++ via JNI
--keep interface com.lamaphone.app.engine.TokenCallback { *; }
--keepclassmembers interface com.lamaphone.app.engine.TokenCallback {
+-keep interface com.aipaca.app.engine.TokenCallback { *; }
+-keepclassmembers interface com.aipaca.app.engine.TokenCallback {
     public void onToken(java.lang.String);
 }
 

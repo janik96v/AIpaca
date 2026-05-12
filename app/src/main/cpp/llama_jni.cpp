@@ -17,7 +17,7 @@
 #include <setjmp.h>
 #include <signal.h>
 
-#define LOG_TAG "LamaPhone"
+#define LOG_TAG "AIpaca"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -244,7 +244,7 @@ static void probe_signal_handler(int /*sig*/) {
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
         JNIEnv*  env,
         jobject  /* thiz */,
         jstring  jModelPath,
@@ -352,7 +352,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeLoadModel(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeProbeGpu(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGpu(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -420,7 +420,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeProbeGpu(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -874,7 +874,7 @@ static void run_generate(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerate(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,
@@ -902,7 +902,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerate(
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerateChat(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChat(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,
@@ -940,7 +940,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGenerateChat(
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeBench(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeBench(
         JNIEnv* env,
         jobject /* thiz */,
         jlong ctxPtr,
@@ -1034,7 +1034,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeBench(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeStopGeneration(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeStopGeneration(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1050,7 +1050,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeStopGeneration(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeUnloadModel(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadModel(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1073,7 +1073,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeUnloadModel(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetSystemInfo(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetSystemInfo(
         JNIEnv*  env,
         jobject  /* thiz */)
 {
@@ -1093,7 +1093,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetSystemInfo(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetModelInfo(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1152,7 +1152,7 @@ Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetModelInfo(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_lamaphone_app_engine_LlamaCppEngine_nativeGetChatTemplate(
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetChatTemplate(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr)

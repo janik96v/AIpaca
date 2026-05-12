@@ -1,0 +1,750 @@
+package com.aipaca.app.ui.server
+
+import android.graphics.Bitmap
+import android.graphics.Color
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.InfiniteRepeatableSpec
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.aipaca.app.EngineState
+import com.aipaca.app.engine.BenchResult
+import com.aipaca.app.engine.ModelInfo
+import com.aipaca.app.server.ServerManager
+import com.aipaca.app.server.security.AuthorizedKeysStore
+import com.aipaca.app.server.security.PairingManager
+import com.aipaca.app.server.security.TlsManager
+import com.aipaca.app.ui.components.ModelPickerButton
+import com.aipaca.app.ui.theme.AIpacaTheme
+import com.aipaca.app.ui.theme.RetroCliColors
+import com.aipaca.app.ui.theme.TerminalPanel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
+// ---- ViewModel --------------------------------------------------------------
+
+class ServerViewModel : ViewModel() {
+    val isServerRunning: StateFlow<Boolean> = ServerManager.isRunning
+    val serverUrl: StateFlow<String?>        = ServerManager.serverUrl
+    val modelLoaded: StateFlow<Boolean>      = EngineState.isLoaded
+    val modelPath: StateFlow<String?>        = EngineState.modelPath
+}
+
+// ---- Screen -----------------------------------------------------------------
+
+@Composable
+fun ServerScreen(
+    modifier: Modifier = Modifier,
+    serverViewModel: ServerViewModel = viewModel()
+) {
+    val isRunning   by serverViewModel.isServerRunning.collectAsState()
+    val serverUrl   by serverViewModel.serverUrl.collectAsState()
+    val modelLoaded by serverViewModel.modelLoaded.collectAsState()
+    val modelPath   by serverViewModel.modelPath.collectAsState()
+    val isLoadingModel by EngineState.isLoadingModel.collectAsState()
+    val gpuLayers by EngineState.gpuLayers.collectAsState()
+    val modelInfo by EngineState.modelInfo.collectAsState()
+    val lastBenchmark by EngineState.lastBenchmark.collectAsState()
+    val isBenchmarking by EngineState.isBenchmarking.collectAsState()
+
+    val context          = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val scrollState      = rememberScrollState()
+
+    var showPairingDialog by remember { mutableStateOf(false) }
+    var pairedClients by remember { mutableStateOf(listOf<AuthorizedKeysStore.AuthorizedKey>()) }
+
+    // Refresh paired client list whenever the screen is visible
+    LaunchedEffect(isRunning) {
+        pairedClients = AuthorizedKeysStore(context).getAll()
+    }
+
+    Column(
+        modifier            = modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(horizontal = 12.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+
+        // ---- Status indicator -----------------------------------------------
+        ServerStatusCard(isRunning = isRunning)
+
+        // ---- Warning if no model --------------------------------------------
+        if (!modelLoaded) {
+            NoModelWarningCard(
+                isLoadingModel = isLoadingModel,
+                onModelSelected = { path ->
+                    EngineState.scope.launch { EngineState.loadModel(path) }
+                }
+            )
+        }
+
+        // ---- URL card -------------------------------------------------------
+        if (isRunning && serverUrl != null) {
+            ServerUrlCard(
+                url     = serverUrl!!,
+                onCopy  = {
+                    clipboardManager.setText(AnnotatedString(serverUrl!!))
+                },
+                onQrCode = { showPairingDialog = true }
+            )
+        }
+
+        // ---- Model info + request count ------------------------------------
+        ModelInfoCard(
+            modelPath = modelPath,
+            gpuLayers = gpuLayers,
+            modelInfo = modelInfo,
+            lastBenchmark = lastBenchmark,
+            isBenchmarking = isBenchmarking,
+            onRunBenchmark = {
+                EngineState.scope.launch { EngineState.benchmark(pp = 128, tg = 128, pl = 1, nr = 3) }
+            }
+        )
+
+        // ---- Connect with section ------------------------------------------
+        if (isRunning && serverUrl != null) {
+            ConnectWithSection(url = serverUrl!!)
+        }
+
+        // ---- Paired clients -------------------------------------------------
+        if (isRunning) {
+            PairedClientsCard(
+                clients   = pairedClients,
+                onPairNew = { showPairingDialog = true },
+                onRemove  = { fingerprint ->
+                    AuthorizedKeysStore(context).remove(fingerprint)
+                    pairedClients = AuthorizedKeysStore(context).getAll()
+                }
+            )
+        }
+
+        // ---- Start / Stop button -------------------------------------------
+        Spacer(Modifier.height(4.dp))
+        Button(
+            onClick  = {
+                if (isRunning) ServerManager.stop(context)
+                else           ServerManager.start(context)
+            },
+            enabled  = (modelLoaded && !isLoadingModel) || isRunning,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+            colors   = ButtonDefaults.buttonColors(
+                containerColor = if (isRunning) RetroCliColors.Error else RetroCliColors.Cyan,
+                contentColor = RetroCliColors.Void,
+                disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
+                disabledContentColor = RetroCliColors.Muted
+            )
+        ) {
+            Text(
+                text  = if (isRunning) "STOP_SERVER" else "START_SERVER",
+                style = MaterialTheme.typography.titleMedium
+            )
+        }
+    }
+
+    // ---- Pairing dialog -----------------------------------------------------
+    if (showPairingDialog && serverUrl != null) {
+        val certFingerprint = remember { TlsManager.getCertFingerprint(context) }
+        PairingDialog(
+            serverUrl          = serverUrl!!,
+            certFingerprint    = certFingerprint,
+            onDismiss          = {
+                showPairingDialog = false
+                PairingManager.cancel()
+                pairedClients = AuthorizedKeysStore(context).getAll()
+            }
+        )
+    }
+}
+
+// ---- Sub-composables --------------------------------------------------------
+
+@Composable
+private fun ServerStatusCard(
+    isRunning: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val dotColor by animateColorAsState(
+        targetValue = if (isRunning) RetroCliColors.Success else RetroCliColors.Error,
+        label       = "dotColor"
+    )
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue  = 0.6f,
+        targetValue   = 1f,
+        animationSpec = InfiniteRepeatableSpec(
+            animation  = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label         = "pulseAlpha"
+    )
+
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "SERVER",
+        accent = if (isRunning) RetroCliColors.Success else RetroCliColors.Error
+    ) {
+        Row(
+            modifier            = Modifier
+                .fillMaxWidth(),
+            verticalAlignment   = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(16.dp)
+                    .clip(CircleShape)
+                    .background(dotColor)
+                    .alpha(if (isRunning) pulseAlpha else 1f)
+            )
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text  = if (isRunning) "RUNNING" else "STOPPED",
+                style = MaterialTheme.typography.titleLarge,
+                color = if (isRunning) RetroCliColors.Success else RetroCliColors.Muted,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun ServerUrlCard(
+    url: String,
+    onCopy: () -> Unit,
+    onQrCode: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "ENDPOINT",
+        accent = RetroCliColors.Cyan
+    ) {
+        Column {
+            Text(
+                text  = "OPENAI_COMPATIBLE_BASE_URL",
+                style = MaterialTheme.typography.labelMedium,
+                color = RetroCliColors.Muted
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier            = Modifier.fillMaxWidth(),
+                verticalAlignment   = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text     = url,
+                    style    = MaterialTheme.typography.bodyLarge,
+                    fontFamily = FontFamily.Monospace,
+                    color    = RetroCliColors.Cyan,
+                    modifier = Modifier.weight(1f)
+                )
+                Row {
+                    IconButton(onClick = onCopy) {
+                        Icon(
+                            imageVector        = Icons.Filled.ContentCopy,
+                            contentDescription = "Copy URL",
+                            tint               = RetroCliColors.Cyan
+                        )
+                    }
+                    IconButton(onClick = onQrCode) {
+                        Icon(
+                            imageVector        = Icons.Filled.QrCode,
+                            contentDescription = "Pair new device",
+                            tint               = RetroCliColors.Magenta
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairedClientsCard(
+    clients: List<AuthorizedKeysStore.AuthorizedKey>,
+    onPairNew: () -> Unit,
+    onRemove: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "AUTHORIZED_CLIENTS",
+        accent = RetroCliColors.Magenta
+    ) {
+        Column {
+            if (clients.isEmpty()) {
+                Text(
+                    text  = "> No devices paired yet.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RetroCliColors.Muted
+                )
+            } else {
+                clients.forEach { client ->
+                    Row(
+                        modifier            = Modifier.fillMaxWidth(),
+                        verticalAlignment   = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text  = client.displayName,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = RetroCliColors.Cyan,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text  = client.fingerprint.take(16) + "...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = RetroCliColors.Muted,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                        IconButton(onClick = { onRemove(client.fingerprint) }) {
+                            Icon(
+                                imageVector        = Icons.Filled.Delete,
+                                contentDescription = "Remove ${client.displayName}",
+                                tint               = RetroCliColors.Error,
+                                modifier           = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick  = onPairNew,
+                modifier = Modifier.fillMaxWidth().height(40.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = RetroCliColors.Magenta,
+                    contentColor   = RetroCliColors.Void
+                )
+            ) {
+                Icon(Icons.Filled.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("PAIR_NEW_DEVICE", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairingDialog(
+    serverUrl: String,
+    certFingerprint: String,
+    onDismiss: () -> Unit
+) {
+    var pin by remember { mutableStateOf(PairingManager.generatePin()) }
+    var remainingSec by remember { mutableIntStateOf((PairingManager.remainingMs() / 1000).toInt()) }
+
+    // Countdown timer — refreshes every second
+    LaunchedEffect(pin) {
+        while (remainingSec > 0) {
+            delay(1000)
+            remainingSec = (PairingManager.remainingMs() / 1000).toInt()
+        }
+    }
+
+    // Build QR payload JSON: { endpoint, pin, fingerprint }
+    val qrPayload = remember(pin, serverUrl, certFingerprint) {
+        """{"endpoint":"$serverUrl","pin":"$pin","fingerprint":"$certFingerprint"}"""
+    }
+
+    val qrBitmap = remember(qrPayload) { generateQrBitmap(qrPayload, 512) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("PAIR_NEW_DEVICE", style = MaterialTheme.typography.titleMedium)
+        },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (qrBitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(220.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(androidx.compose.ui.graphics.Color.White)
+                            .padding(8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            bitmap             = qrBitmap.asImageBitmap(),
+                            contentDescription = "Pairing QR code",
+                            modifier           = Modifier.fillMaxSize()
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier.size(220.dp).clip(RoundedCornerShape(8.dp)).background(RetroCliColors.TerminalSoft),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Filled.QrCode, contentDescription = null, modifier = Modifier.size(80.dp), tint = RetroCliColors.Cyan)
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Text("PIN_CODE", style = MaterialTheme.typography.labelMedium, color = RetroCliColors.Muted)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text       = pin,
+                    style      = MaterialTheme.typography.headlineMedium,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color      = RetroCliColors.Cyan
+                )
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text  = if (remainingSec > 0) "Expires in ${remainingSec}s" else "EXPIRED",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (remainingSec > 30) RetroCliColors.Success else RetroCliColors.Warning
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text  = "Scan the QR code with your client app, or use the PIN manually.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = RetroCliColors.Muted
+                )
+
+                if (remainingSec <= 0) {
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = {
+                        pin = PairingManager.generatePin()
+                        remainingSec = (PairingManager.remainingMs() / 1000).toInt()
+                    }) {
+                        Text("REGENERATE_PIN", color = RetroCliColors.Cyan)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("CLOSE") }
+        }
+    )
+}
+
+@Composable
+private fun ModelInfoCard(
+    modelPath: String?,
+    gpuLayers: Int,
+    modelInfo: ModelInfo,
+    lastBenchmark: BenchResult,
+    isBenchmarking: Boolean,
+    onRunBenchmark: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "MODEL",
+        accent = if (modelPath != null) RetroCliColors.Cyan else RetroCliColors.Magenta
+    ) {
+        Column {
+            Text(
+                text  = "ACTIVE_MODEL",
+                style = MaterialTheme.typography.labelMedium,
+                color = RetroCliColors.Muted
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = modelPath?.substringAfterLast('/') ?: "NONE",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (modelPath != null) RetroCliColors.Cyan else RetroCliColors.Warning
+            )
+            if (modelPath != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "BACKEND: ${if (gpuLayers > 0) "GPU / $gpuLayers LAYERS" else "CPU"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (gpuLayers > 0) RetroCliColors.Magenta else RetroCliColors.Warning
+                )
+                Text(
+                    text = "QUANT: ${modelInfo.quant} PURE_Q4_0=${modelInfo.pureQ4_0}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (modelInfo.pureQ4_0) RetroCliColors.Success else RetroCliColors.Warning
+                )
+                Text(
+                    text = "TENSORS: ${modelInfo.tensorHistogram}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = RetroCliColors.Muted,
+                    maxLines = 2
+                )
+                if (lastBenchmark.tgRuns > 0 || lastBenchmark.ppRuns > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "BENCH: PP ${"%.2f".format(lastBenchmark.ppAvg)} t/s  TG ${"%.2f".format(lastBenchmark.tgAvg)} t/s",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (lastBenchmark.tgAvg >= 5f) RetroCliColors.Success else RetroCliColors.Warning
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onRunBenchmark,
+                    enabled = !isBenchmarking,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RetroCliColors.Magenta,
+                        contentColor = RetroCliColors.Void,
+                        disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
+                        disabledContentColor = RetroCliColors.Muted
+                    )
+                ) {
+                    if (isBenchmarking) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            color = RetroCliColors.Cyan,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        text = if (isBenchmarking) "BENCH_RUNNING" else "RUN_NATIVE_BENCH",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoModelWarningCard(
+    isLoadingModel: Boolean,
+    onModelSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = "WARNING",
+        accent = RetroCliColors.Warning
+    ) {
+        Column {
+            Text(
+                text  = if (isLoadingModel) "MODEL_LOADING" else "NO_MODEL_LOADED",
+                style = MaterialTheme.typography.titleSmall,
+                color = RetroCliColors.Warning,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = if (isLoadingModel) "> Background load in progress." else "> Load a model first to start the server.",
+                style = MaterialTheme.typography.bodySmall,
+                color = RetroCliColors.Muted
+            )
+            Spacer(Modifier.height(12.dp))
+            ModelPickerButton(
+                onModelSelected = onModelSelected,
+                isLoading = isLoadingModel
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectWithSection(
+    url: String,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier            = Modifier.fillMaxWidth(),
+            verticalAlignment   = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Box(modifier = Modifier.weight(1f).height(1.dp).background(RetroCliColors.Cyan.copy(alpha = 0.35f)))
+            Text(
+                text     = "  CONNECT_WITH  ",
+                style    = MaterialTheme.typography.labelMedium,
+                color    = RetroCliColors.Magenta
+            )
+            Box(modifier = Modifier.weight(1f).height(1.dp).background(RetroCliColors.Magenta.copy(alpha = 0.35f)))
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        ConnectCard(
+            title   = "OpenClaw",
+            description = "Set the API base URL in OpenClaw's settings:",
+            code    = url
+        )
+        Spacer(Modifier.height(8.dp))
+        ConnectCard(
+            title   = "Open WebUI",
+            description = "In Open WebUI, go to Settings → Connections → OpenAI API and set:",
+            code    = url
+        )
+        Spacer(Modifier.height(8.dp))
+        ConnectCard(
+            title   = "curl",
+            description = "Test from your computer (--insecure skips cert check for self-signed cert):",
+            code    = """curl $url/v1/chat/completions --insecure \
+  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"local","messages":[{"role":"user","content":"Hi!"}]}'"""
+        )
+    }
+}
+
+@Composable
+private fun ConnectCard(
+    title: String,
+    description: String,
+    code: String,
+    modifier: Modifier = Modifier
+) {
+    TerminalPanel(
+        modifier = modifier.fillMaxWidth(),
+        title = title.uppercase(),
+        accent = RetroCliColors.Purple
+    ) {
+        Column {
+            Text(
+                text       = title,
+                style      = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color      = RetroCliColors.Cyan
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = RetroCliColors.Muted
+            )
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(RetroCliColors.Void)
+                    .padding(10.dp)
+            ) {
+                Text(
+                    text       = code,
+                    style      = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color      = RetroCliColors.Text
+                )
+            }
+        }
+    }
+}
+
+// ---- QR code generation -----------------------------------------------------
+
+private fun generateQrBitmap(content: String, sizePx: Int): Bitmap? {
+    return try {
+        val hints = mapOf(EncodeHintType.MARGIN to 1)
+        val bitMatrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+        for (x in 0 until sizePx) {
+            for (y in 0 until sizePx) {
+                bmp.setPixel(x, y, if (bitMatrix[x, y]) Color.BLACK else Color.WHITE)
+            }
+        }
+        bmp
+    } catch (e: Exception) {
+        null
+    }
+}
+
+// ---- Previews ---------------------------------------------------------------
+
+@Preview(showBackground = true, name = "ServerScreen — stopped, no model")
+@Composable
+private fun ServerScreenStoppedPreview() {
+    AIpacaTheme(darkTheme = true) {
+        ServerScreen()
+    }
+}
+
+@Preview(showBackground = true, name = "StatusCard — running")
+@Composable
+private fun StatusCardRunningPreview() {
+    AIpacaTheme(darkTheme = true) {
+        ServerStatusCard(isRunning = true, modifier = Modifier.padding(16.dp))
+    }
+}
+
+@Preview(showBackground = true, name = "ConnectCard")
+@Composable
+private fun ConnectCardPreview() {
+    AIpacaTheme(darkTheme = true) {
+        ConnectCard(
+            title       = "curl",
+            description = "Test with:",
+            code        = "curl https://192.168.1.42:8443/v1/models --insecure",
+            modifier    = Modifier.padding(16.dp)
+        )
+    }
+}

@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.lamaphone.app"
+    namespace = "com.aipaca.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.lamaphone.app"
+        applicationId = "com.aipaca.app"
         minSdk = 28
         targetSdk = 35
         versionCode = 1
