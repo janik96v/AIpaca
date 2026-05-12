@@ -15,9 +15,10 @@ Connect OpenClaw, Open WebUI, LangChain — or `curl` — directly to your pocke
 ## What it does
 
 - Runs GGUF models entirely on-device via llama.cpp (no cloud, no subscription)
+- GPU-accelerated inference via Adreno OpenCL on Qualcomm devices
 - Exposes `POST /v1/chat/completions` on your local network — 100% OpenAI-compatible
 - Works with **OpenClaw**, Open WebUI, any OpenAI SDK, or `curl`
-- Built-in chat UI with streaming tokens
+- Built-in chat UI with streaming tokens and conversation history
 - Android foreground service keeps the server alive when the screen is off
 
 ---
@@ -31,7 +32,7 @@ Connect OpenClaw, Open WebUI, LangChain — or `curl` — directly to your pocke
 | Android Studio | Hedgehog 2023.1+ |
 | Android NDK | r27.2.12479018 |
 | CMake | 3.22+ |
-| Device | API 28+, ≥4 GB RAM (S24 Ultra recommended) |
+| Device | API 28+, ≥4 GB RAM (Snapdragon device recommended for GPU acceleration) |
 
 Install NDK and CMake via **Android Studio → SDK Manager → SDK Tools**.
 
@@ -40,18 +41,22 @@ Install NDK and CMake via **Android Studio → SDK Manager → SDK Tools**.
 ```bash
 git clone <your-repo-url>
 cd AIpaca
-git submodule update --init --recursive   # pulls llama.cpp
+git submodule update --init --recursive   # pulls llama.cpp (custom Adreno OpenCL fork)
 ```
 
 ### 3. Download a model
 
-Download a GGUF file and copy it to your phone (via USB or cloud storage):
+Download a GGUF file and copy it to your phone (via USB or cloud storage).
+The in-app **Models tab** links directly to each model's Hugging Face page.
 
-| Model | Size | Speed (S24 Ultra) | Download |
+| Model | Size | Quantization | Status |
 |---|---|---|---|
-| Qwen2.5-0.5B Q4_K_M | ~400 MB | ~35 t/s | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) |
-| **Qwen2.5-3B Q4_K_M** ← recommended | ~1.9 GB | ~18 t/s | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF) |
-| Qwen2.5-7B Q4_K_M | ~4.7 GB | ~8 t/s | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF) |
+| Gemma 4 E2B Instruct (unsloth) | ~2.5 GB | Q4_0 | Tested |
+| **Qwen 2.5 3B Instruct** ← recommended | ~1.9 GB | Q4_0 | Tested |
+| Qwen3 4B | ~2.6 GB | Q4_0 | Tested |
+| HY-MT 1.5 1.8B (translation) | ~440 MB | TBD | Experimental |
+
+> **GPU compatibility:** AIpaca uses the Adreno OpenCL backend. Formats with GPU kernels: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU.
 
 ### 4. Build and run
 
@@ -99,15 +104,19 @@ curl -k -X POST https://192.168.1.XX:8443/v1/chat/completions \
 
 ### `GET /health` — public, no auth
 ```json
-{"status": "ok", "model": "Qwen2.5-3B-Instruct-Q4_K_M", "loaded": true}
+{"status": "ok", "model": "Qwen2.5-3B-Instruct-Q4_0", "loaded": true}
 ```
 
 ### `POST /v1/pair` — public, PIN protected
 Registers a client's Ed25519 public key. Requires the 6-digit PIN shown in the app.
 
+```json
+{ "clientPublicKey": "<base64>", "pin": "123456", "displayName": "My Laptop" }
+```
+
 ### `GET /v1/models` — requires auth
 ```json
-{"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model"}]}
+{"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_0", "object": "model"}]}
 ```
 
 ### `POST /v1/chat/completions` — requires auth
@@ -122,7 +131,12 @@ Registers a client's Ed25519 public key. Requires the 6-digit PIN shown in the a
   ],
   "stream": false,
   "temperature": 0.7,
-  "max_tokens": 512
+  "max_tokens": 512,
+  "top_p": 0.9,
+  "frequency_penalty": 0.0,
+  "presence_penalty": 0.0,
+  "stop": ["<string>"],
+  "include_thinking": false
 }
 ```
 
@@ -138,6 +152,12 @@ Registers a client's Ed25519 public key. Requires the 6-digit PIN shown in the a
 
 Set `"stream": true` for Server-Sent Events token streaming.
 
+**Authentication header:**
+```
+Authorization: AIpaca-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
+```
+Signed message: `AIpaca-Ed25519:<unix-timestamp-seconds>`. Timestamp window: ±30 seconds.
+
 ---
 
 ## Architecture
@@ -152,7 +172,7 @@ LlamaCppEngine (Kotlin + JNI)
 llama_jni.cpp (C++ bridge)
     ↓ llama.cpp API
 llama.cpp (ARM64 native, compiled via NDK)
-    ↓ file I/O
+    ↓ Adreno OpenCL (GPU) / CPU fallback
 GGUF model (on-device storage)
 
 ─── parallel ───
@@ -185,19 +205,24 @@ app/src/main/
 │   │   ├── ApiServer.kt            ← Ktor HTTPS embedded server
 │   │   ├── ApiService.kt           ← Android Foreground Service
 │   │   └── ServerManager.kt        ← Observable state (StateFlow)
+│   ├── data/
+│   │   └── ChatConversationStore.kt ← conversation persistence
 │   ├── ui/
 │   │   ├── MainActivity.kt         ← Single activity, bottom nav
 │   │   ├── chat/ChatScreen.kt      ← Streaming chat UI + ViewModel
 │   │   ├── server/ServerScreen.kt  ← Server dashboard + ViewModel
-│   │   ├── components/ModelPickerButton.kt
+│   │   ├── models/ModelScreen.kt   ← Curated model library + quant guide
+│   │   ├── components/             ← Shared UI components
 │   │   └── theme/                  ← Material 3 dark theme
-│   ├── model/ChatMessage.kt
+│   ├── model/
+│   │   ├── ChatMessage.kt
+│   │   └── StoredConversation.kt
 │   ├── EngineState.kt              ← Process-scoped engine singleton
 │   └── AIpacaApp.kt
 └── cpp/
     ├── CMakeLists.txt
     ├── llama_jni.cpp               ← 5 JNI functions
-    └── llama.cpp/                  ← git submodule
+    └── llama.cpp/                  ← git submodule (custom Adreno OpenCL fork)
 ```
 
 ---
@@ -208,8 +233,8 @@ app/src/main/
 - [x] API key authentication for the server (Ed25519 asymmetric keys)
 - [x] TLS / HTTPS transport encryption
 - [x] QR code for one-tap device pairing
-- [ ] Chat history persistence (Room DB)
-- [ ] GPU acceleration (OpenCL / Vulkan)
+- [x] Chat history persistence
+- [x] GPU acceleration (Adreno OpenCL)
 - [ ] Multi-request queuing
 - [ ] Multimodal / vision support (LLaVA)
 - [ ] iOS port (shared llama.cpp core + SwiftUI)
