@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LamaPhone</string>
+    <string name="app_name">AIpaca</string>
 
     <!-- Navigation -->
     <string name="nav_chat">Chat</string>
@@ -45,7 +45,7 @@
     <string name="qr_dialog_close">Close</string>
 
     <!-- Notifications -->
-    <string name="notif_channel_name">LamaPhone API Server</string>
+    <string name="notif_channel_name">AIpaca API Server</string>
     <string name="notif_channel_desc">Shows while the OpenAI-compatible API server is running</string>
-    <string name="notif_title">LamaPhone API Server</string>
+    <string name="notif_title">AIpaca API Server</string>
 </resources>

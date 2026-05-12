@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-pair.py — Run this once to register your machine with LamaPhone.
+pair.py — Run this once to register your machine with AIpaca.
 
 Usage:
     pip install -r requirements.txt
     python3 pair.py
 
 On your phone: Server tab → PAIR_NEW_DEVICE → enter the PIN shown here.
-After pairing, your key and the server config are saved to ~/.lamaphone/.
+After pairing, your key and the server config are saved to ~/.aipaca/.
 """
 
 import base64
@@ -28,15 +28,15 @@ from cryptography.hazmat.primitives.serialization import (
     load_pem_private_key,
 )
 
-KEY_FILE  = os.path.expanduser("~/.lamaphone/client_key.pem")
-CFG_FILE  = os.path.expanduser("~/.lamaphone/config.json")
-CERT_FILE = os.path.expanduser("~/.lamaphone/server.pem")
+KEY_FILE  = os.path.expanduser("~/.aipaca/client_key.pem")
+CFG_FILE  = os.path.expanduser("~/.aipaca/config.json")
+CERT_FILE = os.path.expanduser("~/.aipaca/server.pem")
 os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
 
 
 class PinnedCertAdapter(HTTPAdapter):
     """Verify TLS cert against pinned file but skip hostname check.
-    LamaPhone's self-signed cert has CN=LamaPhone (no IP SAN), so hostname
+    AIpaca's self-signed cert has CN=AIpaca (no IP SAN), so hostname
     verification always fails. Security is maintained via fingerprint pinning.
 
     Note: urllib3 1.x has TWO hostname checks — one in ssl.SSLContext and one

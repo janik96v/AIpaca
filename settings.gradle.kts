@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "LamaPhone"
+rootProject.name = "AIpaca"
 include(":app")
