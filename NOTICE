@@ -1,0 +1,90 @@
+AIpaca
+Copyright 2026 Janik Vollenweider
+
+This product is licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+Third-party software included in this distribution
+================================================================================
+
+This product includes software developed by third parties. The following
+notices are provided for informational purposes and do not modify the License.
+
+--------------------------------------------------------------------------------
+llama.cpp
+--------------------------------------------------------------------------------
+Bundled as a git submodule at app/src/main/cpp/llama.cpp/
+Source: https://github.com/ggerganov/llama.cpp
+License: MIT
+Copyright (c) 2023-2024 The ggml authors
+
+The full text of the MIT License is provided in the submodule directory at
+app/src/main/cpp/llama.cpp/LICENSE.
+
+--------------------------------------------------------------------------------
+ggml
+--------------------------------------------------------------------------------
+Bundled as part of llama.cpp (app/src/main/cpp/llama.cpp/ggml/)
+Source: https://github.com/ggerganov/ggml
+License: MIT
+Copyright (c) 2022-2024 Georgi Gerganov
+
+--------------------------------------------------------------------------------
+Ktor
+--------------------------------------------------------------------------------
+Source: https://github.com/ktorio/ktor
+License: Apache License, Version 2.0
+Copyright 2014-2024 JetBrains s.r.o. and contributors
+
+--------------------------------------------------------------------------------
+Kotlin / kotlinx.coroutines / kotlinx.serialization
+--------------------------------------------------------------------------------
+Source: https://github.com/JetBrains/kotlin, https://github.com/Kotlin/*
+License: Apache License, Version 2.0
+Copyright 2010-2024 JetBrains s.r.o. and Kotlin Programming Language contributors
+
+--------------------------------------------------------------------------------
+AndroidX (Compose, Lifecycle, Activity, Navigation, Security-Crypto, Core)
+--------------------------------------------------------------------------------
+Source: https://android.googlesource.com/platform/frameworks/support/
+License: Apache License, Version 2.0
+Copyright (C) The Android Open Source Project
+
+--------------------------------------------------------------------------------
+Material Icons Extended
+--------------------------------------------------------------------------------
+Source: https://github.com/google/material-design-icons
+License: Apache License, Version 2.0
+Copyright Google LLC
+
+--------------------------------------------------------------------------------
+ZXing Core
+--------------------------------------------------------------------------------
+Source: https://github.com/zxing/zxing
+License: Apache License, Version 2.0
+Copyright 2008-2024 ZXing authors
+
+--------------------------------------------------------------------------------
+Coil
+--------------------------------------------------------------------------------
+Source: https://github.com/coil-kt/coil
+License: Apache License, Version 2.0
+Copyright Coil Contributors
+
+--------------------------------------------------------------------------------
+Netty
+--------------------------------------------------------------------------------
+Used transitively via Ktor server.
+Source: https://github.com/netty/netty
+License: Apache License, Version 2.0
+Copyright The Netty Project
+
+================================================================================
+Model weights
+================================================================================
+
+AIpaca does not bundle any model weights. Users download GGUF model files from
+third-party sources (e.g. HuggingFace). Those models are licensed independently
+by their respective publishers; please review the license of any model you load
+into AIpaca.

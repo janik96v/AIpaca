@@ -1,106 +1,91 @@
 package com.aipaca.app.ui.theme
 
 import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-// ---- Schemes ----------------------------------------------------------------
+/**
+ * AIpaca Editorial Retro — main theme entry point.
+ *
+ * Dark-first (Editorial direction); light mode comes in a later pass.
+ */
 
-private val LightColors = lightColorScheme(
-    primary = RetroCliColors.Cyan,
-    onPrimary = RetroCliColors.Void,
-    primaryContainer = Color(0xFF071A3A),
-    onPrimaryContainer = RetroCliColors.Text,
-    secondary = RetroCliColors.Magenta,
-    onSecondary = RetroCliColors.Void,
-    secondaryContainer = Color(0xFF321044),
-    onSecondaryContainer = RetroCliColors.Text,
-    tertiary = RetroCliColors.Blue,
-    surface = RetroCliColors.Terminal,
-    onSurface = RetroCliColors.Text,
-    surfaceVariant = RetroCliColors.TerminalSoft,
-    onSurfaceVariant = RetroCliColors.Muted,
-    background = RetroCliColors.Void,
-    onBackground = RetroCliColors.Text,
-    outline = RetroCliColors.Purple,
-    outlineVariant = RetroCliColors.Cyan.copy(alpha = 0.35f),
-    error = RetroCliColors.Error,
-    onError = RetroCliColors.Void,
-    errorContainer = Color(0xFF3A102D),
-    onErrorContainer = RetroCliColors.Text
+private val AlpacaDarkScheme = darkColorScheme(
+    // --- Primary (terracotta accent) ----------------------------------------
+    primary            = AlpacaColors.Accent.Primary,
+    onPrimary          = AlpacaColors.Text.OnAccent,
+    primaryContainer   = AlpacaColors.Accent.Soft,
+    onPrimaryContainer = AlpacaColors.Accent.Primary,
+
+    // --- Secondary (kept neutral — Editorial uses one accent) ---------------
+    secondary            = AlpacaColors.Text.Primary,
+    onSecondary          = AlpacaColors.Surface.Canvas,
+    secondaryContainer   = AlpacaColors.Surface.Elevated,
+    onSecondaryContainer = AlpacaColors.Text.Body,
+
+    // --- Tertiary (semantic info) -------------------------------------------
+    tertiary            = AlpacaColors.State.Info,
+    onTertiary          = AlpacaColors.Surface.Canvas,
+    tertiaryContainer   = AlpacaColors.Surface.Elevated,
+    onTertiaryContainer = AlpacaColors.State.Info,
+
+    // --- Backgrounds & surfaces --------------------------------------------
+    background        = AlpacaColors.Surface.Canvas,
+    onBackground      = AlpacaColors.Text.Primary,
+
+    surface           = AlpacaColors.Surface.Canvas,
+    onSurface         = AlpacaColors.Text.Primary,
+    surfaceVariant    = AlpacaColors.Surface.Elevated,
+    onSurfaceVariant  = AlpacaColors.Text.Muted,
+    surfaceContainer  = AlpacaColors.Surface.Elevated,
+    surfaceContainerHigh    = AlpacaColors.Surface.Card,
+    surfaceContainerHighest = AlpacaColors.Surface.Card,
+    surfaceContainerLow     = AlpacaColors.Surface.Canvas,
+    surfaceContainerLowest  = AlpacaColors.Surface.Recess,
+
+    // --- Lines & outlines ---------------------------------------------------
+    outline         = AlpacaColors.Line.Hairline,
+    outlineVariant  = AlpacaColors.Line.Subtle,
+
+    // --- Errors -------------------------------------------------------------
+    error              = AlpacaColors.State.Error,
+    onError            = AlpacaColors.Surface.Canvas,
+    errorContainer     = AlpacaColors.Surface.Elevated,
+    onErrorContainer   = AlpacaColors.State.Error,
+
+    // --- Inverse + scrim ----------------------------------------------------
+    inverseSurface     = AlpacaColors.Text.Primary,
+    inverseOnSurface   = AlpacaColors.Surface.Canvas,
+    inversePrimary     = AlpacaColors.Accent.Muted,
+    scrim              = AlpacaColors.Surface.Canvas
 )
-
-private val DarkColors = darkColorScheme(
-    primary = RetroCliColors.Cyan,
-    onPrimary = RetroCliColors.Void,
-    primaryContainer = Color(0xFF071A3A),
-    onPrimaryContainer = RetroCliColors.Text,
-    secondary = RetroCliColors.Magenta,
-    onSecondary = RetroCliColors.Void,
-    secondaryContainer = Color(0xFF321044),
-    onSecondaryContainer = RetroCliColors.Text,
-    tertiary = RetroCliColors.Blue,
-    onTertiary = RetroCliColors.Void,
-    surface = RetroCliColors.Terminal,
-    onSurface = RetroCliColors.Text,
-    surfaceVariant = RetroCliColors.TerminalSoft,
-    onSurfaceVariant = RetroCliColors.Muted,
-    background = RetroCliColors.Void,
-    onBackground = RetroCliColors.Text,
-    outline = RetroCliColors.Purple,
-    outlineVariant = RetroCliColors.Cyan.copy(alpha = 0.35f),
-    error = RetroCliColors.Error,
-    onError = RetroCliColors.Void,
-    errorContainer = Color(0xFF3A102D),
-    onErrorContainer = RetroCliColors.Text
-)
-
-// ---- Theme ------------------------------------------------------------------
 
 @Composable
 fun AIpacaTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+; disabled by default so our
-    // purple/teal palette is always shown.
-    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColors
-        else      -> LightColors
-    }
-
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
             @Suppress("DEPRECATION")
-            window.statusBarColor = RetroCliColors.Void.toArgb()
+            window.statusBarColor     = AlpacaColors.Surface.Canvas.toArgb()
             @Suppress("DEPRECATION")
-            window.navigationBarColor = RetroCliColors.Void.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
-            WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = false
+            window.navigationBarColor = AlpacaColors.Surface.Canvas.toArgb()
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars     = false
+                isAppearanceLightNavigationBars = false
+            }
         }
     }
 
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = AlpacaDarkScheme,
         typography  = Typography,
         content     = content
     )

@@ -55,6 +55,31 @@ struct LlamaContext {
 };
 
 // ---------------------------------------------------------------------------
+// Helper: return the number of trailing bytes that form an incomplete UTF-8
+// multi-byte sequence. Returns 0 if the string ends on a complete codepoint.
+// ---------------------------------------------------------------------------
+static size_t utf8_incomplete_tail(const std::string& s) {
+    if (s.empty()) return 0;
+    // Walk backwards over continuation bytes (10xxxxxx)
+    size_t tail = 0;
+    for (size_t i = s.size(); i > 0 && tail < 4; --i, ++tail) {
+        unsigned char c = (unsigned char)s[i - 1];
+        if ((c & 0xC0) != 0x80) {
+            // This is a leading byte or ASCII
+            size_t expected_len;
+            if      ((c & 0x80) == 0x00) expected_len = 1; // ASCII
+            else if ((c & 0xE0) == 0xC0) expected_len = 2;
+            else if ((c & 0xF0) == 0xE0) expected_len = 3;
+            else if ((c & 0xF8) == 0xF0) expected_len = 4;
+            else return 0; // invalid leading byte — don't buffer
+            size_t have = s.size() - (i - 1);
+            return (have < expected_len) ? (s.size() - (i - 1)) : 0;
+        }
+    }
+    return 0; // couldn't find a leading byte — don't buffer
+}
+
+// ---------------------------------------------------------------------------
 // Helper: convert a jstring to std::string, releasing the UTF chars
 // ---------------------------------------------------------------------------
 static std::string jstring_to_std(JNIEnv* env, jstring js) {
@@ -180,7 +205,7 @@ static TensorHistogram build_tensor_histogram(const std::string& model_path) {
     bool pure_q4_0 = !counts.empty();
     for (const auto& entry : counts) {
         // llama.cpp's "mostly Q4_0" can still keep small 1D tensors in float.
-        // Treat those as speed-compatible; anything else is a red flag for Adreno OpenCL.
+        // Treat those as pure_q4_0; anything else means the model uses a different quant format.
         if (entry.first != "q4_0" && entry.first != "f32" && entry.first != "f16") {
             pure_q4_0 = false;
             break;
@@ -299,8 +324,18 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
         nGpuLayers < 0 ? n_layer + 1 :
         std::min<int32_t>((int32_t)nGpuLayers, n_layer + 1);
     const int ftype_val = get_model_ftype(model);
+    // Formats with confirmed Adreno OpenCL kernels in ggml-opencl.cpp:
+    // pure_q4_0, Q4_1, Q4_K_S/M, Q5_K_S/M, Q6_K, Q8_0, IQ4_NL.
     const bool speed_compatible =
-        histogram.pure_q4_0 || ftype_val == LLAMA_FTYPE_MOSTLY_Q6_K;
+        histogram.pure_q4_0              ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q4_1   ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q4_K_S ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q4_K_M ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q5_K_S ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q5_K_M ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q6_K   ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_Q8_0   ||
+        ftype_val == LLAMA_FTYPE_MOSTLY_IQ4_NL;
 
     LOGI("Offload request resolved: requested=%d effective=%d max_all_layers=%d",
          (int)nGpuLayers, (int)effective_gpu_layers, (int)(n_layer + 1));
@@ -779,6 +814,7 @@ static void run_generate(
 
     int n_generated = 0;
     double t_start_ms = (double)ggml_time_ms();
+    std::string utf8_tail; // incomplete UTF-8 bytes carried over from the previous token
 
     while (n_generated < max_tokens && !lc->stop_flag.load()) {
         llama_token new_token;
@@ -817,7 +853,16 @@ static void run_generate(
             break;
         }
         piece_buf[piece_len] = '\0';
-        std::string piece(piece_buf, piece_len);
+        // Prepend any incomplete UTF-8 tail from the previous token, then
+        // strip a new incomplete tail so NewStringUTF always receives valid
+        // Modified UTF-8 (Android crashes hard on truncated multi-byte sequences).
+        std::string piece = utf8_tail + std::string(piece_buf, piece_len);
+        utf8_tail.clear();
+        size_t tail_len = utf8_incomplete_tail(piece);
+        if (tail_len > 0) {
+            utf8_tail = piece.substr(piece.size() - tail_len);
+            piece.resize(piece.size() - tail_len);
+        }
 
         // Skip unrelated control/special tokens that aren't caught by EOG
         // while preserving reasoning markers such as Gemma 4's <|channel>.

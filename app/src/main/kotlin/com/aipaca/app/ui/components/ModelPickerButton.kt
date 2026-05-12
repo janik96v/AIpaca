@@ -6,15 +6,16 @@ import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -23,7 +24,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.aipaca.app.ui.theme.AIpacaTheme
-import com.aipaca.app.ui.theme.RetroCliColors
+import com.aipaca.app.ui.theme.AlpacaColors
+import com.aipaca.app.ui.theme.AlpacaType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,10 +35,11 @@ import java.io.FileOutputStream
 private const val TAG = "ModelPickerButton"
 
 /**
- * A button that opens the system file picker filtered to any file type
- * (GGUF files have no standard MIME type), copies the selected file into
- * the app's internal storage if it is a SAF content URI, then calls
- * [onModelSelected] with the resolved absolute path.
+ * Opens the system file picker for any file type (GGUF has no standard MIME)
+ * and, for SAF content URIs, copies the file into internal storage before
+ * calling [onModelSelected] with the resolved absolute path.
+ *
+ * Editorial styling: terracotta accent, sentence-case "Load model" label.
  */
 @Composable
 fun ModelPickerButton(
@@ -62,52 +65,46 @@ fun ModelPickerButton(
     }
 
     Button(
-        onClick   = { launcher.launch(arrayOf("*/*")) },
-        modifier  = modifier,
-        enabled = !isLoading,
-        shape = RoundedCornerShape(4.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = RetroCliColors.Magenta,
-            contentColor = RetroCliColors.Void,
-            disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.55f),
-            disabledContentColor = RetroCliColors.Text
+        onClick  = { launcher.launch(arrayOf("*/*")) },
+        modifier = modifier,
+        enabled  = !isLoading,
+        shape    = RoundedCornerShape(6.dp),
+        colors   = ButtonDefaults.buttonColors(
+            containerColor         = AlpacaColors.Accent.Primary,
+            contentColor           = AlpacaColors.Text.OnAccent,
+            disabledContainerColor = AlpacaColors.Surface.Elevated,
+            disabledContentColor   = AlpacaColors.Text.Subtle
         )
     ) {
         if (isLoading) {
             CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                color = RetroCliColors.Text,
+                modifier    = Modifier.size(16.dp),
+                color       = AlpacaColors.Text.OnAccent,
                 strokeWidth = 2.dp
             )
         } else {
             Icon(
-                imageVector        = Icons.Filled.FolderOpen,
-                contentDescription = null
+                imageVector        = Icons.Outlined.FolderOpen,
+                contentDescription = null,
+                modifier           = Modifier.size(16.dp)
             )
         }
+        Spacer(Modifier.width(6.dp))
         Text(
-            text = if (isLoading) " LOADING_MODEL" else " LOAD_MODEL",
-            style = MaterialTheme.typography.labelMedium
+            text  = if (isLoading) "Loading model" else "Load model",
+            style = AlpacaType.LabelLg
         )
     }
 }
 
-/**
- * Resolve a content URI to an absolute file path.
- * For SAF URIs the file is copied to internal storage first.
- */
 private suspend fun resolveUri(context: Context, uri: Uri): String? =
     withContext(Dispatchers.IO) {
         try {
-            // Try to get a direct file:// path first
             if (uri.scheme == "file") {
                 return@withContext uri.path
             }
-
-            // Content URI — copy to internal storage
             val fileName = getFileName(context, uri) ?: "model.gguf"
             val destFile = File(context.filesDir, fileName)
-
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(destFile).use { output ->
                     input.copyTo(output)
@@ -133,7 +130,7 @@ private fun getFileName(context: Context, uri: Uri): String? {
     }
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, backgroundColor = 0xFF14140F)
 @Composable
 private fun ModelPickerButtonPreview() {
     AIpacaTheme {
