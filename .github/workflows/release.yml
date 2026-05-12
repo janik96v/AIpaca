@@ -28,7 +28,7 @@ jobs:
 
       - name: Install NDK r27
         run: |
-          echo "y" | sdkmanager "ndk;27.2.12479018" "cmake;3.22.1"
+          echo "y" | sdkmanager "ndk;27.2.12479018" "cmake;3.27.1"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
