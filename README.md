@@ -1,5 +1,10 @@
 # AIpaca 🦙📡
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Build](https://github.com/janikvollenweider/AIpaca/actions/workflows/ci.yml/badge.svg)](https://github.com/janikvollenweider/AIpaca/actions/workflows/ci.yml)
+[![Android](https://img.shields.io/badge/Android-API%2028%2B-green.svg)](https://developer.android.com/about/versions/pie)
+[![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20compatible-orange.svg)](#api-reference)
+
 **Turn your Android phone into a portable OpenAI-compatible AI server.**
 
 Run LLMs locally on your phone. Expose them as an OpenAI API on your WiFi network.
@@ -217,3 +222,27 @@ PocketPal, SmolChat, Off Grid — all great apps, but none expose a local API.
 Termux + llama-server works but it's a developer hack, not a product.
 
 AIpaca is the first **polished Play Store app** that turns your phone into a portable AI server — usable as an Ollama replacement for OpenClaw, Open WebUI, and anything that speaks the OpenAI API.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
+
+Bug reports and feature requests go in [GitHub Issues](https://github.com/janikvollenweider/AIpaca/issues) — use the provided templates.
+
+By contributing you agree that your code will be licensed under the [Apache 2.0 License](LICENSE).
+
+---
+
+## License
+
+```
+Copyright 2025 Janik Vollenweider
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+```

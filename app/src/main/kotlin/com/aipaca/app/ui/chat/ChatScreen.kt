@@ -1,18 +1,10 @@
 package com.aipaca.app.ui.chat
 
 import android.app.Application
-import androidx.compose.ui.res.painterResource
-import com.aipaca.app.R
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.InfiniteRepeatableSpec
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -33,12 +26,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,9 +47,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -84,10 +76,16 @@ import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.model.ChatMessage
 import com.aipaca.app.model.Role
 import com.aipaca.app.model.StoredConversation
+import com.aipaca.app.ui.components.EditorialDivider
+import com.aipaca.app.ui.components.EditorialSectionMark
+import com.aipaca.app.ui.components.MonoLabel
+import com.aipaca.app.ui.components.MonoLabelTone
 import com.aipaca.app.ui.components.ModelPickerButton
+import com.aipaca.app.ui.components.StatusChip
+import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.theme.AIpacaTheme
-import com.aipaca.app.ui.theme.RetroCliColors
-import com.aipaca.app.ui.theme.TerminalPanel
+import com.aipaca.app.ui.theme.AlpacaColors
+import com.aipaca.app.ui.theme.AlpacaType
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,7 +101,6 @@ import java.util.UUID
 data class ThinkParseResult(val content: String, val thinking: String)
 
 class ThinkTagParser {
-    // Supported tag pairs: standard <think>/</ think> and Gemma 4 <|channel>thought\n / <channel|>
     private data class TagPair(val open: String, val close: String)
     private val tagPairs = listOf(
         TagPair("<think>", "</think>"),
@@ -111,7 +108,7 @@ class ThinkTagParser {
     )
 
     private var insideThink = false
-    private var activeClose: String? = null  // which close tag to look for
+    private var activeClose: String? = null
     private var buffer = ""
 
     private fun couldBePartialTag(text: String, tag: String): Boolean {
@@ -128,7 +125,7 @@ class ThinkTagParser {
     fun feed(token: String): ThinkParseResult {
         buffer += token
         val contentParts = StringBuilder()
-        val thinkParts = StringBuilder()
+        val thinkParts   = StringBuilder()
 
         while (buffer.isNotEmpty()) {
             if (insideThink) {
@@ -146,7 +143,6 @@ class ThinkTagParser {
                     buffer = ""
                 }
             } else {
-                // Try to find any open tag
                 var bestIdx = -1
                 var bestPair: TagPair? = null
                 for (pair in tagPairs) {
@@ -222,7 +218,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _activeConversationId.value = activeConversationId
         }
 
-        val userMsg = ChatMessage(role = Role.USER, content = userText.trim())
+        val userMsg      = ChatMessage(role = Role.USER, content = userText.trim())
         val assistantMsg = ChatMessage(role = Role.ASSISTANT, content = "")
 
         _messages.value = _messages.value + userMsg + assistantMsg
@@ -332,10 +328,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
         _conversations.value = conversationStore.upsert(
             StoredConversation(
-                id = conversationId,
-                title = title,
-                messages = currentMessages,
-                updatedAt = System.currentTimeMillis(),
+                id           = conversationId,
+                title        = title,
+                messages     = currentMessages,
+                updatedAt    = System.currentTimeMillis(),
                 systemPrompt = _systemPrompt.value
             )
         )
@@ -349,34 +345,32 @@ fun ChatScreen(
     modifier: Modifier = Modifier,
     chatViewModel: ChatViewModel = viewModel()
 ) {
-    val messages      by chatViewModel.messages.collectAsState()
-    val conversations by chatViewModel.conversations.collectAsState()
+    val messages              by chatViewModel.messages.collectAsState()
+    val conversations         by chatViewModel.conversations.collectAsState()
     val currentConversationId by chatViewModel.currentConversationId.collectAsState()
-    val systemPrompt  by chatViewModel.systemPrompt.collectAsState()
-    val isGenerating  by chatViewModel.isGenerating.collectAsState()
-    val thinkingEnabled by chatViewModel.thinkingEnabled.collectAsState()
-    val isLoaded  by EngineState.isLoaded.collectAsState()
-    val isLoadingModel by EngineState.isLoadingModel.collectAsState()
-    val modelPath by EngineState.modelPath.collectAsState()
-    val gpuLayers by EngineState.gpuLayers.collectAsState()
-    val modelInfo by EngineState.modelInfo.collectAsState()
+    val systemPrompt          by chatViewModel.systemPrompt.collectAsState()
+    val isGenerating          by chatViewModel.isGenerating.collectAsState()
+    val thinkingEnabled       by chatViewModel.thinkingEnabled.collectAsState()
+    val isLoaded              by EngineState.isLoaded.collectAsState()
+    val isLoadingModel        by EngineState.isLoadingModel.collectAsState()
+    val modelPath             by EngineState.modelPath.collectAsState()
+    val gpuLayers             by EngineState.gpuLayers.collectAsState()
+    val modelInfo             by EngineState.modelInfo.collectAsState()
 
-    val listState      = rememberLazyListState()
-    val snackbarState  = remember { SnackbarHostState() }
-    val drawerState    = rememberDrawerState(initialValue = DrawerValue.Closed)
-    val scope          = rememberCoroutineScope()
-    var inputText      by remember { mutableStateOf("") }
+    val listState     = rememberLazyListState()
+    val snackbarState = remember { SnackbarHostState() }
+    val drawerState   = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope         = rememberCoroutineScope()
+    var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
-    var editingSystemPrompt by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
 
-    // Auto-scroll to bottom when messages change
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
-    // Also scroll when the last message content changes (streaming)
     val lastContent = messages.lastOrNull()?.content
     LaunchedEffect(lastContent) {
         if (messages.isNotEmpty()) {
@@ -384,19 +378,13 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(drawerState) {
-        ChatHistoryBus.openRequests.collect {
-            drawerState.open()
-        }
-    }
-
     ModalNavigationDrawer(
-        drawerState = drawerState,
+        drawerState   = drawerState,
         drawerContent = {
             ChatHistoryDrawer(
-                conversations = conversations,
+                conversations         = conversations,
                 currentConversationId = currentConversationId,
-                onNewChat = {
+                onNewChat             = {
                     chatViewModel.clearChat()
                     scope.launch { drawerState.close() }
                 },
@@ -411,20 +399,20 @@ fun ChatScreen(
         }
     ) {
         Scaffold(
-            modifier    = modifier,
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            snackbarHost = { SnackbarHost(snackbarState) },
-            bottomBar   = {
+            modifier       = modifier.background(AlpacaColors.Surface.Canvas),
+            containerColor = AlpacaColors.Surface.Canvas,
+            snackbarHost   = { SnackbarHost(snackbarState) },
+            bottomBar      = {
                 ChatInputBar(
-                    text         = inputText,
-                    onTextChange = { inputText = it },
-                    isGenerating = isGenerating,
+                    text             = inputText,
+                    onTextChange     = { inputText = it },
+                    isGenerating     = isGenerating,
                     supportsThinking = modelInfo.supportsThinking,
                     thinkingEnabled  = thinkingEnabled,
                     onThinkingToggle = { chatViewModel.toggleThinking() },
-                    systemPrompt = systemPrompt,
+                    systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
-                    onSend       = {
+                    onSend = {
                         if (!isLoaded) {
                             scope.launch {
                                 snackbarState.showSnackbar("Please load a model first")
@@ -434,7 +422,7 @@ fun ChatScreen(
                             inputText = ""
                         }
                     },
-                    onStop       = { chatViewModel.stopGeneration() }
+                    onStop = { chatViewModel.stopGeneration() }
                 )
             }
         ) { innerPadding ->
@@ -443,29 +431,37 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                ChatHeaderBar(
-                    modelPath    = modelPath,
-                    isLoaded     = isLoaded,
+                // ----- Masthead -----
+                ChatMasthead(
+                    modelPath      = modelPath,
+                    isLoaded       = isLoaded,
                     isLoadingModel = isLoadingModel,
-                    gpuLayers    = gpuLayers,
-                    onUnload     = { EngineState.unload() },
+                    gpuLayers      = gpuLayers,
                     onModelSelected = { path ->
                         EngineState.scope.launch { EngineState.loadModel(path) }
-                    }
+                    },
+                    onUnload  = { EngineState.unload() },
+                    onHistory = { scope.launch { drawerState.open() } }
                 )
 
                 if (messages.isEmpty()) {
                     EmptyChatPlaceholder(
-                        isLoaded    = isLoaded,
+                        isLoaded       = isLoaded,
                         isLoadingModel = isLoadingModel,
-                        modifier    = Modifier.fillMaxSize()
+                        modifier       = Modifier.fillMaxSize()
                     )
                 } else {
+                    Spacer(Modifier.height(8.dp))
+                    EditorialSectionMark(
+                        label    = "DISPATCH",
+                        modifier = Modifier.padding(horizontal = 24.dp)
+                    )
+                    Spacer(Modifier.height(8.dp))
                     LazyColumn(
-                        state           = listState,
-                        modifier        = Modifier.fillMaxSize(),
-                        contentPadding  = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        state               = listState,
+                        modifier            = Modifier.fillMaxSize(),
+                        contentPadding      = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         items(messages, key = { it.id }) { message ->
                             val isLastAssistant = message.id == messages.lastOrNull()?.id &&
@@ -482,178 +478,102 @@ fun ChatScreen(
     }
 
     if (showSystemPromptDialog) {
-        AlertDialog(
-            onDismissRequest = {
+        SystemPromptDialog(
+            initialValue = editingSystemPrompt,
+            onValueChange = { editingSystemPrompt = it },
+            onConfirm = {
                 chatViewModel.updateSystemPrompt(editingSystemPrompt)
                 showSystemPromptDialog = false
             },
-            containerColor = RetroCliColors.Void,
-            titleContentColor = RetroCliColors.Purple,
-            title = {
-                Text(
-                    text = "> SYSTEM_PROMPT",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = RetroCliColors.Purple
-                )
+            onClear = {
+                editingSystemPrompt = ""
+                chatViewModel.updateSystemPrompt("")
+                showSystemPromptDialog = false
             },
-            text = {
-                OutlinedTextField(
-                    value = editingSystemPrompt,
-                    onValueChange = { editingSystemPrompt = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("> set system instructions...") },
-                    minLines = 3,
-                    maxLines = 8,
-                    textStyle = MaterialTheme.typography.bodySmall,
-                    shape = RoundedCornerShape(4.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = RetroCliColors.Text,
-                        unfocusedTextColor = RetroCliColors.Text,
-                        cursorColor = RetroCliColors.Cyan,
-                        focusedBorderColor = RetroCliColors.Purple,
-                        unfocusedBorderColor = RetroCliColors.Purple.copy(alpha = 0.5f),
-                        focusedPlaceholderColor = RetroCliColors.Muted,
-                        unfocusedPlaceholderColor = RetroCliColors.Muted
-                    )
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    editingSystemPrompt = ""
-                    chatViewModel.updateSystemPrompt("")
-                    showSystemPromptDialog = false
-                }) {
-                    Text("CLEAR", color = RetroCliColors.Error)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    chatViewModel.updateSystemPrompt(editingSystemPrompt)
-                    showSystemPromptDialog = false
-                }) {
-                    Text("DONE", color = RetroCliColors.Cyan)
-                }
+            onDismiss = {
+                chatViewModel.updateSystemPrompt(editingSystemPrompt)
+                showSystemPromptDialog = false
             }
         )
     }
 }
 
-// ---- Sub-composables --------------------------------------------------------
+// ---- Masthead ---------------------------------------------------------------
 
 @Composable
-private fun ChatHeaderBar(
+private fun ChatMasthead(
     modelPath: String?,
     isLoaded: Boolean,
     isLoadingModel: Boolean,
     gpuLayers: Int,
-    onUnload: () -> Unit,
     onModelSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
+    onUnload: () -> Unit,
+    onHistory: () -> Unit
 ) {
-    TerminalPanel(
-        modifier = modifier
+    Column(
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        title = "SESSION",
-        accent = if (isLoaded) RetroCliColors.Cyan else RetroCliColors.Magenta
+            .padding(horizontal = 24.dp, vertical = 16.dp)
     ) {
         Row(
-            modifier            = Modifier
-                .fillMaxWidth(),
+            verticalAlignment   = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier            = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text  = "Alpaca.",
+                style = AlpacaType.DisplayMasthead,
+                color = AlpacaColors.Text.Primary
+            )
+            IconButton(onClick = onHistory) {
+                Icon(
+                    imageVector        = Icons.Outlined.Menu,
+                    contentDescription = "Open chat history",
+                    tint               = AlpacaColors.Text.Primary
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        EditorialDivider()
+        Spacer(Modifier.height(12.dp))
+
+        val statusText = when {
+            isLoadingModel -> "MODEL · LOADING…"
+            isLoaded       -> {
+                val name    = modelPath?.substringAfterLast('/')?.removeSuffix(".gguf").orEmpty()
+                val backend = if (gpuLayers > 0) "GPU · $gpuLayers LAYERS" else "CPU"
+                "${name.uppercase()} · $backend · ONLINE"
+            }
+            else -> "NO MODEL LOADED"
+        }
+        val statusTone = when {
+            isLoadingModel -> MonoLabelTone.Warning
+            isLoaded       -> MonoLabelTone.Accent
+            else           -> MonoLabelTone.Muted
+        }
+
+        Row(
+            modifier            = Modifier.fillMaxWidth(),
             verticalAlignment   = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (isLoadingModel) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = RetroCliColors.Magenta,
-                        strokeWidth = 2.dp
-                    )
-                    Column {
-                        Text(
-                            text = "STATUS: LOADING_MODEL",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = RetroCliColors.Warning
-                        )
-                        Text(
-                            text = "BACKGROUND PROCESS ACTIVE",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RetroCliColors.Muted
-                        )
-                    }
-                }
-            } else if (isLoaded && modelPath != null) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text  = "STATUS: ONLINE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = RetroCliColors.Success
-                    )
-                    Text(
-                        text  = "MODEL: ${modelPath.substringAfterLast('/')}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RetroCliColors.Cyan,
-                        maxLines = 1
-                    )
-                    val (badgeText, badgeColor) = when {
-                        gpuLayers > 0  -> "BACKEND: GPU / $gpuLayers LAYERS" to RetroCliColors.Magenta
-                        gpuLayers == 0 -> "BACKEND: CPU FALLBACK" to RetroCliColors.Warning
-                        else           -> null to null
-                    }
-                    if (badgeText != null && badgeColor != null) {
-                        Text(
-                            text  = badgeText,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = badgeColor
-                        )
-                    }
+            MonoLabel(text = statusText, tone = statusTone, modifier = Modifier.weight(1f))
+
+            if (isLoaded) {
+                TextButton(onClick = onUnload) {
+                    Text("Unload", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
                 }
             } else {
-                Text(
-                    text     = "STATUS: WAITING_FOR_MODEL",
-                    style    = MaterialTheme.typography.bodySmall,
-                    color    = RetroCliColors.Muted,
-                    modifier = Modifier.weight(1f)
+                ModelPickerButton(
+                    onModelSelected = onModelSelected,
+                    isLoading       = isLoadingModel
                 )
-            }
-
-            Row {
-                if (isLoaded) {
-                    Button(
-                        onClick  = onUnload,
-                        modifier = Modifier.height(36.dp),
-                        shape    = RoundedCornerShape(4.dp),
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = RetroCliColors.Error,
-                            contentColor   = RetroCliColors.Void
-                        )
-                    ) {
-                        Icon(
-                            imageVector        = Icons.Filled.Close,
-                            contentDescription = null,
-                            modifier           = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text  = " UNLOAD_MODEL",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
-                } else {
-                    ModelPickerButton(
-                        onModelSelected = onModelSelected,
-                        modifier        = Modifier.height(36.dp),
-                        isLoading       = isLoadingModel
-                    )
-                }
             }
         }
     }
 }
+
+// ---- Sub-composables --------------------------------------------------------
 
 @Composable
 private fun EmptyChatPlaceholder(
@@ -661,38 +581,26 @@ private fun EmptyChatPlaceholder(
     isLoadingModel: Boolean,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier         = modifier,
-        contentAlignment = Alignment.Center
+    Column(
+        modifier            = modifier.padding(horizontal = 24.dp, vertical = 32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.Start
     ) {
-        TerminalPanel(
-            modifier = Modifier
-                .padding(28.dp)
-                .fillMaxWidth(),
-            title = "BOOT",
-            accent = RetroCliColors.Magenta
-        ) {
-            Text(
-                text  = "AIpaca TERMINAL",
-                style = MaterialTheme.typography.titleLarge,
-                color = RetroCliColors.Cyan
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text  = when {
-                    isLoadingModel -> "> LOADING_MODEL. PLEASE WAIT."
-                    isLoaded -> "> READY. TYPE A PROMPT."
-                    else -> "> LOAD_MODEL REQUIRED."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isLoaded) RetroCliColors.Success else RetroCliColors.Warning
-            )
-            Text(
-                text = "> LOCAL INFERENCE / OFFLINE CHAT",
-                style = MaterialTheme.typography.bodySmall,
-                color = RetroCliColors.Muted
-            )
-        }
+        EditorialSectionMark(label = "READY")
+        Text(
+            text  = when {
+                isLoadingModel -> "Loading model…"
+                isLoaded       -> "Ready. Write a message below."
+                else           -> "Load a model to start chatting."
+            },
+            style = AlpacaType.BodyLg,
+            color = AlpacaColors.Text.Body
+        )
+        Text(
+            text  = "Local inference. No data leaves this device.",
+            style = AlpacaType.BodySm,
+            color = AlpacaColors.Text.Muted
+        )
     }
 }
 
@@ -705,71 +613,61 @@ private fun ChatHistoryDrawer(
     onDeleteConversation: (String) -> Unit
 ) {
     ModalDrawerSheet(
-        modifier = Modifier.width(320.dp),
-        drawerContainerColor = RetroCliColors.Void,
-        drawerContentColor = RetroCliColors.Text
+        modifier             = Modifier.width(320.dp),
+        drawerContainerColor = AlpacaColors.Surface.Canvas,
+        drawerContentColor   = AlpacaColors.Text.Primary
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-            TerminalPanel(
+            Text(
+                text  = "History.",
+                style = AlpacaType.DisplayHeadline,
+                color = AlpacaColors.Text.Primary
+            )
+            Spacer(Modifier.height(8.dp))
+            EditorialDivider()
+            Spacer(Modifier.height(8.dp))
+            MonoLabel("STORED CONVERSATIONS · ${conversations.size}")
+
+            Spacer(Modifier.height(20.dp))
+            Button(
+                onClick  = onNewChat,
                 modifier = Modifier.fillMaxWidth(),
-                title = "HISTORY",
-                accent = RetroCliColors.Magenta
-            ) {
-                Text(
-                    text = "STORED_CONVERSATIONS",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = RetroCliColors.Cyan
+                shape    = RoundedCornerShape(6.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = AlpacaColors.Accent.Primary,
+                    contentColor   = AlpacaColors.Text.OnAccent
                 )
-                Spacer(Modifier.height(10.dp))
-                Button(
-                    onClick = onNewChat,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(4.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = RetroCliColors.Cyan,
-                        contentColor = RetroCliColors.Void
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Add,
-                        contentDescription = null
-                    )
-                    Text(
-                        text = " NEW_CHAT",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
+            ) {
+                Text("New chat", style = AlpacaType.LabelLg)
             }
 
+            Spacer(Modifier.height(20.dp))
+            EditorialDivider()
+
             if (conversations.isEmpty()) {
-                TerminalPanel(
-                    modifier = Modifier.fillMaxWidth(),
-                    title = "EMPTY",
-                    accent = RetroCliColors.Purple
-                ) {
-                    Text(
-                        text = "> No saved conversations yet.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = RetroCliColors.Muted
-                    )
-                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text  = "No saved conversations yet.",
+                    style = AlpacaType.BodyMd,
+                    color = AlpacaColors.Text.Muted
+                )
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier            = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     items(conversations, key = { it.id }) { conversation ->
                         ConversationHistoryRow(
                             conversation = conversation,
-                            isSelected = conversation.id == currentConversationId,
-                            onSelect = { onSelectConversation(conversation.id) },
-                            onDelete = { onDeleteConversation(conversation.id) }
+                            isSelected   = conversation.id == currentConversationId,
+                            onSelect     = { onSelectConversation(conversation.id) },
+                            onDelete     = { onDeleteConversation(conversation.id) }
                         )
+                        EditorialDivider(color = AlpacaColors.Line.Subtle)
                     }
                 }
             }
@@ -784,42 +682,33 @@ private fun ConversationHistoryRow(
     onSelect: () -> Unit,
     onDelete: () -> Unit
 ) {
-    TerminalPanel(
-        modifier = Modifier.fillMaxWidth(),
-        title = if (isSelected) "ACTIVE" else "CHAT",
-        accent = if (isSelected) RetroCliColors.Cyan else RetroCliColors.Purple
+    Row(
+        modifier            = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect)
+            .padding(vertical = 12.dp),
+        verticalAlignment   = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            TextButton(
-                onClick = onSelect,
-                modifier = Modifier.weight(1f)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = conversation.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isSelected) RetroCliColors.Cyan else RetroCliColors.Text,
-                        maxLines = 2
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "${conversation.messages.size} lines · ${formatConversationTime(conversation.updatedAt)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = RetroCliColors.Muted
-                    )
-                }
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    imageVector = Icons.Filled.Delete,
-                    contentDescription = "Delete conversation",
-                    tint = RetroCliColors.Error
-                )
-            }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text     = conversation.title,
+                style    = AlpacaType.BodyMd,
+                color    = if (isSelected) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary,
+                maxLines = 2
+            )
+            Spacer(Modifier.height(4.dp))
+            MonoLabel(
+                text = "${conversation.messages.size} LINES · ${formatConversationTime(conversation.updatedAt)}"
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector        = Icons.Outlined.Delete,
+                contentDescription = "Delete conversation",
+                tint               = AlpacaColors.Text.Muted,
+                modifier           = Modifier.size(18.dp)
+            )
         }
     }
 }
@@ -842,132 +731,97 @@ private fun ChatInputBar(
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = RetroCliColors.Void,
-        contentColor = RetroCliColors.Text,
-        border = BorderStroke(1.dp, RetroCliColors.Magenta.copy(alpha = 0.55f))
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(AlpacaColors.Surface.Canvas)
     ) {
+        EditorialDivider()
         Column(
-            modifier = Modifier
+            modifier            = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Top row: text input
             OutlinedTextField(
                 value         = text,
                 onValueChange = onTextChange,
                 modifier      = Modifier.fillMaxWidth(),
-                placeholder   = { Text("> enter prompt") },
+                placeholder   = {
+                    Text("Write a message…", style = AlpacaType.BodyMd, color = AlpacaColors.Text.Subtle)
+                },
                 enabled       = !isGenerating,
                 maxLines      = 4,
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction      = ImeAction.Send
                 ),
-                keyboardActions = KeyboardActions(
-                    onSend = { onSend() }
-                ),
-                shape = RoundedCornerShape(4.dp),
-                textStyle = MaterialTheme.typography.bodyMedium,
+                keyboardActions = KeyboardActions(onSend = { onSend() }),
+                shape           = RoundedCornerShape(6.dp),
+                textStyle       = AlpacaType.BodyLg.copy(color = AlpacaColors.Text.Primary),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = RetroCliColors.Text,
-                    unfocusedTextColor = RetroCliColors.Text,
-                    disabledTextColor = RetroCliColors.Muted,
-                    cursorColor = RetroCliColors.Cyan,
-                    focusedBorderColor = RetroCliColors.Cyan,
-                    unfocusedBorderColor = RetroCliColors.Purple,
-                    disabledBorderColor = RetroCliColors.Purple.copy(alpha = 0.45f),
-                    focusedPlaceholderColor = RetroCliColors.Muted,
-                    unfocusedPlaceholderColor = RetroCliColors.Muted
+                    focusedTextColor          = AlpacaColors.Text.Primary,
+                    unfocusedTextColor        = AlpacaColors.Text.Primary,
+                    disabledTextColor         = AlpacaColors.Text.Muted,
+                    cursorColor               = AlpacaColors.Accent.Primary,
+                    focusedBorderColor        = AlpacaColors.Accent.Primary,
+                    unfocusedBorderColor      = AlpacaColors.Line.Hairline,
+                    disabledBorderColor       = AlpacaColors.Line.Subtle,
+                    focusedContainerColor     = AlpacaColors.Surface.Elevated,
+                    unfocusedContainerColor   = AlpacaColors.Surface.Elevated,
+                    disabledContainerColor    = AlpacaColors.Surface.Elevated,
+                    focusedPlaceholderColor   = AlpacaColors.Text.Subtle,
+                    unfocusedPlaceholderColor = AlpacaColors.Text.Subtle
                 )
             )
 
-            // Bottom row: sys prompt + think toggle (left) + send/stop (right)
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                modifier            = Modifier.fillMaxWidth(),
+                verticalAlignment   = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // System prompt button (always visible)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { onSystemPromptClick() }
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .alpha(if (systemPrompt.isNotBlank()) 1f else 0.35f)
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_robot),
-                            contentDescription = "System prompt",
-                            modifier = Modifier.size(20.dp),
-                            tint = RetroCliColors.Purple
-                        )
-                        Text(
-                            text = "Sys",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = RetroCliColors.Purple
-                        )
-                    }
-
-                    // Thinking toggle (conditional)
+                    InputToggleChip(
+                        icon     = Icons.Outlined.SmartToy,
+                        label    = "Sys",
+                        active   = systemPrompt.isNotBlank(),
+                        onClick  = onSystemPromptClick
+                    )
                     if (supportsThinking) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable { onThinkingToggle() }
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                                .alpha(if (thinkingEnabled) 1f else 0.35f)
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_atom),
-                                contentDescription = "Toggle thinking",
-                                modifier = Modifier.size(20.dp),
-                                tint = RetroCliColors.Cyan
-                            )
-                            Text(
-                                text = "Think",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = RetroCliColors.Cyan
-                            )
-                        }
+                        Spacer(Modifier.width(8.dp))
+                        InputToggleChip(
+                            icon     = Icons.Outlined.Psychology,
+                            label    = "Think",
+                            active   = thinkingEnabled,
+                            onClick  = onThinkingToggle
+                        )
                     }
                 }
 
                 if (isGenerating) {
                     Button(
-                        onClick  = onStop,
-                        colors   = ButtonDefaults.buttonColors(
-                            containerColor = RetroCliColors.Error,
-                            contentColor = RetroCliColors.Void
+                        onClick = onStop,
+                        shape   = RoundedCornerShape(6.dp),
+                        colors  = ButtonDefaults.buttonColors(
+                            containerColor = AlpacaColors.State.Error,
+                            contentColor   = AlpacaColors.Text.OnAccent
                         )
                     ) {
-                        Icon(
-                            imageVector        = Icons.Filled.Stop,
-                            contentDescription = "Stop generation"
-                        )
+                        Icon(Icons.Filled.Stop, contentDescription = "Stop generation")
                     }
                 } else {
                     Button(
-                        onClick  = onSend,
-                        enabled  = text.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = RetroCliColors.Cyan,
-                            contentColor = RetroCliColors.Void,
-                            disabledContainerColor = RetroCliColors.Purple.copy(alpha = 0.35f),
-                            disabledContentColor = RetroCliColors.Muted
+                        onClick = onSend,
+                        enabled = text.isNotBlank(),
+                        shape   = RoundedCornerShape(6.dp),
+                        colors  = ButtonDefaults.buttonColors(
+                            containerColor         = AlpacaColors.Accent.Primary,
+                            contentColor           = AlpacaColors.Text.OnAccent,
+                            disabledContainerColor = AlpacaColors.Surface.Elevated,
+                            disabledContentColor   = AlpacaColors.Text.Subtle
                         )
                     ) {
-                        Icon(
-                            imageVector        = Icons.Filled.Send,
-                            contentDescription = "Send message"
-                        )
+                        Icon(Icons.Filled.Send, contentDescription = "Send message")
                     }
                 }
             }
@@ -976,86 +830,173 @@ private fun ChatInputBar(
 }
 
 @Composable
+private fun InputToggleChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    val color = if (active) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted
+    Row(
+        verticalAlignment   = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = label,
+            tint               = color,
+            modifier           = Modifier.size(18.dp)
+        )
+        Text(label, style = AlpacaType.LabelMd, color = color)
+    }
+}
+
+@Composable
+private fun SystemPromptDialog(
+    initialValue: String,
+    onValueChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var value by remember(initialValue) { mutableStateOf(initialValue) }
+
+    AlertDialog(
+        onDismissRequest    = onDismiss,
+        containerColor      = AlpacaColors.Surface.Card,
+        titleContentColor   = AlpacaColors.Text.Primary,
+        textContentColor    = AlpacaColors.Text.Body,
+        shape               = RoundedCornerShape(12.dp),
+        title = {
+            Column {
+                Text("System prompt", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                Spacer(Modifier.height(4.dp))
+                MonoLabel("INSTRUCTION FOR THE MODEL")
+            }
+        },
+        text = {
+            OutlinedTextField(
+                value         = value,
+                onValueChange = { value = it; onValueChange(it) },
+                modifier      = Modifier.fillMaxWidth(),
+                placeholder   = { Text("Set system instructions…", style = AlpacaType.BodyMd) },
+                minLines      = 3,
+                maxLines      = 8,
+                textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                shape         = RoundedCornerShape(6.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor          = AlpacaColors.Text.Primary,
+                    unfocusedTextColor        = AlpacaColors.Text.Primary,
+                    cursorColor               = AlpacaColors.Accent.Primary,
+                    focusedBorderColor        = AlpacaColors.Accent.Primary,
+                    unfocusedBorderColor      = AlpacaColors.Line.Hairline,
+                    focusedPlaceholderColor   = AlpacaColors.Text.Subtle,
+                    unfocusedPlaceholderColor = AlpacaColors.Text.Subtle
+                )
+            )
+        },
+        dismissButton = {
+            TextButton(onClick = onClear) {
+                Text("Clear", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("Done", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+            }
+        }
+    )
+}
+
+// ---- Message bubble ---------------------------------------------------------
+
+@Composable
 fun MessageBubble(
     message: ChatMessage,
     isStreaming: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isUser = message.role == Role.USER
-    val accent = if (isUser) RetroCliColors.Magenta else RetroCliColors.Cyan
 
-    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
-    val cursorAlpha by infiniteTransition.animateFloat(
-        initialValue    = 1f,
-        targetValue     = 0f,
-        animationSpec   = InfiniteRepeatableSpec(
-            animation  = tween(durationMillis = 500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label           = "cursorAlpha"
-    )
+    if (isUser) {
+        UserMessage(message = message, modifier = modifier)
+    } else {
+        AssistantMessage(message = message, isStreaming = isStreaming, modifier = modifier)
+    }
+}
 
+@Composable
+private fun UserMessage(
+    message: ChatMessage,
+    modifier: Modifier = Modifier
+) {
     Row(
         modifier            = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
+        horizontalArrangement = Arrangement.End
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 4.dp,
-                        topEnd = 4.dp,
-                        bottomStart = 4.dp,
-                        bottomEnd = 4.dp
-                    )
-                )
-                .background(
-                    if (isUser) RetroCliColors.TerminalSoft else RetroCliColors.Terminal
-                )
-                .border(1.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .widthIn(max = 320.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(AlpacaColors.Surface.Elevated)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.Start
         ) {
-            if (isStreaming && message.content.isEmpty() && message.thinkingContent.isEmpty()) {
-                CircularProgressIndicator(
-                    modifier  = Modifier.size(16.dp),
-                    color     = RetroCliColors.Cyan,
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Column {
-                    Text(
-                        text = if (isUser) "> USER" else "> LAMA",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = accent
-                    )
+            MonoLabel("YOU · ${currentTimeShort()}")
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text  = message.content,
+                style = AlpacaType.BodyLg,
+                color = AlpacaColors.Text.Primary
+            )
+        }
+    }
+}
 
-                    if (message.thinkingContent.isNotEmpty()) {
-                        Spacer(Modifier.height(6.dp))
-                        ThinkingBlock(
-                            thinkingContent = message.thinkingContent,
-                            isStreaming = isStreaming && message.content.isEmpty()
-                        )
-                    }
+@Composable
+private fun AssistantMessage(
+    message: ChatMessage,
+    isStreaming: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        MonoLabel(text = "ALPACA · ON-DEVICE", tone = MonoLabelTone.Accent)
+        Spacer(Modifier.height(8.dp))
 
-                    Spacer(Modifier.height(6.dp))
-                    Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text  = message.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = RetroCliColors.Text
-                    )
-                    if (isStreaming) {
-                        Text(
-                            text     = "|",
-                            style    = MaterialTheme.typography.bodyMedium,
-                            color    = RetroCliColors.Cyan,
-                            modifier = Modifier.alpha(cursorAlpha)
-                        )
-                    }
-                    }
-                }
-            }
+        if (message.thinkingContent.isNotEmpty()) {
+            ThinkingBlock(
+                thinkingContent = message.thinkingContent,
+                isStreaming     = isStreaming && message.content.isEmpty()
+            )
+            Spacer(Modifier.height(10.dp))
+        }
+
+        if (isStreaming && message.content.isEmpty() && message.thinkingContent.isEmpty()) {
+            CircularProgressIndicator(
+                modifier    = Modifier.size(16.dp),
+                color       = AlpacaColors.Accent.Primary,
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text(
+                text  = message.content,
+                style = AlpacaType.BodyLg,
+                color = AlpacaColors.Text.Body
+            )
+        }
+
+        if (isStreaming && message.content.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Box(
+                modifier = Modifier
+                    .size(width = 24.dp, height = 1.dp)
+                    .background(AlpacaColors.Accent.Primary)
+                    .alpha(0.8f)
+            )
         }
     }
 }
@@ -1067,7 +1008,6 @@ private fun ThinkingBlock(
 ) {
     var expanded by remember { mutableStateOf(isStreaming) }
 
-    // Auto-expand while streaming thinking content
     LaunchedEffect(isStreaming) {
         if (isStreaming) expanded = true
     }
@@ -1075,57 +1015,52 @@ private fun ThinkingBlock(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(4.dp))
-            .background(RetroCliColors.Void.copy(alpha = 0.5f))
-            .border(1.dp, RetroCliColors.Warning.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+            .clickable { expanded = !expanded }
+            .padding(vertical = 6.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        MonoLabel(
+            text = if (expanded) "THINKING · TAP TO COLLAPSE" else "THINKING · TAP TO EXPAND",
+            tone = MonoLabelTone.Warning
+        )
+        AnimatedVisibility(
+            visible = expanded,
+            enter   = expandVertically(),
+            exit    = shrinkVertically()
         ) {
             Text(
-                text = if (expanded) "v THINKING" else "> THINKING",
-                style = MaterialTheme.typography.labelSmall,
-                color = RetroCliColors.Warning
-            )
-        }
-
-        AnimatedVisibility(visible = expanded) {
-            Text(
-                text = thinkingContent,
-                style = MaterialTheme.typography.bodySmall,
-                color = RetroCliColors.Muted,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                text     = thinkingContent,
+                style    = AlpacaType.BodySm,
+                color    = AlpacaColors.Text.Muted,
+                modifier = Modifier.padding(top = 6.dp)
             )
         }
     }
 }
+
+private fun currentTimeShort(): String =
+    SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
 // ---- Previews ---------------------------------------------------------------
 
 @Preview(showBackground = true, name = "ChatScreen — no model")
 @Composable
 private fun ChatScreenEmptyPreview() {
-    AIpacaTheme(darkTheme = true) {
+    AIpacaTheme {
         ChatScreen()
     }
 }
 
-@Preview(showBackground = true, name = "MessageBubble — user")
+@Preview(showBackground = true, name = "MessageBubbles")
 @Composable
 private fun MessageBubbleUserPreview() {
-    AIpacaTheme(darkTheme = true) {
-        Column(modifier = Modifier.padding(8.dp)) {
+    AIpacaTheme {
+        Column(modifier = Modifier
+            .background(AlpacaColors.Surface.Canvas)
+            .padding(24.dp)) {
+            MessageBubble(message = ChatMessage(role = Role.USER, content = "How fast is this?"))
+            Spacer(Modifier.height(16.dp))
             MessageBubble(
-                message = ChatMessage(role = Role.USER, content = "Hello! How are you?")
-            )
-            Spacer(Modifier.height(4.dp))
-            MessageBubble(
-                message     = ChatMessage(role = Role.ASSISTANT, content = "I'm doing great, running entirely on your phone!"),
+                message     = ChatMessage(role = Role.ASSISTANT, content = "I'm running on your phone — 14.2 t/s right now."),
                 isStreaming = true
             )
         }
