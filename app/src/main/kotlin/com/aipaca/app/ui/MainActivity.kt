@@ -94,7 +94,7 @@ private fun AIpacaApp() {
                 title = {
                     Column {
                         Text(
-                            text  = "> AIPACA",
+                            text  = "> AIpaca",
                             style = MaterialTheme.typography.titleMedium,
                             color = RetroCliColors.Cyan
                         )

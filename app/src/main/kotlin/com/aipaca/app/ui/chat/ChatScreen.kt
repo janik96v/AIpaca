@@ -680,7 +680,7 @@ private fun EmptyChatPlaceholder(
             accent = RetroCliColors.Magenta
         ) {
             Text(
-                text  = "AIPACA TERMINAL",
+                text  = "AIpaca TERMINAL",
                 style = MaterialTheme.typography.titleLarge,
                 color = RetroCliColors.Cyan
             )
