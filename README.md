@@ -12,6 +12,14 @@ Connect OpenClaw, Open WebUI, LangChain — or `curl` — directly to your pocke
 
 ---
 
+## Screenshots
+
+| Chat | Chat History | Models | Server |
+|:---:|:---:|:---:|:---:|
+| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
+
+---
+
 ## What it does
 
 - Runs GGUF models entirely on-device via llama.cpp (no cloud, no subscription)
