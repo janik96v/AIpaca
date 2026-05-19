@@ -3,6 +3,8 @@ package com.aipaca.app
 import android.app.Application
 import android.system.Os
 import android.util.Log
+import com.aipaca.app.data.WhisperModelPrefs
+import kotlinx.coroutines.launch
 
 class AIpacaApp : Application() {
 
@@ -13,9 +15,16 @@ class AIpacaApp : Application() {
         // model weights > 1 GB to stay in GPU memory. No-op on non-Adreno devices.
         Os.setenv("LM_GGML_OPENCL_ADRENO_USE_LARGE_BUFFER", "1", true)
         Log.i("AIpacaApp", "Application starting — EngineState initialised")
-        // EngineState is an object (singleton); referencing it here triggers
-        // its static initialiser and creates the LlamaCppEngine instance.
-        // No model is loaded yet — that happens when the user picks a file.
+        // Inject context before touching EngineState so whisper prefs work.
+        EngineState.init(this)
         EngineState   // touch to init
+
+        // Restore whisper model from last session (non-blocking)
+        val savedWhisperPath = WhisperModelPrefs.getPath(this)
+        if (savedWhisperPath != null) {
+            EngineState.scope.launch {
+                EngineState.loadWhisperModel(savedWhisperPath)
+            }
+        }
     }
 }

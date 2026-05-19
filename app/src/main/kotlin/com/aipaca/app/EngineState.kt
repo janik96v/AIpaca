@@ -1,11 +1,14 @@
 package com.aipaca.app
 
+import android.content.Context
 import android.util.Log
+import com.aipaca.app.data.WhisperModelPrefs
 import com.aipaca.app.engine.BenchResult
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.engine.LlamaCppEngine
 import com.aipaca.app.engine.ModelInfo
+import com.aipaca.app.engine.WhisperEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,9 +33,19 @@ private const val TAG = "EngineState"
  */
 object EngineState {
 
-    // ---- Engine ------------------------------------------------------------
+    // ---- Application context (injected from AIpacaApp.onCreate) -----------
+
+    lateinit var appContext: Context
+        private set
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
+    // ---- Engines -----------------------------------------------------------
 
     val engine: LlamaCppEngine = LlamaCppEngine()
+    val whisperEngine: WhisperEngine = WhisperEngine()
 
     // ---- Coroutine scope ---------------------------------------------------
 
@@ -79,6 +92,17 @@ object EngineState {
 
     private val _isBenchmarking = MutableStateFlow(false)
     val isBenchmarking: StateFlow<Boolean> = _isBenchmarking.asStateFlow()
+
+    // ---- Whisper STT state -------------------------------------------------
+
+    private val _whisperModelPath = MutableStateFlow<String?>(null)
+    val whisperModelPath: StateFlow<String?> = _whisperModelPath.asStateFlow()
+
+    private val _isLoadingWhisperModel = MutableStateFlow(false)
+    val isLoadingWhisperModel: StateFlow<Boolean> = _isLoadingWhisperModel.asStateFlow()
+
+    private val _whisperError = MutableStateFlow<String?>(null)
+    val whisperError: StateFlow<String?> = _whisperError.asStateFlow()
 
     // ---- Actions -----------------------------------------------------------
 
@@ -188,6 +212,36 @@ object EngineState {
                 .catch        { e -> _errorMessage.value = e.message; onError(e) }
                 .collect      { chunk -> onToken(chunk.content) }
         }
+    }
+
+    suspend fun loadWhisperModel(path: String): Result<Unit> {
+        _whisperError.value = null
+        _isLoadingWhisperModel.value = true
+        return try {
+            val result = whisperEngine.loadModel(path)
+            result.fold(
+                onSuccess = {
+                    _whisperModelPath.value = path
+                    WhisperModelPrefs.savePath(appContext, path)
+                    Log.i(TAG, "Whisper model loaded: $path")
+                },
+                onFailure = { e ->
+                    _whisperError.value = e.message ?: "Failed to load whisper model"
+                    Log.e(TAG, "loadWhisperModel failed", e)
+                }
+            )
+            result
+        } finally {
+            _isLoadingWhisperModel.value = false
+        }
+    }
+
+    fun unloadWhisper() {
+        whisperEngine.unload()
+        _whisperModelPath.value = null
+        _whisperError.value = null
+        WhisperModelPrefs.clearPath(appContext)
+        Log.i(TAG, "Whisper model unloaded")
     }
 
     suspend fun benchmark(pp: Int = 128, tg: Int = 128, pl: Int = 1, nr: Int = 3): Result<BenchResult> {

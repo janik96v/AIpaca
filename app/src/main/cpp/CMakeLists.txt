@@ -86,8 +86,28 @@ endif()
 # Add llama.cpp as subdirectory
 add_subdirectory(llama.cpp)
 
+# ---------------------------------------------------------------------------
+# whisper.cpp — on-device speech-to-text
+#
+# add_subdirectory after llama.cpp so the `ggml` CMake target already exists.
+# whisper.cpp detects this and skips its own ggml build, reusing ours.
+# ---------------------------------------------------------------------------
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/whisper.cpp/include/whisper.h")
+    message(FATAL_ERROR
+        "whisper.cpp submodule is missing!\n"
+        "Please run: git submodule update --init --recursive"
+    )
+endif()
+
+set(WHISPER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WHISPER_BUILD_SERVER   OFF CACHE BOOL "" FORCE)
+set(WHISPER_ALL_WARNINGS   OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(whisper.cpp)
+
 # Our JNI bridge library
-add_library(aipaca SHARED llama_jni.cpp)
+add_library(aipaca SHARED llama_jni.cpp whisper_jni.cpp)
 
 find_library(log-lib     log)
 find_library(android-lib android)
@@ -96,6 +116,7 @@ target_link_libraries(aipaca
     llama
     llama-common
     ggml
+    whisper
     ${log-lib}
     ${android-lib}
     OpenCL::OpenCL
@@ -105,4 +126,5 @@ target_include_directories(aipaca PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
     llama.cpp/common
+    whisper.cpp/include
 )

@@ -1,7 +1,16 @@
 package com.aipaca.app.ui.chat
 
+import android.Manifest
 import android.app.Application
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
@@ -30,8 +39,10 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +73,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
@@ -195,6 +210,57 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
 
     private var generationJob: Job? = null
+
+    // ---- STT state ---------------------------------------------------------
+
+    private val audioRecorder = com.aipaca.app.engine.AudioRecorder()
+
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    private val _isTranscribing = MutableStateFlow(false)
+    val isTranscribing: StateFlow<Boolean> = _isTranscribing.asStateFlow()
+
+    private val _transcriptionResult = MutableStateFlow<String?>(null)
+    val transcriptionResult: StateFlow<String?> = _transcriptionResult.asStateFlow()
+
+    private val _transcriptionError = MutableStateFlow<String?>(null)
+    val transcriptionError: StateFlow<String?> = _transcriptionError.asStateFlow()
+
+    private var recordingJob: Job? = null
+
+    fun startRecording() {
+        if (_isRecording.value || _isGenerating.value) return
+        _isRecording.value = true
+        _transcriptionError.value = null
+
+        recordingJob = viewModelScope.launch {
+            try {
+                val samples = audioRecorder.record()  // suspends until stopRecording()
+                _isRecording.value = false
+                _isTranscribing.value = true
+                val result = EngineState.whisperEngine.transcribe(samples)
+                result.fold(
+                    onSuccess  = { text -> _transcriptionResult.value = text },
+                    onFailure  = { e   -> _transcriptionError.value = e.message ?: "Transcription failed" }
+                )
+            } catch (e: Exception) {
+                _transcriptionError.value = e.message ?: "Recording failed"
+            } finally {
+                _isRecording.value = false
+                _isTranscribing.value = false
+            }
+        }
+    }
+
+    fun stopRecording() {
+        audioRecorder.stopRecording()
+        // recordingJob continues — it transitions to transcription automatically
+    }
+
+    fun consumeTranscriptionResult() {
+        _transcriptionResult.value = null
+    }
 
     fun toggleThinking() {
         _thinkingEnabled.value = !_thinkingEnabled.value
@@ -357,13 +423,40 @@ fun ChatScreen(
     val gpuLayers             by EngineState.gpuLayers.collectAsState()
     val modelInfo             by EngineState.modelInfo.collectAsState()
 
+    val isRecording         by chatViewModel.isRecording.collectAsState()
+    val isTranscribing      by chatViewModel.isTranscribing.collectAsState()
+    val transcriptionResult by chatViewModel.transcriptionResult.collectAsState()
+    val transcriptionError  by chatViewModel.transcriptionError.collectAsState()
+    val whisperLoaded       = EngineState.whisperEngine.isLoaded
+
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
     val drawerState   = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope         = rememberCoroutineScope()
+    val context       = LocalContext.current
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+
+    // Consume transcription result → populate input field
+    LaunchedEffect(transcriptionResult) {
+        transcriptionResult?.let { text ->
+            inputText = text
+            chatViewModel.consumeTranscriptionResult()
+        }
+    }
+
+    // Show transcription errors as snackbars
+    LaunchedEffect(transcriptionError) {
+        transcriptionError?.let { snackbarState.showSnackbar(it) }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) chatViewModel.startRecording()
+        else scope.launch { snackbarState.showSnackbar("Microphone permission denied") }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -407,6 +500,9 @@ fun ChatScreen(
                     text             = inputText,
                     onTextChange     = { inputText = it },
                     isGenerating     = isGenerating,
+                    isRecording      = isRecording,
+                    isTranscribing   = isTranscribing,
+                    whisperLoaded    = whisperLoaded,
                     supportsThinking = modelInfo.supportsThinking,
                     thinkingEnabled  = thinkingEnabled,
                     onThinkingToggle = { chatViewModel.toggleThinking() },
@@ -422,7 +518,23 @@ fun ChatScreen(
                             inputText = ""
                         }
                     },
-                    onStop = { chatViewModel.stopGeneration() }
+                    onStop = { chatViewModel.stopGeneration() },
+                    onMicClick = {
+                        when {
+                            isRecording    -> chatViewModel.stopRecording()
+                            isTranscribing -> { /* no-op while transcribing */ }
+                            !whisperLoaded -> scope.launch {
+                                snackbarState.showSnackbar("Load a Whisper model first — go to Models tab")
+                            }
+                            else -> {
+                                val granted = ContextCompat.checkSelfPermission(
+                                    context, Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+                                if (granted) chatViewModel.startRecording()
+                                else permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    }
                 )
             }
         ) { innerPadding ->
@@ -722,6 +834,9 @@ private fun ChatInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     isGenerating: Boolean,
+    isRecording: Boolean = false,
+    isTranscribing: Boolean = false,
+    whisperLoaded: Boolean = false,
     supportsThinking: Boolean = false,
     thinkingEnabled: Boolean = false,
     onThinkingToggle: () -> Unit = {},
@@ -729,6 +844,7 @@ private fun ChatInputBar(
     onSystemPromptClick: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
+    onMicClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -798,6 +914,15 @@ private fun ChatInputBar(
                     }
                 }
 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    MicButton(
+                        isRecording    = isRecording,
+                        isTranscribing = isTranscribing,
+                        whisperLoaded  = whisperLoaded,
+                        onClick        = onMicClick
+                    )
+                    Spacer(Modifier.width(4.dp))
+
                 if (isGenerating) {
                     Button(
                         onClick = onStop,
@@ -824,8 +949,72 @@ private fun ChatInputBar(
                         Icon(Icons.Filled.Send, contentDescription = "Send message")
                     }
                 }
+                } // end mic+send Row
             }
         }
+    }
+}
+
+@Composable
+private fun MicButton(
+    isRecording: Boolean,
+    isTranscribing: Boolean,
+    whisperLoaded: Boolean,
+    onClick: () -> Unit
+) {
+    if (isTranscribing) {
+        CircularProgressIndicator(
+            modifier    = Modifier
+                .size(36.dp)
+                .padding(6.dp),
+            color       = AlpacaColors.Accent.Primary,
+            strokeWidth = 2.dp
+        )
+        return
+    }
+
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+    val tint: Color
+    val scaleModifier: Modifier
+
+    when {
+        isRecording -> {
+            val infiniteTransition = rememberInfiniteTransition(label = "mic_pulse")
+            val scale by infiniteTransition.animateFloat(
+                initialValue  = 1f,
+                targetValue   = 1.3f,
+                animationSpec = infiniteRepeatable(
+                    animation  = tween(600),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "mic_scale"
+            )
+            icon          = Icons.Outlined.Mic
+            tint          = AlpacaColors.State.Error
+            scaleModifier = Modifier.scale(scale)
+        }
+        !whisperLoaded -> {
+            icon          = Icons.Outlined.MicOff
+            tint          = AlpacaColors.Text.Muted
+            scaleModifier = Modifier
+        }
+        else -> {
+            icon          = Icons.Outlined.Mic
+            tint          = AlpacaColors.Text.Primary
+            scaleModifier = Modifier
+        }
+    }
+
+    IconButton(
+        onClick  = onClick,
+        modifier = scaleModifier
+    ) {
+        Icon(
+            imageVector        = icon,
+            contentDescription = if (isRecording) "Stop recording" else "Start recording",
+            tint               = tint,
+            modifier           = Modifier.size(22.dp)
+        )
     }
 }
 

@@ -45,7 +45,8 @@ private const val TAG = "ModelPickerButton"
 fun ModelPickerButton(
     onModelSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
-    isLoading: Boolean = false
+    isLoading: Boolean = false,
+    label: String = "Load model"
 ) {
     val context = LocalContext.current
     val scope   = rememberCoroutineScope()
@@ -91,7 +92,7 @@ fun ModelPickerButton(
         }
         Spacer(Modifier.width(6.dp))
         Text(
-            text  = if (isLoading) "Loading model" else "Load model",
+            text  = if (isLoading) "Loading…" else label,
             style = AlpacaType.LabelLg
         )
     }
