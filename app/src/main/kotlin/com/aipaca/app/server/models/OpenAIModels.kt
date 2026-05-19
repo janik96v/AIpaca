@@ -82,6 +82,36 @@ data class DeltaContent(
 )
 
 // ---------------------------------------------------------------------------
+// Images API (POST /v1/images/generations)
+// ---------------------------------------------------------------------------
+
+@Serializable
+data class ImageGenerationRequest(
+    val model: String = "stable-diffusion",
+    val prompt: String,
+    @SerialName("negative_prompt") val negativePrompt: String = "",
+    val n: Int = 1,
+    val size: String = "512x512",
+    @SerialName("response_format") val responseFormat: String = "b64_json",
+    val steps: Int = 20,
+    @SerialName("cfg_scale") val cfgScale: Float = 7.5f,
+    val seed: Long = -1L
+)
+
+@Serializable
+data class ImageGenerationResponse(
+    val created: Long,
+    val data: List<ImageData>
+)
+
+@Serializable
+data class ImageData(
+    @SerialName("b64_json") val b64Json: String? = null,
+    val url: String? = null,
+    @SerialName("revised_prompt") val revisedPrompt: String? = null
+)
+
+// ---------------------------------------------------------------------------
 // Models list response
 // ---------------------------------------------------------------------------
 

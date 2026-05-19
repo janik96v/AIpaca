@@ -2,8 +2,10 @@ package com.aipaca.app.server
 
 import android.util.Log
 import com.aipaca.app.EngineState
+import com.aipaca.app.ImageGenState
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
+import com.aipaca.app.engine.ImageGenRequest
 import com.aipaca.app.server.models.*
 import com.aipaca.app.server.security.AIpacaAuth
 import com.aipaca.app.server.security.AuthorizedKeysAttrKey
@@ -141,7 +143,8 @@ object ApiServer {
     private fun Application.configureRouting(
         engineState: EngineState,
         authorizedKeys: AuthorizedKeysStore,
-        tlsConfig: TlsManager.TlsConfig
+        tlsConfig: TlsManager.TlsConfig,
+        imageGenState: ImageGenState = ImageGenState
     ) {
         routing {
 
@@ -402,6 +405,71 @@ object ApiServer {
                     }
                 }
             }
+            // ------------------------------------------------------------------
+            // POST /v1/images/generations  (requires auth)
+            // ------------------------------------------------------------------
+            post("/v1/images/generations") {
+                requestCount.incrementAndGet()
+
+                val contentLength = call.request.contentLength() ?: 0L
+                if (contentLength > MAX_REQUEST_BYTES) {
+                    call.respond(HttpStatusCode.PayloadTooLarge, ApiErrorWrapper(ApiError("Request body too large", "invalid_request_error")))
+                    return@post
+                }
+
+                val request = try {
+                    call.receive<ImageGenerationRequest>()
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorWrapper(ApiError("Invalid request body: ${e.message}", "invalid_request_error")))
+                    return@post
+                }
+
+                if (request.prompt.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, ApiErrorWrapper(ApiError("prompt is required", "invalid_request_error")))
+                    return@post
+                }
+
+                if (!imageGenState.isLoaded.value) {
+                    call.respond(HttpStatusCode.ServiceUnavailable, ApiErrorWrapper(ApiError("No image generation model loaded. Load a diffusion GGUF model in the AIpaca app first.", "model_not_loaded")))
+                    return@post
+                }
+
+                val (width, height) = parseImageSize(request.size)
+                val genRequest = ImageGenRequest(
+                    prompt         = request.prompt.trim(),
+                    negativePrompt = request.negativePrompt,
+                    width          = width,
+                    height         = height,
+                    steps          = request.steps.coerceIn(1, 100),
+                    cfgScale       = request.cfgScale.coerceIn(0f, 30f),
+                    seed           = request.seed
+                )
+
+                val acquired = withTimeoutOrNull(300_000L) {  // 5 min max for image gen
+                    generateMutex.withLock {
+                        imageGenState.generateImage(genRequest)
+                    }
+                }
+
+                if (acquired == null) {
+                    call.respond(HttpStatusCode.ServiceUnavailable, ApiErrorWrapper(ApiError("Server busy or generation timed out.", "server_busy")))
+                    return@post
+                }
+
+                acquired.fold(
+                    onSuccess = { result ->
+                        val b64 = result.toPngBase64()
+                        call.respond(HttpStatusCode.OK, ImageGenerationResponse(
+                            created = System.currentTimeMillis() / 1000,
+                            data    = listOf(ImageData(b64Json = b64))
+                        ))
+                    },
+                    onFailure = { e ->
+                        Log.e(TAG, "Image generation failed", e)
+                        call.respond(HttpStatusCode.InternalServerError, ApiErrorWrapper(ApiError(e.message ?: "Generation failed", "generation_error")))
+                    }
+                )
+            }
         }
     }
 
@@ -422,6 +490,14 @@ object ApiServer {
             c.category != CharCategory.PRIVATE_USE &&
             c.category != CharCategory.SURROGATE
         }.take(64).ifBlank { "Unknown Device" }
+
+    private fun parseImageSize(size: String): Pair<Int, Int> {
+        val parts = size.trim().lowercase().split("x")
+        val w = parts.getOrNull(0)?.toIntOrNull()?.coerceIn(64, 2048) ?: 512
+        val h = parts.getOrNull(1)?.toIntOrNull()?.coerceIn(64, 2048) ?: 512
+        // Round to multiple of 64 (required by most diffusion models)
+        return Pair((w / 64) * 64, (h / 64) * 64)
+    }
 
     private fun buildTurnsFromMessages(messages: List<OpenAIMessage>): List<ChatTurn> {
         val turns = messages.mapNotNull { msg ->

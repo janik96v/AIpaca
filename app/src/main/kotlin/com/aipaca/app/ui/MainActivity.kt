@@ -24,6 +24,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aipaca.app.ui.chat.ChatScreen
 import com.aipaca.app.ui.components.AlpacaBottomNav
 import com.aipaca.app.ui.components.AlpacaTab
+import com.aipaca.app.ui.image.ImageScreen
 import com.aipaca.app.ui.models.ModelScreen
 import com.aipaca.app.ui.server.ServerScreen
 import com.aipaca.app.ui.theme.AIpacaTheme
@@ -84,6 +85,7 @@ private fun AIpacaApp() {
         ) {
             composable(AlpacaTab.Chat.route)   { ChatScreen() }
             composable(AlpacaTab.Models.route) { ModelScreen() }
+            composable(AlpacaTab.Image.route)  { ImageScreen() }
             composable(AlpacaTab.Server.route) { ServerScreen() }
         }
     }

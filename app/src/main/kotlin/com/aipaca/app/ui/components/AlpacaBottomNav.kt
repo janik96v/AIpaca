@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Inventory2
@@ -39,12 +40,14 @@ import com.aipaca.app.ui.theme.AlpacaType
 enum class AlpacaTab(val label: String, val icon: ImageVector, val route: String) {
     Chat   ("Chat",   Icons.Outlined.ChatBubbleOutline, "chat"),
     Models ("Models", Icons.Outlined.Inventory2,        "models"),
+    Image  ("Image",  Icons.Outlined.AutoAwesome,       "image"),
     Server ("Server", Icons.Outlined.Dns,               "server");
 
     companion object {
         fun fromRoute(route: String?): AlpacaTab = when (route) {
             Chat.route   -> Chat
             Models.route -> Models
+            Image.route  -> Image
             Server.route -> Server
             else         -> Chat
         }

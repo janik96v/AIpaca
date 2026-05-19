@@ -86,7 +86,7 @@ endif()
 # Add llama.cpp as subdirectory
 add_subdirectory(llama.cpp)
 
-# Our JNI bridge library
+# Our LLM JNI bridge library
 add_library(aipaca SHARED llama_jni.cpp)
 
 find_library(log-lib     log)
@@ -106,3 +106,45 @@ target_include_directories(aipaca PRIVATE
     llama.cpp/ggml/include
     llama.cpp/common
 )
+
+# ---------------------------------------------------------------------------
+# stable-diffusion.cpp — on-device image generation engine
+#
+# Reuses llama.cpp's ggml via a CMake target guard in stable-diffusion.cpp:
+#   if (NOT TARGET ggml) → skips its own ggml subdirectory
+# Both libraries share the same ggml build (same Adreno OpenCL backend).
+# ---------------------------------------------------------------------------
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/stable-diffusion.cpp/CMakeLists.txt")
+    message(WARNING
+        "stable-diffusion.cpp submodule missing — image generation disabled.\n"
+        "Run: git submodule update --init --recursive"
+    )
+else()
+    set(SD_BUILD_EXAMPLES    OFF CACHE BOOL "" FORCE)
+    set(SD_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(SD_VULKAN            OFF CACHE BOOL "" FORCE)
+    set(SD_CUDA              OFF CACHE BOOL "" FORCE)
+    set(SD_METAL             OFF CACHE BOOL "" FORCE)
+    # SD_OPENCL=OFF: OpenCL is provided by llama.cpp's shared ggml above
+    set(SD_OPENCL            OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(stable-diffusion.cpp)
+
+    add_library(aipaca_sd SHARED stable_diffusion_jni.cpp)
+
+    target_link_libraries(aipaca_sd
+        stable-diffusion
+        ${log-lib}
+        ${android-lib}
+    )
+
+    target_include_directories(aipaca_sd PRIVATE
+        stable-diffusion.cpp/include
+        stable-diffusion.cpp
+        llama.cpp/ggml/include
+    )
+
+    # Hide all symbols except JNI entry points to avoid conflicts with
+    # libaipaca.so when both are loaded in the same JVM process.
+    target_compile_options(aipaca_sd PRIVATE -fvisibility=hidden)
+endif()
