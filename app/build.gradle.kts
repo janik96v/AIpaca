@@ -150,6 +150,9 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
 
+    // PDF text extraction (API < 35 fallback)
+    implementation(libs.pdfbox.android)
+
     // Debug
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

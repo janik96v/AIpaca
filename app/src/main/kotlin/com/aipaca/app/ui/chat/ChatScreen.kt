@@ -1,6 +1,16 @@
 package com.aipaca.app.ui.chat
 
 import android.app.Application
+import android.graphics.pdf.PdfRenderer
+import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.provider.OpenableColumns
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -15,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,9 +37,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Psychology
@@ -37,6 +52,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,6 +64,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.SuggestionChipDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -62,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
@@ -69,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import coil.compose.AsyncImage
 import com.aipaca.app.EngineState
 import com.aipaca.app.data.ChatConversationStore
 import com.aipaca.app.engine.ChatTurn
@@ -87,8 +108,11 @@ import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -191,6 +215,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    private val _generationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val generationError: SharedFlow<String> = _generationError.asSharedFlow()
+
     private val _thinkingEnabled = MutableStateFlow(true)
     val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
 
@@ -211,14 +238,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendMessage(userText: String) {
-        if (userText.isBlank()) return
+    fun sendMessage(
+        userText: String,
+        imageUri: Uri? = null,
+        documentName: String? = null,
+        documentText: String? = null
+    ) {
+        val content = buildString {
+            if (!documentText.isNullOrBlank()) append("[Document: $documentName]\n$documentText\n\n")
+            if (userText.isNotBlank()) append(userText.trim())
+        }.trim()
+        if (content.isBlank() && imageUri == null) return
+
         if (activeConversationId == null) {
             activeConversationId = UUID.randomUUID().toString()
             _activeConversationId.value = activeConversationId
         }
 
-        val userMsg      = ChatMessage(role = Role.USER, content = userText.trim())
+        val userMsg = ChatMessage(
+            role = Role.USER,
+            content = content,
+            attachedImageUri = imageUri?.toString(),
+            attachedDocumentName = documentName,
+            displayText = if (documentName != null) userText.trim().ifBlank { null } else null
+        )
         val assistantMsg = ChatMessage(role = Role.ASSISTANT, content = "")
 
         _messages.value = _messages.value + userMsg + assistantMsg
@@ -226,12 +269,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = true
 
         generationJob = viewModelScope.launch {
+            var tokenCount = 0
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
                 val thinkEnabled = _thinkingEnabled.value
 
                 EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
                     .collect { chunk ->
+                        tokenCount++
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
@@ -244,6 +289,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 last.copy(content = newContent, thinkingContent = newThinking)
                         }
                     }
+                if (tokenCount == 0) {
+                    _generationError.tryEmit("Generation failed — prompt may exceed context window")
+                }
+            } catch (e: Exception) {
+                _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
             } finally {
                 _isGenerating.value = false
                 persistCurrentConversation()
@@ -356,14 +406,85 @@ fun ChatScreen(
     val modelPath             by EngineState.modelPath.collectAsState()
     val gpuLayers             by EngineState.gpuLayers.collectAsState()
     val modelInfo             by EngineState.modelInfo.collectAsState()
+    val contextSize           by EngineState.contextSize.collectAsState()
+    // Reserve 25% of context for generation output; ~4 chars per token.
+    val docCharLimit = ((contextSize * 0.75) * 4).toInt().coerceAtLeast(2_000)
 
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
     val drawerState   = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope         = rememberCoroutineScope()
+    val context       = LocalContext.current
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var pendingModelPath       by remember { mutableStateOf<String?>(null) }
+
+    var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
+    var selectedDocumentName by remember { mutableStateOf<String?>(null) }
+    var selectedDocumentText by remember { mutableStateOf<String?>(null) }
+    var documentError        by remember { mutableStateOf<String?>(null) }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.PickVisualMedia()
+    ) { uri -> selectedImageUri = uri }
+
+    val documentPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { docUri ->
+            val name = context.contentResolver
+                .query(docUri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: "Document"
+            val extracted = try {
+                val mimeType = context.contentResolver.getType(docUri)
+                if (mimeType == "application/pdf") {
+                    if (android.os.Build.VERSION.SDK_INT >= 35) {
+                        context.contentResolver.openFileDescriptor(docUri, "r")?.use { pfd ->
+                            PdfRenderer(pfd).use { renderer ->
+                                buildString {
+                                    for (i in 0 until renderer.pageCount) {
+                                        renderer.openPage(i).use { page ->
+                                            page.textContents.forEach { block ->
+                                                append(block.text)
+                                                append(' ')
+                                            }
+                                            append('\n')
+                                        }
+                                    }
+                                }.trim().ifEmpty { null }
+                            }
+                        }
+                    } else {
+                        PDFBoxResourceLoader.init(context)
+                        context.contentResolver.openInputStream(docUri)?.use { stream ->
+                            PDDocument.load(stream).use { doc ->
+                                PDFTextStripper().getText(doc).ifEmpty { null }
+                            }
+                        }
+                    }
+                } else {
+                    context.contentResolver.openInputStream(docUri)
+                        ?.bufferedReader()?.use { it.readText() }
+                }
+            } catch (_: Exception) { null }
+
+            when {
+                extracted == null -> {
+                    documentError = "Could not read document."
+                }
+                extracted.length > docCharLimit -> {
+                    documentError = "Document too large for the current context window " +
+                        "($contextSize tokens). Load the model with a larger context or use a shorter document."
+                }
+                else -> {
+                    selectedDocumentName = name
+                    selectedDocumentText = extracted
+                }
+            }
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -375,6 +496,19 @@ fun ChatScreen(
     LaunchedEffect(lastContent) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        chatViewModel.generationError.collect { error ->
+            snackbarState.showSnackbar(error)
+        }
+    }
+
+    LaunchedEffect(documentError) {
+        documentError?.let {
+            snackbarState.showSnackbar(it)
+            documentError = null
         }
     }
 
@@ -412,14 +546,45 @@ fun ChatScreen(
                     onThinkingToggle = { chatViewModel.toggleThinking() },
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
+                    supportsAttachments  = isLoaded,
+                    supportsMultimodal   = modelInfo.supportsMultimodal && isLoaded,
+                    selectedImageUri     = selectedImageUri,
+                    selectedDocumentName = selectedDocumentName,
+                    onAttachImage = {
+                        imagePicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onAttachDocument = {
+                        documentPicker.launch(
+                            arrayOf(
+                                "text/plain", "text/markdown", "text/csv",
+                                "application/json", "text/x-markdown", "text/comma-separated-values",
+                                "application/pdf"
+                            )
+                        )
+                    },
+                    onClearAttachment = {
+                        selectedImageUri = null
+                        selectedDocumentName = null
+                        selectedDocumentText = null
+                    },
                     onSend = {
                         if (!isLoaded) {
                             scope.launch {
                                 snackbarState.showSnackbar("Please load a model first")
                             }
-                        } else if (inputText.isNotBlank()) {
-                            chatViewModel.sendMessage(inputText)
+                        } else if (inputText.isNotBlank() || selectedImageUri != null || selectedDocumentName != null) {
+                            chatViewModel.sendMessage(
+                                userText     = inputText,
+                                imageUri     = selectedImageUri,
+                                documentName = selectedDocumentName,
+                                documentText = selectedDocumentText
+                            )
                             inputText = ""
+                            selectedImageUri = null
+                            selectedDocumentName = null
+                            selectedDocumentText = null
                         }
                     },
                     onStop = { chatViewModel.stopGeneration() }
@@ -438,7 +603,7 @@ fun ChatScreen(
                     isLoadingModel = isLoadingModel,
                     gpuLayers      = gpuLayers,
                     onModelSelected = { path ->
-                        EngineState.scope.launch { EngineState.loadModel(path) }
+                        pendingModelPath = path
                     },
                     onUnload  = { EngineState.unload() },
                     onHistory = { scope.launch { drawerState.open() } }
@@ -475,6 +640,55 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    pendingModelPath?.let { path ->
+        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
+        val recommended = 1024
+        AlertDialog(
+            onDismissRequest = { pendingModelPath = null },
+            title = { Text("Context Window", style = AlpacaType.TitleMd) },
+            text = {
+                Column {
+                    Text(
+                        "Choose how many tokens the model can hold in memory at once. Larger = more document/history, but uses more RAM and is slower to start.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Muted
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    contextOptions.forEach { size ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingModelPath = null
+                                    EngineState.scope.launch {
+                                        EngineState.loadModel(path, contextSize = size)
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "$size tokens",
+                                style = AlpacaType.BodyMd,
+                                color = AlpacaColors.Text.Primary
+                            )
+                            if (size == recommended) {
+                                MonoLabel(text = "RECOMMENDED", tone = MonoLabelTone.Accent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingModelPath = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showSystemPromptDialog) {
@@ -727,10 +941,19 @@ private fun ChatInputBar(
     onThinkingToggle: () -> Unit = {},
     systemPrompt: String = "",
     onSystemPromptClick: () -> Unit = {},
+    supportsAttachments: Boolean = false,
+    supportsMultimodal: Boolean = false,
+    selectedImageUri: Uri? = null,
+    selectedDocumentName: String? = null,
+    onAttachImage: () -> Unit = {},
+    onAttachDocument: () -> Unit = {},
+    onClearAttachment: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val hasAttachment = selectedImageUri != null || selectedDocumentName != null
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -743,6 +966,40 @@ private fun ChatInputBar(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            if (hasAttachment) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (selectedImageUri != null) {
+                        AsyncImage(
+                            model              = selectedImageUri,
+                            contentDescription = "Attached image",
+                            modifier           = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                        )
+                    } else if (selectedDocumentName != null) {
+                        SuggestionChip(
+                            onClick = {},
+                            label   = { Text(selectedDocumentName, style = AlpacaType.LabelMd) },
+                            icon    = { Icon(Icons.Outlined.Description, null, Modifier.size(14.dp)) },
+                            colors  = SuggestionChipDefaults.suggestionChipColors(
+                                containerColor = AlpacaColors.Surface.Elevated
+                            )
+                        )
+                    }
+                    IconButton(onClick = onClearAttachment, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            Icons.Filled.Close,
+                            contentDescription = "Remove attachment",
+                            modifier = Modifier.size(16.dp),
+                            tint     = AlpacaColors.Text.Muted
+                        )
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value         = text,
                 onValueChange = onTextChange,
@@ -796,6 +1053,41 @@ private fun ChatInputBar(
                             onClick  = onThinkingToggle
                         )
                     }
+                    if (supportsAttachments) {
+                        Spacer(Modifier.width(4.dp))
+                        var showAttachMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(
+                                onClick  = { showAttachMenu = true },
+                                enabled  = !isGenerating,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.Add,
+                                    contentDescription = "Attach file",
+                                    tint     = AlpacaColors.Text.Muted,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded         = showAttachMenu,
+                                onDismissRequest = { showAttachMenu = false }
+                            ) {
+                                if (supportsMultimodal) {
+                                    DropdownMenuItem(
+                                        text        = { Text("Image", style = AlpacaType.BodyMd) },
+                                        leadingIcon = { Icon(Icons.Outlined.Image, null, Modifier.size(18.dp)) },
+                                        onClick     = { showAttachMenu = false; onAttachImage() }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text        = { Text("Document", style = AlpacaType.BodyMd) },
+                                    leadingIcon = { Icon(Icons.Outlined.Description, null, Modifier.size(18.dp)) },
+                                    onClick     = { showAttachMenu = false; onAttachDocument() }
+                                )
+                            }
+                        }
+                    }
                 }
 
                 if (isGenerating) {
@@ -812,7 +1104,7 @@ private fun ChatInputBar(
                 } else {
                     Button(
                         onClick = onSend,
-                        enabled = text.isNotBlank(),
+                        enabled = text.isNotBlank() || hasAttachment,
                         shape   = RoundedCornerShape(6.dp),
                         colors  = ButtonDefaults.buttonColors(
                             containerColor         = AlpacaColors.Accent.Primary,
@@ -948,11 +1240,35 @@ private fun UserMessage(
         ) {
             MonoLabel("YOU · ${currentTimeShort()}")
             Spacer(Modifier.height(6.dp))
-            Text(
-                text  = message.content,
-                style = AlpacaType.BodyLg,
-                color = AlpacaColors.Text.Primary
-            )
+            if (message.attachedImageUri != null) {
+                AsyncImage(
+                    model              = Uri.parse(message.attachedImageUri),
+                    contentDescription = "Attached image",
+                    modifier           = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+                if (message.content.isNotBlank()) Spacer(Modifier.height(8.dp))
+            } else if (message.attachedDocumentName != null) {
+                SuggestionChip(
+                    onClick = {},
+                    label   = { Text(message.attachedDocumentName, style = AlpacaType.LabelMd) },
+                    icon    = { Icon(Icons.Outlined.Description, null, Modifier.size(14.dp)) },
+                    colors  = SuggestionChipDefaults.suggestionChipColors(
+                        containerColor = AlpacaColors.Surface.Canvas
+                    )
+                )
+                if (message.content.isNotBlank()) Spacer(Modifier.height(4.dp))
+            }
+            val bubbleText = message.displayText ?: message.content
+            if (bubbleText.isNotBlank()) {
+                Text(
+                    text  = bubbleText,
+                    style = AlpacaType.BodyLg,
+                    color = AlpacaColors.Text.Primary
+                )
+            }
         }
     }
 }

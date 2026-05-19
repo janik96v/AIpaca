@@ -36,7 +36,8 @@ data class ModelInfo(
     val supportsThinking: Boolean = false,
     val thinkingStartTag: String = "",
     val thinkingEndTag: String = "",
-    val modelName: String = ""
+    val modelName: String = "",
+    val supportsMultimodal: Boolean = false
 )
 
 data class BenchResult(
@@ -63,7 +64,7 @@ interface InferenceEngine {
     suspend fun loadModel(
         modelPath: String,
         nThreads: Int    = 4,
-        contextSize: Int = 2048,
+        contextSize: Int = 1024,
         nGpuLayers: Int  = -1   // -1 = all layers; 0 = CPU only
     ): Result<Unit>
 
