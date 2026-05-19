@@ -1186,7 +1186,23 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
     if (llama_model_meta_val_str(lc->model, "general.name", name_buf, sizeof(name_buf)) >= 0) {
         json << json_escape(name_buf);
     }
-    json << "\"" << "}";
+    json << "\",";
+
+    // Detect multimodal capability by scanning GGUF metadata keys.
+    // Vision models contain keys prefixed with "vision." or "clip." that
+    // text-only models never have, making this reliable without name matching.
+    bool supports_multimodal = false;
+    int meta_count = llama_model_meta_count(lc->model);
+    for (int i = 0; i < meta_count && !supports_multimodal; i++) {
+        char key_buf[128] = {0};
+        if (llama_model_meta_key_by_index(lc->model, i, key_buf, sizeof(key_buf)) >= 0) {
+            std::string key(key_buf);
+            if (key.rfind("vision.", 0) == 0 || key.rfind("clip.", 0) == 0) {
+                supports_multimodal = true;
+            }
+        }
+    }
+    json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << "}";
     return env->NewStringUTF(json.str().c_str());
 }
 
