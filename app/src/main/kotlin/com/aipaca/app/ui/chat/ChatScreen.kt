@@ -1,8 +1,13 @@
 package com.aipaca.app.ui.chat
 
 import android.app.Application
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -103,8 +108,11 @@ import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -207,6 +215,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
+    private val _generationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val generationError: SharedFlow<String> = _generationError.asSharedFlow()
+
     private val _thinkingEnabled = MutableStateFlow(true)
     val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
 
@@ -258,12 +269,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = true
 
         generationJob = viewModelScope.launch {
+            var tokenCount = 0
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
                 val thinkEnabled = _thinkingEnabled.value
 
                 EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
                     .collect { chunk ->
+                        tokenCount++
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
@@ -276,6 +289,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 last.copy(content = newContent, thinkingContent = newThinking)
                         }
                     }
+                if (tokenCount == 0) {
+                    _generationError.tryEmit("Generation failed — prompt may exceed context window")
+                }
+            } catch (e: Exception) {
+                _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
             } finally {
                 _isGenerating.value = false
                 persistCurrentConversation()
@@ -388,6 +406,9 @@ fun ChatScreen(
     val modelPath             by EngineState.modelPath.collectAsState()
     val gpuLayers             by EngineState.gpuLayers.collectAsState()
     val modelInfo             by EngineState.modelInfo.collectAsState()
+    val contextSize           by EngineState.contextSize.collectAsState()
+    // Reserve 25% of context for generation output; ~4 chars per token.
+    val docCharLimit = ((contextSize * 0.75) * 4).toInt().coerceAtLeast(2_000)
 
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
@@ -397,10 +418,12 @@ fun ChatScreen(
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var pendingModelPath       by remember { mutableStateOf<String?>(null) }
 
     var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
     var selectedDocumentName by remember { mutableStateOf<String?>(null) }
     var selectedDocumentText by remember { mutableStateOf<String?>(null) }
+    var documentError        by remember { mutableStateOf<String?>(null) }
 
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -410,14 +433,56 @@ fun ChatScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { docUri ->
-            selectedDocumentName = context.contentResolver
+            val name = context.contentResolver
                 .query(docUri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
                 ?: "Document"
-            selectedDocumentText = try {
-                context.contentResolver.openInputStream(docUri)
-                    ?.bufferedReader()?.use { it.readText().take(50_000) }
+            val extracted = try {
+                val mimeType = context.contentResolver.getType(docUri)
+                if (mimeType == "application/pdf") {
+                    if (android.os.Build.VERSION.SDK_INT >= 35) {
+                        context.contentResolver.openFileDescriptor(docUri, "r")?.use { pfd ->
+                            PdfRenderer(pfd).use { renderer ->
+                                buildString {
+                                    for (i in 0 until renderer.pageCount) {
+                                        renderer.openPage(i).use { page ->
+                                            page.textContents.forEach { block ->
+                                                append(block.text)
+                                                append(' ')
+                                            }
+                                            append('\n')
+                                        }
+                                    }
+                                }.trim().ifEmpty { null }
+                            }
+                        }
+                    } else {
+                        PDFBoxResourceLoader.init(context)
+                        context.contentResolver.openInputStream(docUri)?.use { stream ->
+                            PDDocument.load(stream).use { doc ->
+                                PDFTextStripper().getText(doc).ifEmpty { null }
+                            }
+                        }
+                    }
+                } else {
+                    context.contentResolver.openInputStream(docUri)
+                        ?.bufferedReader()?.use { it.readText() }
+                }
             } catch (_: Exception) { null }
+
+            when {
+                extracted == null -> {
+                    documentError = "Could not read document."
+                }
+                extracted.length > docCharLimit -> {
+                    documentError = "Document too large for the current context window " +
+                        "($contextSize tokens). Load the model with a larger context or use a shorter document."
+                }
+                else -> {
+                    selectedDocumentName = name
+                    selectedDocumentText = extracted
+                }
+            }
         }
     }
 
@@ -431,6 +496,19 @@ fun ChatScreen(
     LaunchedEffect(lastContent) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        chatViewModel.generationError.collect { error ->
+            snackbarState.showSnackbar(error)
+        }
+    }
+
+    LaunchedEffect(documentError) {
+        documentError?.let {
+            snackbarState.showSnackbar(it)
+            documentError = null
         }
     }
 
@@ -481,7 +559,8 @@ fun ChatScreen(
                         documentPicker.launch(
                             arrayOf(
                                 "text/plain", "text/markdown", "text/csv",
-                                "application/json", "text/x-markdown", "text/comma-separated-values"
+                                "application/json", "text/x-markdown", "text/comma-separated-values",
+                                "application/pdf"
                             )
                         )
                     },
@@ -524,7 +603,7 @@ fun ChatScreen(
                     isLoadingModel = isLoadingModel,
                     gpuLayers      = gpuLayers,
                     onModelSelected = { path ->
-                        EngineState.scope.launch { EngineState.loadModel(path) }
+                        pendingModelPath = path
                     },
                     onUnload  = { EngineState.unload() },
                     onHistory = { scope.launch { drawerState.open() } }
@@ -561,6 +640,55 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    pendingModelPath?.let { path ->
+        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
+        val recommended = 1024
+        AlertDialog(
+            onDismissRequest = { pendingModelPath = null },
+            title = { Text("Context Window", style = AlpacaType.TitleMd) },
+            text = {
+                Column {
+                    Text(
+                        "Choose how many tokens the model can hold in memory at once. Larger = more document/history, but uses more RAM and is slower to start.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Muted
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    contextOptions.forEach { size ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingModelPath = null
+                                    EngineState.scope.launch {
+                                        EngineState.loadModel(path, contextSize = size)
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "$size tokens",
+                                style = AlpacaType.BodyMd,
+                                color = AlpacaColors.Text.Primary
+                            )
+                            if (size == recommended) {
+                                MonoLabel(text = "RECOMMENDED", tone = MonoLabelTone.Accent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingModelPath = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showSystemPromptDialog) {

@@ -348,7 +348,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
     // Context params
     llama_context_params cparams   = llama_context_default_params();
     cparams.n_ctx                  = static_cast<uint32_t>(nCtx);
-    cparams.n_batch                = std::min<uint32_t>(512, static_cast<uint32_t>(nCtx));
+    cparams.n_batch                = static_cast<uint32_t>(nCtx);  // must fit full prompt
     cparams.n_ubatch               = std::min<uint32_t>(512, cparams.n_batch);
     cparams.n_threads              = static_cast<uint32_t>(nThreads);
     cparams.n_threads_batch        = static_cast<uint32_t>(nThreads);
@@ -735,12 +735,19 @@ static void run_generate(
         return;
     }
     tokens.resize(n_tokens);
-    LOGI("Prompt tokenised: %d tokens (n_batch=%u n_ubatch=%u)",
-         n_tokens, llama_n_batch(lc->ctx), llama_n_ubatch(lc->ctx));
+    LOGI("Prompt tokenised: %d tokens (n_ctx=%u n_batch=%u n_ubatch=%u)",
+         n_tokens, llama_n_ctx(lc->ctx), llama_n_batch(lc->ctx), llama_n_ubatch(lc->ctx));
 
-    if ((uint32_t)n_tokens > llama_n_batch(lc->ctx)) {
-        LOGW("Prompt tokens (%d) exceed n_batch (%u); llama.cpp may reject this request. Reduce history or raise n_batch.",
-             n_tokens, llama_n_batch(lc->ctx));
+    // Hard-truncate to context window, keeping the most recent tokens (tail of prompt).
+    // Reserve ~10% for generation output, minimum 64 tokens.
+    const uint32_t n_ctx   = llama_n_ctx(lc->ctx);
+    const uint32_t reserve = std::max<uint32_t>(64u, n_ctx / 10u);
+    const uint32_t max_prompt_tokens = n_ctx > reserve ? n_ctx - reserve : n_ctx;
+    if ((uint32_t)n_tokens > max_prompt_tokens) {
+        LOGW("Prompt tokens (%d) exceed limit (%u / ctx=%u); truncating from the front.",
+             n_tokens, max_prompt_tokens, n_ctx);
+        tokens.erase(tokens.begin(), tokens.begin() + (n_tokens - (int)max_prompt_tokens));
+        n_tokens = (int)max_prompt_tokens;
     }
 
     jclass cbClass = env->GetObjectClass(tokenCallback);
@@ -1196,7 +1203,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
         char key_buf[128] = {0};
         if (llama_model_meta_key_by_index(lc->model, i, key_buf, sizeof(key_buf)) >= 0) {
             std::string key(key_buf);
-            LOGD("GGUF key[%d]: %s", i, key.c_str());
+            LOGI("GGUF key[%d]: %s", i, key.c_str());
             if (!supports_multimodal && (
                 key.rfind("vision.", 0) == 0 ||
                 key.rfind("clip.",   0) == 0 ||
@@ -1209,6 +1216,8 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
             }
         }
     }
+
+
     json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << "}";
     return env->NewStringUTF(json.str().c_str());
 }
