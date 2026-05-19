@@ -36,7 +36,8 @@ data class ModelInfo(
     val supportsThinking: Boolean = false,
     val thinkingStartTag: String = "",
     val thinkingEndTag: String = "",
-    val modelName: String = ""
+    val modelName: String = "",
+    val supportsMultimodal: Boolean = false
 )
 
 data class BenchResult(

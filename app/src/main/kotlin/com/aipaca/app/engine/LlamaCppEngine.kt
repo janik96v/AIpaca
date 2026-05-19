@@ -351,6 +351,11 @@ class LlamaCppEngine : InferenceEngine {
             val supportsThinking = json.contains("\"supportsThinking\":true")
             val thinkingStartTag = Regex("\"thinkingStartTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
             val thinkingEndTag = Regex("\"thinkingEndTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            val supportsMultimodal = modelName.lowercase().let { n ->
+                n.contains("gemma-4") || n.contains("gemma4") ||
+                n.contains("llava") || n.contains("bakllava") ||
+                n.contains("minicpm-v") || n.contains("qwen2-vl") || n.contains("qwen2.5-vl")
+            }
 
             ModelInfo(
                 quant = quant,
@@ -362,7 +367,8 @@ class LlamaCppEngine : InferenceEngine {
                 supportsThinking = supportsThinking,
                 thinkingStartTag = thinkingStartTag,
                 thinkingEndTag = thinkingEndTag,
-                modelName = modelName
+                modelName = modelName,
+                supportsMultimodal = supportsMultimodal
             )
         } catch (e: Exception) {
             Log.w(TAG, "getModelInfo failed", e)
