@@ -468,6 +468,7 @@ fun ChatScreen(
                     onThinkingToggle = { chatViewModel.toggleThinking() },
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
+                    supportsAttachments  = isLoaded,
                     supportsMultimodal   = modelInfo.supportsMultimodal && isLoaded,
                     selectedImageUri     = selectedImageUri,
                     selectedDocumentName = selectedDocumentName,
@@ -812,6 +813,7 @@ private fun ChatInputBar(
     onThinkingToggle: () -> Unit = {},
     systemPrompt: String = "",
     onSystemPromptClick: () -> Unit = {},
+    supportsAttachments: Boolean = false,
     supportsMultimodal: Boolean = false,
     selectedImageUri: Uri? = null,
     selectedDocumentName: String? = null,
@@ -923,7 +925,7 @@ private fun ChatInputBar(
                             onClick  = onThinkingToggle
                         )
                     }
-                    if (supportsMultimodal) {
+                    if (supportsAttachments) {
                         Spacer(Modifier.width(4.dp))
                         var showAttachMenu by remember { mutableStateOf(false) }
                         Box {
@@ -940,18 +942,20 @@ private fun ChatInputBar(
                                 )
                             }
                             DropdownMenu(
-                                expanded        = showAttachMenu,
+                                expanded         = showAttachMenu,
                                 onDismissRequest = { showAttachMenu = false }
                             ) {
+                                if (supportsMultimodal) {
+                                    DropdownMenuItem(
+                                        text        = { Text("Image", style = AlpacaType.BodyMd) },
+                                        leadingIcon = { Icon(Icons.Outlined.Image, null, Modifier.size(18.dp)) },
+                                        onClick     = { showAttachMenu = false; onAttachImage() }
+                                    )
+                                }
                                 DropdownMenuItem(
-                                    text          = { Text("Image", style = AlpacaType.BodyMd) },
-                                    leadingIcon   = { Icon(Icons.Outlined.Image, null, Modifier.size(18.dp)) },
-                                    onClick       = { showAttachMenu = false; onAttachImage() }
-                                )
-                                DropdownMenuItem(
-                                    text          = { Text("Document", style = AlpacaType.BodyMd) },
-                                    leadingIcon   = { Icon(Icons.Outlined.Description, null, Modifier.size(18.dp)) },
-                                    onClick       = { showAttachMenu = false; onAttachDocument() }
+                                    text        = { Text("Document", style = AlpacaType.BodyMd) },
+                                    leadingIcon = { Icon(Icons.Outlined.Description, null, Modifier.size(18.dp)) },
+                                    onClick     = { showAttachMenu = false; onAttachDocument() }
                                 )
                             }
                         }
