@@ -3,3 +3,9 @@
     url = https://github.com/janik96v/llama.cpp.git
     shallow = true
     branch = aipaca/android-vulkan-build
+[submodule "app/src/main/cpp/whisper.cpp"]
+	path = app/src/main/cpp/whisper.cpp
+	url = https://github.com/ggerganov/whisper.cpp.git
+[submodule "app/src/main/cpp/stable-diffusion.cpp"]
+	path = app/src/main/cpp/stable-diffusion.cpp
+	url = https://github.com/leejet/stable-diffusion.cpp.git
