@@ -28,7 +28,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeLoadWhisperModel(
     LOGI("loading model from %s", path.c_str());
 
     struct whisper_context_params cparams = whisper_context_default_params();
-    cparams.use_gpu = false;  // CPU-only; GPU path needs Vulkan, AIpaca uses OpenCL
+    cparams.use_gpu = false;  // OpenCL lacks CONV_1D/IM2COL — whisper encoder produces silent zero output; CPU only
 
     whisper_context* ctx = whisper_init_from_file_with_params(path.c_str(), cparams);
     if (ctx == nullptr) {

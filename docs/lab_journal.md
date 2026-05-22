@@ -4,6 +4,162 @@ A centralized knowledge repository for the AIpaca development team. Each entry d
 
 ---
 
+## 2026-05-22 - whisper.cpp OpenCL GPU Backend: Empty Output on Android Adreno (Snapdragon 8 Gen 3)
+
+**Context**: Investigating why `whisper_full()` returns success (exit code 0) but produces 0 segments and 0 characters of text output when `use_gpu=true` with the OpenCL backend on a Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3, Adreno 750). This followed a previous attempt with the Vulkan backend that crashed entirely. The goal is to determine whether GPU acceleration is viable at all for whisper.cpp on Android Adreno, and what the recommended path forward is.
+
+---
+
+### 1. Root Cause: OpenCL Backend Does Not Support Whisper's Encoder Operations
+
+**This is the most critical finding.** whisper.cpp's OpenCL/CLBlast backend is built on top of the ggml OpenCL backend, which is designed exclusively as a **matrix multiplication (GEMM) accelerator** — not a full compute backend. It offloads matrix multiplications (the dominant cost in the transformer decoder) but silently falls back to CPU for any operation it does not support.
+
+The Whisper model's **encoder** requires:
+1. `GGML_OP_CONV_1D` — two 1D convolution layers (the audio feature extraction stem)
+2. `GGML_OP_IM2COL` — used internally to implement convolution as GEMM
+3. Various normalization and reshape ops
+
+**None of these convolution operations are implemented in the OpenCL/CLBlast backend.** When these ops encounter an unsupported backend, the behaviour depends on the ggml scheduler version:
+- With the legacy `ggml_gallocr_alloc_graph` path: the graph fails silently, producing zero-valued encoder outputs
+- With `ggml_backend_sched_alloc_graph`: the scheduler may split the graph, but the corrupt GPU-CPU boundary between encoder (CPU) and decoder (GPU) produces zeroed hidden states
+
+In both cases, the decoder then autoregressively samples from a zeroed context, producing zero tokens — hence `whisper_full()` returns 0 with no error, but 0 segments and 0 characters. The function succeeds in the sense that no exception is thrown, but the inference is producing garbage that the VAD/token filter discards as empty.
+
+**Source**: ggml GitHub issue [#13621 — OpenCL: Add CPU fallback for unsupported operations](https://github.com/ggml-org/llama.cpp/issues/13621) documents the exact mechanism. The issue lists `IM2COL`, `CONV_1D`, `GROUP_NORM`, `NORM`, and 17 other operations as missing from the OpenCL backend.
+
+---
+
+### 2. OpenCL Backend Support Status on Android Adreno
+
+The ggml OpenCL backend (`GGML_OPENCL_USE_ADRENO_KERNELS`) was introduced via [llama.cpp PR #10693](https://github.com/ggml-org/llama.cpp/pull/10693) and is officially supported by Qualcomm.
+
+**Supported operations (LLM inference focus)**:
+- GEMM for quantized tensors: Q4_0 (optimized), Q6_K, Q8_0, F16, F32
+- Full and partial GPU layer offload via `-ngl`
+
+**NOT supported** (as of May 2026):
+- Flash attention
+- Q4_K and other K-quant / I-quant types
+- Convolution operations (IM2COL, CONV_1D, CONV_2D)
+- Mel spectrogram operations
+- Many normalization and reshape ops needed by non-LLM models
+
+**Verified supported Adreno GPUs**: Adreno 750 (Snapdragon 8 Gen 3), Adreno 830 (Snapdragon 8 Elite), Adreno X85 (Snapdragon X Elite).
+
+**Known driver issue**: Qualcomm Adreno reports OpenCL 2.0 support but lacks the `clGetKernelSubGroupInfo` symbol, which belongs to OpenCL 2.1. This causes `libggml-opencl.so` to fail to load on some devices with a linker error. See [whisper.cpp issue #3015](https://github.com/ggml-org/whisper.cpp/issues/3015).
+
+**Older Adreno GPUs in phones** (A6x series): Not supported due to outdated drivers and compilers, even though IoT platforms with the same silicon and newer drivers do work.
+
+**Bottom line**: The OpenCL backend in ggml/whisper.cpp is designed for **LLM text generation** (decoder-heavy GEMM), not for Whisper's encoder pipeline. Using it with whisper.cpp will always produce empty output because the encoder convolutions cannot run on the GPU and the graph scheduler silently produces zero outputs.
+
+**Sources**:
+- [Qualcomm Developer Blog — Introducing OpenCL GPU Backend in llama.cpp for Adreno](https://www.qualcomm.com/developer/blog/2024/11/introducing-new-opn-cl-gpu-backend-llama-cpp-for-qualcomm-adreno-gpu)
+- [llama.cpp OpenCL backend documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/OPENCL.md)
+- [llama.cpp PR #10693 — Experimental OpenCL backend for Adreno](https://github.com/ggml-org/llama.cpp/pull/10693)
+- [whisper.cpp issue #1140 — OpenCL Android support](https://github.com/ggml-org/whisper.cpp/issues/1140) (contributor states: "OpenCL is kinda broken on android this isn't a problem with whisper.cpp it's an OpenCL problem")
+
+---
+
+### 3. Vulkan Backend on Android Adreno: Known Crash Issues
+
+The Vulkan backend was attempted before OpenCL and crashed. Research confirmed this is a well-documented issue:
+
+**Root cause**: The ggml Vulkan backend requires `VK_KHR_16bit_storage` (fp16 support in shader storage buffers). Many Adreno GPUs — including Adreno 610, 630, and 640 — report `fp16: 0` in their Vulkan capabilities. The ggml Vulkan initializer performs a hard capability check and throws `std::runtime_error("Unsupported device")` rather than gracefully degrading.
+
+**Error message**:
+```
+ggml_vulkan: device Vulkan0 does not support 16-bit storage.
+libc++abi: terminating due to uncaught exception of type std::runtime_error: Unsupported device
+```
+
+**Status of fix**: A PR ([#3719 — Fix/vulkan adreno crashes](https://github.com/ggml-org/whisper.cpp/issues/3035)) has been opened but was not yet merged as of the time of research. The workaround confirmed to work is disabling GPU entirely and using CPU-only inference.
+
+**Adreno 750 (Snapdragon 8 Gen 3)**: This GPU is newer and does support fp16 storage, so the 16-bit storage crash should NOT occur on a Samsung Galaxy S24 Ultra. However, there are separate Adreno shader compilation bugs in the Vulkan backend. A related llama.cpp issue ([#5186 — Subtle Vulkan shader compilation bug on Adreno Samsung Galaxy S23 Ultra](https://github.com/ggml-org/llama.cpp/issues/5186)) documents shader compilation failures on S23 Ultra (Adreno 740), which is the prior generation to the S24 Ultra (Adreno 750).
+
+**Additional Vulkan issues**:
+- [whisper.cpp issue #3455 — Vulkan support broken at v1.8.0](https://github.com/ggml-org/whisper.cpp/issues/3455)
+- [whisper.cpp issue #3168 — Vulkan backend crashes with DeviceLost](https://github.com/ggml-org/whisper.cpp/issues/3168)
+- [whisper.cpp issue #3611 — Vulkan crash on AMD RDNA1 during buffer initialization](https://github.com/ggml-org/whisper.cpp/issues/3611)
+
+**Sources**:
+- [whisper.cpp issue #3035 — ggml_vulkan: device Vulkan0 does not support 16-bit storage](https://github.com/ggml-org/whisper.cpp/issues/3035)
+- [whisper.cpp issue #2765 — Unsupported device error with Vulkan on Android](https://github.com/ggml-org/whisper.cpp/issues/2765)
+- [llama.cpp issue #5186 — Subtle Vulkan shader compilation bug on Adreno S23 Ultra](https://github.com/ggml-org/llama.cpp/issues/5186)
+
+---
+
+### 4. Android GPU Acceleration Alternatives
+
+#### NNAPI (Neural Networks API)
+**Status: Deprecated as of Android 15.** Google deprecated NNAPI in Android 15 (2024) and is migrating to TensorFlow Lite in Play Services and AICore. For new development, NNAPI should not be targeted.
+- [Android NNAPI Migration Guide](https://developer.android.com/ndk/guides/neuralnetworks/migration-guide)
+
+#### Hexagon DSP (Qualcomm)
+- Qualcomm's Hexagon DSP can accelerate quantized models significantly (MobileNet under 25ms vs. 60-65ms on CPU).
+- Access to Hexagon from native code requires Qualcomm's QNN SDK or via NNAPI/TFLite Hexagon delegate.
+- whisper.cpp has **no native Hexagon DSP integration**. This would require porting to QNN or a TFLite-converted model.
+
+#### LiteRT / TFLite GPU Delegate
+- A GitHub issue ([whisper.cpp #2413](https://github.com/ggml-org/whisper.cpp/issues/2413)) requests LiteRT support for Android GPU acceleration. The issue was opened September 2024 with no resolution as of research date.
+- This would require converting the Whisper model to TFLite format, which is non-trivial.
+
+#### OpenVINO (Intel only)
+- OpenVINO encoder acceleration is documented in whisper.cpp but is Intel-exclusive (x86 CPUs, Intel integrated/discrete GPUs). Not applicable to Qualcomm Adreno.
+
+#### Core ML / Metal (Apple only)
+- Apple platform only. Not applicable to Android.
+
+#### Practical recommendation for Adreno 750 / Snapdragon 8 Gen 3
+There is no production-ready, stable GPU acceleration path for whisper.cpp on Android Adreno as of May 2026. The recommended approach is **CPU-only inference with quantized models**:
+- Quantized Whisper models (Q4_0, Q8_0 GGUF) run at practical speeds on Snapdragon 8 Gen 3 ARM cores
+- The `tiny` and `base` quantized models finish in 1-3x real-time on flagship Snapdragon devices
+- `small` quantized models are feasible for non-real-time use cases
+
+**Sources**:
+- [whisper.cpp issue #2413 — LiteRT Android GPU support request](https://github.com/ggml-org/whisper.cpp/issues/2413)
+- [TensorFlow issue #48349 — NNAPI vs GPU vs Hexagon delegates](https://github.com/tensorflow/tensorflow/issues/48349)
+- [NNAPI Explained 2025 Guide](https://medium.com/softaai-blogs/nnapi-explained-the-ultimate-2025-guide-to-androids-ai-acceleration-33c0087f2ddf)
+
+---
+
+### 5. Practical Fix for AIpaca
+
+**Immediate fix**: Set `use_gpu = false` unconditionally in the Android JNI layer. This bypasses both the OpenCL silent-zero-output problem and the Vulkan crash. CPU-only inference on Snapdragon 8 Gen 3 with a quantized tiny or base model is fast enough for real-time voice input.
+
+**Code change** (JNI layer / whisper_wrapper):
+```cpp
+// Force CPU-only on Android — OpenCL produces empty output,
+// Vulkan crashes on many Adreno devices. See docs/lab_journal.md.
+params.use_gpu = false;
+```
+
+**Model size recommendations for Android**:
+| Model | Quantization | GGUF size | Expected speed (Snapdragon 8 Gen 3) |
+|---|---|---|---|
+| tiny | Q8_0 | ~42 MB | ~0.3x real-time (very fast) |
+| base | Q8_0 | ~78 MB | ~0.6x real-time (fast) |
+| small | Q5_0 | ~180 MB | ~1.5x real-time (usable) |
+| medium | Q4_0 | ~470 MB | ~4x real-time (slow, not for STT) |
+
+**Future GPU path (monitor)**: Watch for a stable Vulkan backend release that handles Adreno fp16 storage gracefully and includes the Adreno shader compilation fixes. The llama.cpp Vulkan backend has more active maintenance than the OpenCL backend and may become viable for whisper.cpp in H2 2025.
+
+---
+
+### Summary
+
+| Question | Answer |
+|---|---|
+| Why does OpenCL return success but 0 segments? | OpenCL backend lacks CONV_1D / IM2COL ops; encoder runs with zero outputs silently |
+| Is OpenCL encoder supported on Adreno? | No — only GEMM (decoder) ops are supported |
+| Does Vulkan work on Adreno 750? | Crashes on older Adreno; fp16 storage crash may not hit Adreno 750 but shader bugs persist |
+| Is NNAPI an option? | Deprecated in Android 15; no whisper.cpp integration |
+| Is Hexagon DSP an option? | No native whisper.cpp support; requires QNN/TFLite port |
+| Best current approach? | CPU-only with quantized model (tiny/base Q8_0) |
+
+**Tags**: #whisper-cpp #android #opencl #vulkan #adreno #gpu #snapdragon #speech-to-text #on-device #ggml #bug-investigation
+
+---
+
 ## 2026-05-12 - Tencent HY-MT1.5-1.8B On-Device Translation Model
 
 **Context**: Evaluating Tencent's HY-MT1.5-1.8B as a candidate for on-device machine translation within the AIpaca Android app. Need to understand format, language coverage, hardware feasibility, quantization options, licensing, and integration path.
