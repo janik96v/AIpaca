@@ -423,6 +423,7 @@ private fun WhisperModelSection(
     onModelSelected: (String) -> Unit,
     onUnload: () -> Unit
 ) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -436,6 +437,13 @@ private fun WhisperModelSection(
                     "from ggerganov/whisper.cpp (tiny, base, or small recommended for edge hardware).",
             style = AlpacaType.BodySm,
             color = AlpacaColors.Text.Muted
+        )
+        InlineCTA(
+            text    = "Browse models on Hugging Face",
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/ggerganov/whisper.cpp/tree/main"))
+                context.startActivity(intent)
+            }
         )
         Spacer(Modifier.height(4.dp))
 
