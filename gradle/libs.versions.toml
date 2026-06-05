@@ -12,6 +12,7 @@ androidxNavigationCompose = "2.8.3"
 coilCompose = "2.7.0"
 androidxSecurityCrypto = "1.1.0-alpha06"
 zxingCore = "3.5.3"
+pdfboxAndroid = "2.0.27.0"
 
 [libraries]
 # AndroidX Core
@@ -48,6 +49,7 @@ ktor-server-status-pages = { group = "io.ktor", name = "ktor-server-status-pages
 # Security
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "androidxSecurityCrypto" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
 
 # Kotlinx
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }

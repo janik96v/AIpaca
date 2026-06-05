@@ -87,6 +87,9 @@ object EngineState {
     private val _modelInfo = MutableStateFlow(ModelInfo())
     val modelInfo: StateFlow<ModelInfo> = _modelInfo.asStateFlow()
 
+    private val _contextSize = MutableStateFlow(1024)
+    val contextSize: StateFlow<Int> = _contextSize.asStateFlow()
+
     private val _lastBenchmark = MutableStateFlow(BenchResult())
     val lastBenchmark: StateFlow<BenchResult> = _lastBenchmark.asStateFlow()
 
@@ -118,7 +121,7 @@ object EngineState {
     suspend fun loadModel(
         path: String,
         nThreads: Int    = Runtime.getRuntime().availableProcessors().coerceAtMost(6),
-        contextSize: Int = 2048,
+        contextSize: Int = 1024,
         nGpuLayers: Int  = -1   // -1 = all layers (full GPU offload)
     ): Result<Unit> {
         _errorMessage.value = null
@@ -129,6 +132,7 @@ object EngineState {
         _modelInfo.value    = ModelInfo()
 
         Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
+        _contextSize.value = contextSize
         return try {
             val result = engine.loadModel(path, nThreads, contextSize, nGpuLayers)
 
