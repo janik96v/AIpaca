@@ -4,6 +4,76 @@ A centralized knowledge repository for the AIpaca development team. Each entry d
 
 ---
 
+## 2026-06-05 - Vulkan Backend Experiment: llama.cpp + whisper.cpp on Adreno 750
+
+**Device**: Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3, Adreno 750)
+**Objective**: Replace OpenCL with Vulkan for both llama.cpp and whisper.cpp to enable GPU-accelerated Whisper transcription (OpenCL lacks the CONV_1D/IM2COL ops required by the Whisper encoder — see 2026-05-22 entry).
+**Outcome**: Both engines fell back to CPU. Reverted all changes.
+
+---
+
+### What Was Done
+
+The build was migrated from OpenCL to Vulkan across 4 files:
+
+- `CMakeLists.txt` — removed OpenCL FetchContent/stub setup, added Vulkan with NDK-bundled `glslc`, swapped `OpenCL::OpenCL` → `Vulkan::Vulkan`
+- `build.gradle.kts` — replaced `-DGGML_OPENCL=ON` / `-DGGML_OPENCL_USE_ADRENO_KERNELS=ON` with `-DGGML_VULKAN=ON`
+- `AndroidManifest.xml` — swapped `libOpenCL.so` → `libvulkan.so`
+- `whisper_jni.cpp` — set `cparams.use_gpu = true`
+
+Two additional headers had to be fetched via FetchContent because the NDK does not bundle them:
+- `vulkan.hpp` (Vulkan C++ bindings) — KhronosGroup/Vulkan-Hpp v1.3.275
+- `SPIRV-Headers` — KhronosGroup/SPIRV-Headers vulkan-sdk-1.4.304.1
+
+The build succeeded after resolving both missing header errors.
+
+---
+
+### Results
+
+**LLM (llama.cpp)**:
+```
+LlamaCppEngine  Probing GPU backend...
+LlamaCppEngine  GPU probe FAILED — backend crash detected. Reloading in CPU-only mode.
+LlamaCppEngine  Model loaded in CPU-only fallback mode
+LlamaCppEngine  activeGpuLayers=0
+```
+The Vulkan backend initializes (Adreno driver loads, `AdrenoVK-0` appears in logcat) but the GPU probe crashes during model load. llama.cpp's built-in GPU probe catches the crash and falls back to CPU. The LLM was faster on OpenCL than on Vulkan CPU fallback.
+
+**Whisper**:
+```
+AIpacaWhisper  transcribing 27200 samples (1.7 s)
+AIpacaWhisper  transcription done (7 chars): najwię
+```
+1.7 seconds of audio took 10.4 seconds to transcribe — consistent with CPU speed, not GPU. Output was garbled (`"Who are you?"` → `"najwię"`), indicating the same numerical precision corruption seen with OpenCL, just less severe (partial output instead of empty). GPU was not actually used despite `use_gpu = true`.
+
+---
+
+### Root Cause Analysis
+
+The Vulkan backend initializes at the driver level but the GGML compute graph scheduler fails to dispatch whisper's encoder graph to the GPU. This is the same fundamental problem as OpenCL: the GGML GPU backends were designed and optimized for LLM decoder workloads (GEMM-heavy). The Whisper encoder's graph (1D convolutions, specific attention patterns) does not map cleanly to the Vulkan shader pipeline as implemented in this version of ggml.
+
+The GPU probe crash for llama.cpp is a separate issue — likely a shader compilation failure or a Vulkan extension mismatch at model-load time on the Adreno 750 driver version in use (`0762.39`, build date 06/20/25).
+
+---
+
+### Conclusion
+
+| Engine | Backend | Result |
+|--------|---------|--------|
+| llama.cpp | Vulkan | GPU probe crash → CPU fallback. **Worse than OpenCL.** |
+| whisper | Vulkan (`use_gpu=true`) | CPU fallback, garbled output. **Worse than CPU-only.** |
+| llama.cpp | OpenCL (reverted to) | GPU working. **Best available.** |
+| whisper | CPU-only (reverted to) | Correct output. **Only reliable path.** |
+
+**Decision**: Reverted all changes with `git checkout -- .`. Back to OpenCL for LLM + CPU-only for whisper.
+
+**Future**: The Vulkan GPU probe crash for llama.cpp warrants a separate investigation when time allows. It may be a fixable driver/extension issue. Monitor llama.cpp Vulkan backend progress for Adreno — the backend is more actively maintained than OpenCL and may become viable in a future release.
+
+**Tags**: #vulkan #opencl #android #adreno #llama-cpp #whisper-cpp #gpu #snapdragon #experiment #failed
+
+---
+
 ## 2026-05-22 - whisper.cpp OpenCL GPU Backend: Empty Output on Android Adreno (Snapdragon 8 Gen 3)
 
 **Context**: Investigating why `whisper_full()` returns success (exit code 0) but produces 0 segments and 0 characters of text output when `use_gpu=true` with the OpenCL backend on a Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3, Adreno 750). This followed a previous attempt with the Vulkan backend that crashed entirely. The goal is to determine whether GPU acceleration is viable at all for whisper.cpp on Android Adreno, and what the recommended path forward is.
