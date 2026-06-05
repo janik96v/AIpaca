@@ -6,6 +6,15 @@
     native <methods>;
 }
 
+# whisper.cpp JNI bridge
+-keep class com.aipaca.app.engine.WhisperEngine { *; }
+-keepclassmembers class com.aipaca.app.engine.WhisperEngine {
+    native <methods>;
+}
+
+# Whisper model path persistence
+-keep class com.aipaca.app.data.WhisperModelPrefs { *; }
+
 # Keep TokenCallback — called from C++ via JNI
 -keep interface com.aipaca.app.engine.TokenCallback { *; }
 -keepclassmembers interface com.aipaca.app.engine.TokenCallback {

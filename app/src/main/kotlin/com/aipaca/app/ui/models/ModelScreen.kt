@@ -24,23 +24,30 @@ import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.aipaca.app.EngineState
 import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.components.EditorialDivider
 import com.aipaca.app.ui.components.EditorialMasthead
+import com.aipaca.app.ui.components.EditorialSectionMark
 import com.aipaca.app.ui.components.InlineCTA
+import com.aipaca.app.ui.components.ModelPickerButton
 import com.aipaca.app.ui.components.MonoLabel
 import com.aipaca.app.ui.components.MonoLabelTone
 import com.aipaca.app.ui.components.StatusChip
+import kotlinx.coroutines.launch
 import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
@@ -115,7 +122,11 @@ private val recommendedModels = listOf(
 
 @Composable
 fun ModelScreen(modifier: Modifier = Modifier) {
-    val scrollState = rememberScrollState()
+    val scrollState     = rememberScrollState()
+    val scope           = rememberCoroutineScope()
+    val whisperPath     by EngineState.whisperModelPath.collectAsState()
+    val isLoadingWhisper by EngineState.isLoadingWhisperModel.collectAsState()
+    val whisperError    by EngineState.whisperError.collectAsState()
 
     Column(
         modifier = modifier
@@ -126,6 +137,22 @@ fun ModelScreen(modifier: Modifier = Modifier) {
         EditorialMasthead(
             title = "Models.",
             meta  = "CURATED LIBRARY · ${recommendedModels.size} ENTRIES"
+        )
+
+        // ---- Whisper STT section ----
+        WhisperModelSection(
+            whisperPath      = whisperPath,
+            isLoading        = isLoadingWhisper,
+            errorMessage     = whisperError,
+            onModelSelected  = { path ->
+                scope.launch { EngineState.loadWhisperModel(path) }
+            },
+            onUnload         = { EngineState.unloadWhisper() }
+        )
+
+        EditorialDivider(
+            color    = AlpacaColors.Line.Subtle,
+            modifier = Modifier.padding(horizontal = 24.dp)
         )
 
         Spacer(Modifier.height(16.dp))
@@ -383,6 +410,69 @@ private fun DetailRow(
             style = AlpacaType.BodyMd,
             color = AlpacaColors.Text.Body
         )
+    }
+}
+
+// ---- Whisper model section --------------------------------------------------
+
+@Composable
+private fun WhisperModelSection(
+    whisperPath: String?,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onModelSelected: (String) -> Unit,
+    onUnload: () -> Unit
+) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        EditorialSectionMark(label = "SPEECH · WHISPER STT")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text  = "On-device speech-to-text via whisper.cpp. Download a .bin model " +
+                    "from ggerganov/whisper.cpp (tiny, base, or small recommended for edge hardware).",
+            style = AlpacaType.BodySm,
+            color = AlpacaColors.Text.Muted
+        )
+        InlineCTA(
+            text    = "Browse models on Hugging Face",
+            onClick = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://huggingface.co/ggerganov/whisper.cpp/tree/main"))
+                context.startActivity(intent)
+            }
+        )
+        Spacer(Modifier.height(4.dp))
+
+        val (statusText, statusTone) = when {
+            isLoading    -> "WHISPER · LOADING…" to MonoLabelTone.Warning
+            whisperPath != null -> "WHISPER · ${whisperPath.substringAfterLast('/').uppercase()} · READY" to MonoLabelTone.Accent
+            else         -> "NO WHISPER MODEL LOADED" to MonoLabelTone.Muted
+        }
+        MonoLabel(text = statusText, tone = statusTone)
+
+        errorMessage?.let {
+            Text(text = it, style = AlpacaType.BodySm, color = AlpacaColors.State.Error)
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            ModelPickerButton(
+                label           = if (whisperPath != null) "Change Whisper model" else "Load Whisper model",
+                onModelSelected = onModelSelected,
+                isLoading       = isLoading
+            )
+            if (whisperPath != null && !isLoading) {
+                TextButton(onClick = onUnload) {
+                    Text("Unload", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            }
+        }
     }
 }
 
