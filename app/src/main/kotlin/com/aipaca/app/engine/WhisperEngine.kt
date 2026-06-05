@@ -14,10 +14,17 @@ private const val TAG = "WhisperEngine"
  * llama_jni.cpp, so no additional System.loadLibrary call is needed.
  *
  * Lifecycle: loadModel → transcribe (repeatable) → unload
+ *
+ * GPU acceleration: the model is loaded with GPU enabled by default.
+ * A probe runs a short silent buffer through the full encoder pipeline.
+ * If the GPU backend crashes (SIGSEGV/SIGBUS) or returns an error,
+ * the model is automatically reloaded in CPU-only mode.
  */
 class WhisperEngine {
 
-    private external fun nativeLoadWhisperModel(modelPath: String): Long
+    private external fun nativeLoadWhisperModel(modelPath: String, useGpu: Boolean): Long
+    private external fun nativeProbeWhisperGpu(ctxPtr: Long): Boolean
+    private external fun nativeReloadWhisperCpuOnly(ctxPtr: Long): Long
     private external fun nativeTranscribe(ctxPtr: Long, samples: FloatArray, nSamples: Int): String?
     private external fun nativeGetLanguage(ctxPtr: Long): String
     private external fun nativeFreeWhisperModel(ctxPtr: Long)
@@ -26,23 +33,52 @@ class WhisperEngine {
 
     val isLoaded: Boolean get() = contextPtr.get() != 0L
 
+    /** True if the current model is running on GPU, false if CPU-only or not loaded. */
+    @Volatile
+    var isGpuActive: Boolean = false
+        private set
+
     /**
      * Load a whisper model (.bin file). Unloads any previously loaded model first.
+     * Attempts GPU acceleration with automatic fallback to CPU if the GPU probe fails.
      * Suspends on [Dispatchers.IO].
      */
     suspend fun loadModel(modelPath: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             val prev = contextPtr.getAndSet(0L)
             if (prev != 0L) nativeFreeWhisperModel(prev)
+            isGpuActive = false
 
-            val ptr = nativeLoadWhisperModel(modelPath)
+            // Step 1: Load with GPU enabled
+            var ptr = nativeLoadWhisperModel(modelPath, true)
             if (ptr == 0L) {
                 return@withContext Result.failure(
                     IllegalStateException("Failed to load whisper model from $modelPath")
                 )
             }
+
+            // Step 2: Probe GPU — run a short silent buffer through the encoder
+            Log.i(TAG, "Probing GPU backend...")
+            val gpuOk = nativeProbeWhisperGpu(ptr)
+
+            if (gpuOk) {
+                Log.i(TAG, "GPU probe succeeded — using GPU acceleration")
+                isGpuActive = true
+            } else {
+                // Step 3: GPU failed — reload in CPU-only mode
+                Log.w(TAG, "GPU probe FAILED — reloading in CPU-only mode")
+                val cpuPtr = nativeReloadWhisperCpuOnly(ptr)
+                ptr = cpuPtr
+                if (ptr == 0L) {
+                    return@withContext Result.failure(
+                        IllegalStateException("Failed to reload whisper model in CPU-only mode")
+                    )
+                }
+                isGpuActive = false
+            }
+
             contextPtr.set(ptr)
-            Log.i(TAG, "Whisper model loaded from $modelPath")
+            Log.i(TAG, "Whisper model loaded from $modelPath (gpu=${isGpuActive})")
             Result.success(Unit)
         } catch (e: Exception) {
             Log.e(TAG, "loadModel exception", e)
@@ -82,5 +118,6 @@ class WhisperEngine {
             Log.i(TAG, "Unloading whisper model")
             nativeFreeWhisperModel(ptr)
         }
+        isGpuActive = false
     }
 }

@@ -106,6 +106,10 @@ set(WHISPER_ALL_WARNINGS   OFF CACHE BOOL "" FORCE)
 
 add_subdirectory(whisper.cpp)
 
+# Enable verbose whisper.cpp debug logging for backend scheduling diagnostics.
+# Remove this once GPU acceleration is confirmed stable.
+target_compile_definitions(whisper PRIVATE WHISPER_DEBUG)
+
 # Our JNI bridge library
 add_library(aipaca SHARED llama_jni.cpp whisper_jni.cpp)
 

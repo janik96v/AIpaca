@@ -4,6 +4,41 @@ A centralized knowledge repository for the AIpaca development team. Each entry d
 
 ---
 
+## 2026-06-05 - Whisper GPU Acceleration via OpenCL (SUCCESS)
+
+**Device**: Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3, Adreno 750)
+**Objective**: Enable GPU-accelerated whisper.cpp transcription using the existing OpenCL/Adreno backend.
+
+### Root Cause of Previous Failures
+
+The earlier assumption that "OpenCL lacks CONV_1D/IM2COL" was **incorrect**. Investigation revealed:
+
+1. **There is no `GGML_OP_CONV_1D` opcode** in ggml. The `ggml_conv_1d_ph()` function decomposes into `ggml_im2col()` + `ggml_mul_mat()` + reshapes at the graph level.
+2. **`GGML_OP_IM2COL` returns `true`** unconditionally in the OpenCL backend's `supports_op()`.
+3. **All whisper encoder ops are supported**: IM2COL, MUL_MAT, GELU, GROUP_NORM, SOFT_MAX, NORM, ADD, MUL, SCALE, ROPE, DIAG_MASK_INF, CONCAT, PAD, REPEAT, RESHAPE, VIEW, PERMUTE, CPY, CONT, DUP.
+4. The `clGetKernelSubGroupInfo` OpenCL 2.1 crash (whisper.cpp issue #3015) was already fixed — commented out with hardcoded subgroup sizes for Adreno (64) and Intel (32).
+
+The **actual culprit was `flash_attn = true`**. The `FLASH_ATTN_EXT` OpenCL kernel produces incorrect results for whisper's specific tensor shapes/head dimensions on Adreno GPUs. Setting `flash_attn = false` while keeping `use_gpu = true` resolves the issue completely.
+
+### Implementation
+
+- `whisper_jni.cpp`: `cparams.use_gpu = true`, `cparams.flash_attn = false`
+- GPU probe mechanism added (same SIGSEGV/SIGBUS signal handler pattern as `llama_jni.cpp`)
+- Automatic fallback to CPU-only if GPU probe fails
+- `WhisperEngine.kt`: loads with GPU → probes → falls back if needed; exposes `isGpuActive`
+
+### Results
+
+- GPU probe: ~730 ms (one-time, at model load)
+- Transcription: working correctly with GPU acceleration
+- Adreno kernel compilation visible in logcat during first inference
+
+### Key Takeaway
+
+For whisper.cpp on Adreno OpenCL: **always disable `flash_attn`**. The standard attention path (MUL_MAT + SOFT_MAX) works correctly. This is likely an Adreno-specific issue with the FLASH_ATTN_EXT kernel for whisper's encoder attention dimensions.
+
+---
+
 ## 2026-06-05 - Vulkan Backend Experiment: llama.cpp + whisper.cpp on Adreno 750
 
 **Device**: Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3, Adreno 750)
