@@ -1,5 +1,6 @@
 package com.aipaca.app.engine
 
+import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -34,6 +35,7 @@ class AudioRecorder {
      * @throws SecurityException if RECORD_AUDIO permission is missing.
      * @throws IllegalStateException if AudioRecord cannot be initialised.
      */
+    @SuppressLint("MissingPermission")  // Permission is checked in the UI layer before calling record()
     suspend fun record(): FloatArray = withContext(Dispatchers.IO) {
         val minBufSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         check(minBufSize != AudioRecord.ERROR && minBufSize != AudioRecord.ERROR_BAD_VALUE) {
