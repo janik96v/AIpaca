@@ -3,7 +3,10 @@ package com.aipaca.app.ui.chat
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import java.io.ByteArrayOutputStream
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
@@ -344,12 +347,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         _generationError.tryEmit("Load a vision projector first — go to Models tab")
                         return@launch
                     }
-                    val imageBytes = getApplication<Application>().contentResolver
+                    val rawBytes = getApplication<Application>().contentResolver
                         .openInputStream(imageUri)?.use { it.readBytes() }
-                    if (imageBytes == null || imageBytes.isEmpty()) {
+                    if (rawBytes == null || rawBytes.isEmpty()) {
                         _generationError.tryEmit("Failed to read image")
                         return@launch
                     }
+                    // Downscale large images to reduce vision token count
+                    val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
                     EngineState.engine.generateChatWithImage(turns, imageBytes, params)
                 } else {
                     EngineState.engine.generateChat(turns, params)
@@ -423,6 +428,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _activeConversationId.value = null
             _messages.value = emptyList()
         }
+    }
+
+    private fun downscaleImageIfNeeded(rawBytes: ByteArray, maxLongEdge: Int): ByteArray {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
+        val w = opts.outWidth
+        val h = opts.outHeight
+        if (w <= 0 || h <= 0) return rawBytes // can't decode dimensions, pass through
+        val longEdge = maxOf(w, h)
+        if (longEdge <= maxLongEdge) return rawBytes // already small enough
+
+        val scale = maxLongEdge.toFloat() / longEdge
+        val newW = (w * scale).toInt().coerceAtLeast(1)
+        val newH = (h * scale).toInt().coerceAtLeast(1)
+
+        val full = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return rawBytes
+        val scaled = Bitmap.createScaledBitmap(full, newW, newH, true)
+        if (scaled !== full) full.recycle()
+
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        scaled.recycle()
+        return out.toByteArray()
     }
 
     private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
