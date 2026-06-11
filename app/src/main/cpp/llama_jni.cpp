@@ -3,6 +3,8 @@
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "chat.h"
+#include "mtmd.h"
+#include "mtmd-helper.h"
 #include <android/log.h>
 #include <jni.h>
 #include <string>
@@ -43,6 +45,7 @@ static void ensure_backend_init() {
 struct LlamaContext {
     llama_model*       model         = nullptr;
     llama_context*     ctx           = nullptr;
+    mtmd_context*      mtmd_ctx      = nullptr;   // vision projector (mmproj)
     std::atomic<bool>  stop_flag     { false };
     float              tokens_per_sec = 0.0f;
     int32_t            gpu_layers    = 0;     // effective GPU/offload layers in use
@@ -1114,8 +1117,10 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadModel(
     lc->stop_flag.store(true);
 
     LOGI("Unloading model, handle=%p", (void*)lc);
-    if (lc->ctx)   { llama_free(lc->ctx);        lc->ctx   = nullptr; }
-    if (lc->model) { llama_model_free(lc->model); lc->model = nullptr; }
+    // Free mmproj before model — it depends on the model
+    if (lc->mtmd_ctx) { mtmd_free(lc->mtmd_ctx); lc->mtmd_ctx = nullptr; }
+    if (lc->ctx)      { llama_free(lc->ctx);        lc->ctx   = nullptr; }
+    if (lc->model)    { llama_model_free(lc->model); lc->model = nullptr; }
     delete lc;
     LOGI("Model unloaded (backend remains alive for next load)");
 }
@@ -1239,4 +1244,393 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetChatTemplate(
     const char* tmpl = llama_model_chat_template(lc->model, nullptr);
     if (tmpl == nullptr) return nullptr;
     return env->NewStringUTF(tmpl);
+}
+
+// ---------------------------------------------------------------------------
+// 10. nativeLoadMmproj — load a multimodal projector (mmproj) GGUF
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadMmproj(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr,
+        jstring  jMmprojPath,
+        jboolean useGpu)
+{
+    if (ctxPtr == 0L) return JNI_FALSE;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+
+    // Free existing mmproj if any
+    if (lc->mtmd_ctx) {
+        mtmd_free(lc->mtmd_ctx);
+        lc->mtmd_ctx = nullptr;
+    }
+
+    std::string mmproj_path = jstring_to_std(env, jMmprojPath);
+    LOGI("Loading mmproj: %s (useGpu=%d)", mmproj_path.c_str(), (int)useGpu);
+
+    mtmd_context_params mparams = mtmd_context_params_default();
+    mparams.use_gpu         = (bool)useGpu;
+    mparams.n_threads       = 4;
+    mparams.print_timings   = true;
+    mparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED;
+    mparams.warmup          = true;
+
+    lc->mtmd_ctx = mtmd_init_from_file(mmproj_path.c_str(), lc->model, mparams);
+    if (!lc->mtmd_ctx) {
+        LOGE("Failed to load mmproj from %s", mmproj_path.c_str());
+        return JNI_FALSE;
+    }
+
+    LOGI("mmproj loaded: vision=%d", mtmd_support_vision(lc->mtmd_ctx) ? 1 : 0);
+    return JNI_TRUE;
+}
+
+// ---------------------------------------------------------------------------
+// 11. nativeUnloadMmproj
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadMmproj(
+        JNIEnv*  /* env */,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    if (ctxPtr == 0L) return;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    if (lc->mtmd_ctx) {
+        mtmd_free(lc->mtmd_ctx);
+        lc->mtmd_ctx = nullptr;
+        LOGI("mmproj unloaded");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 12. nativeIsMmprojLoaded
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeIsMmprojLoaded(
+        JNIEnv*  /* env */,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    if (ctxPtr == 0L) return JNI_FALSE;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    return lc->mtmd_ctx != nullptr ? JNI_TRUE : JNI_FALSE;
+}
+
+// ---------------------------------------------------------------------------
+// 13. nativeGenerateChatWithImage
+//     Like nativeGenerateChat but accepts raw image bytes to encode via mtmd.
+// ---------------------------------------------------------------------------
+static void run_generate_with_image(
+        JNIEnv* env,
+        LlamaContext* lc,
+        const std::vector<std::pair<std::string, std::string>>& turns,
+        const uint8_t* image_data,
+        size_t image_size,
+        float temperature,
+        float top_p,
+        float repeat_penalty,
+        int max_tokens,
+        int thinking_budget,
+        jobject tokenCallback) {
+
+    lc->stop_flag.store(false);
+
+    if (!lc->mtmd_ctx) {
+        LOGE("run_generate_with_image: no mmproj loaded");
+        return;
+    }
+
+    LOGI("run_generate_with_image: image_size=%zu turns=%zu", image_size, turns.size());
+
+    const llama_model* model = lc->model;
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+
+    // --- Build formatted prompt with image marker ---
+    // Insert the media marker before the last user message content.
+    std::vector<std::pair<std::string, std::string>> modified_turns;
+    modified_turns.reserve(turns.size());
+    for (const auto& turn : turns) {
+        if (turn.second.empty()) continue;
+        modified_turns.push_back(turn);
+    }
+    if (modified_turns.empty()) {
+        LOGE("run_generate_with_image: no messages to generate from");
+        return;
+    }
+
+    // Prepend image marker to the last user turn
+    const std::string marker = mtmd_default_marker();
+    for (int i = (int)modified_turns.size() - 1; i >= 0; i--) {
+        if (modified_turns[i].first == "user") {
+            modified_turns[i].second = marker + "\n" + modified_turns[i].second;
+            break;
+        }
+    }
+
+    // Format with chat template
+    std::string formatted_prompt;
+    common_chat_params chat_params;
+    try {
+        chat_params = format_chat_with_common(model, modified_turns, thinking_budget);
+        formatted_prompt = chat_params.prompt;
+        LOGD("Vision prompt formatted, len=%zu", formatted_prompt.size());
+    } catch (const std::exception& e) {
+        LOGE("Chat template failed for vision prompt: %s", e.what());
+        return;
+    }
+
+    // --- Create bitmap from image bytes ---
+    mtmd_bitmap* bitmap = mtmd_helper_bitmap_init_from_buf(
+            lc->mtmd_ctx, image_data, image_size);
+    if (!bitmap) {
+        LOGE("run_generate_with_image: failed to decode image bytes");
+        return;
+    }
+
+    // --- Tokenize with mtmd (splits text + image chunks) ---
+    mtmd_input_text text_input;
+    text_input.text          = formatted_prompt.c_str();
+    text_input.add_special   = true;
+    text_input.parse_special = true;
+
+    const mtmd_bitmap* bitmaps[] = { bitmap };
+    mtmd_input_chunks* chunks = mtmd_input_chunks_init();
+
+    int32_t tok_res = mtmd_tokenize(lc->mtmd_ctx, chunks, &text_input, bitmaps, 1);
+    mtmd_bitmap_free(bitmap);
+
+    if (tok_res != 0) {
+        LOGE("mtmd_tokenize failed: %d", tok_res);
+        mtmd_input_chunks_free(chunks);
+        return;
+    }
+
+    size_t total_tokens = mtmd_helper_get_n_tokens(chunks);
+    LOGI("Vision tokenized: %zu total tokens across %zu chunks",
+         total_tokens, mtmd_input_chunks_size(chunks));
+
+    // --- Prefill: eval all chunks (image encoding + text decoding) ---
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+    const uint32_t n_batch = llama_n_batch(lc->ctx);
+    llama_pos n_past = 0;
+
+    double t_prefill_start = (double)ggml_time_ms();
+    int32_t eval_res = mtmd_helper_eval_chunks(
+            lc->mtmd_ctx, lc->ctx, chunks,
+            n_past, /*seq_id=*/0, n_batch,
+            /*logits_last=*/true, &n_past);
+
+    mtmd_input_chunks_free(chunks);
+
+    if (eval_res != 0) {
+        LOGE("mtmd_helper_eval_chunks failed: %d", eval_res);
+        return;
+    }
+
+    double t_prefill_ms = (double)ggml_time_ms() - t_prefill_start;
+    LOGI("Vision prefill: %zu tokens in %.0f ms", total_tokens, t_prefill_ms);
+
+    // --- Token callback setup ---
+    jclass cbClass = env->GetObjectClass(tokenCallback);
+    jmethodID onTokMid = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;Ljava/lang/String;)V");
+    if (onTokMid == nullptr) {
+        LOGE("run_generate_with_image: could not find onToken method");
+        return;
+    }
+
+    // --- Sampler chain (same as run_generate) ---
+    llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(top_p, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+            /*penalty_last_n=*/64,
+            /*penalty_repeat=*/repeat_penalty,
+            /*penalty_freq=*/0.0f,
+            /*penalty_present=*/0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    // --- Think suppression / parsing (same as run_generate) ---
+    ThinkSuppressor suppressor;
+    bool suppress_thinking = (thinking_budget == 0);
+    if (suppress_thinking) {
+        auto tokenize = [&](const std::string& text) -> std::vector<llama_token> {
+            std::vector<llama_token> toks(text.size() + 4);
+            int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
+                                   toks.data(), (int32_t)toks.size(),
+                                   /*add_special=*/false, /*parse_special=*/true);
+            if (n > 0) { toks.resize(n); } else { toks.clear(); }
+            return toks;
+        };
+        auto add_tag_pair = [&](const std::string& open, const std::string& close) {
+            auto open_tokens = tokenize(open);
+            auto close_tokens = tokenize(close);
+            if (!open_tokens.empty() && !close_tokens.empty()) {
+                suppressor.tag_pairs.push_back({ open_tokens, close_tokens });
+            }
+        };
+        if (!chat_params.thinking_start_tag.empty() && !chat_params.thinking_end_tag.empty()) {
+            add_tag_pair(chat_params.thinking_start_tag, chat_params.thinking_end_tag);
+        }
+        add_tag_pair("<think>", "</think>");
+    }
+
+    ThinkingStreamParser thinking_parser;
+    if (chat_params.supports_thinking &&
+            !chat_params.thinking_start_tag.empty() &&
+            !chat_params.thinking_end_tag.empty()) {
+        thinking_parser.start_tag = chat_params.thinking_start_tag;
+        thinking_parser.end_tag = chat_params.thinking_end_tag;
+    }
+
+    // --- Token generation loop (identical to run_generate) ---
+    int n_generated = 0;
+    double t_start_ms = (double)ggml_time_ms();
+    std::string utf8_tail;
+
+    while (n_generated < max_tokens && !lc->stop_flag.load()) {
+        llama_token new_token;
+
+        if (suppress_thinking && suppressor.state == ThinkSuppressor::FORCING_CLOSE) {
+            new_token = suppressor.get_forced_token();
+            llama_sampler_accept(sampler, new_token);
+        } else {
+            new_token = llama_sampler_sample(sampler, lc->ctx, -1);
+        }
+
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            LOGD("EOS reached after %d tokens", n_generated);
+            break;
+        }
+
+        if (suppress_thinking && suppressor.state != ThinkSuppressor::FORCING_CLOSE) {
+            suppressor.should_suppress(new_token);
+        }
+
+        const bool is_control = llama_vocab_is_control(vocab, new_token);
+
+        char piece_buf[512] = {};
+        int piece_len = llama_token_to_piece(
+                vocab, new_token, piece_buf, sizeof(piece_buf) - 1,
+                /*lstrip=*/0, /*special=*/is_control);
+
+        if (piece_len < 0) {
+            LOGE("llama_token_to_piece failed for token %d", (int)new_token);
+            break;
+        }
+        piece_buf[piece_len] = '\0';
+
+        std::string piece = utf8_tail + std::string(piece_buf, piece_len);
+        utf8_tail.clear();
+        size_t tail_len = utf8_incomplete_tail(piece);
+        if (tail_len > 0) {
+            utf8_tail = piece.substr(piece.size() - tail_len);
+            piece.resize(piece.size() - tail_len);
+        }
+
+        if (is_control && !thinking_parser.should_consume_control_piece(piece)) {
+            LOGD("Skipping control token %d (%s)", (int)new_token, piece.c_str());
+        } else {
+            auto parsed = thinking_parser.feed(piece);
+            if (!parsed.content.empty() || !parsed.thinking.empty()) {
+                jstring jContent = env->NewStringUTF(parsed.content.c_str());
+                jstring jThinking = env->NewStringUTF(parsed.thinking.c_str());
+                env->CallVoidMethod(tokenCallback, onTokMid, jContent, jThinking);
+                env->DeleteLocalRef(jContent);
+                env->DeleteLocalRef(jThinking);
+            }
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            LOGE("Exception in onToken callback; stopping generation");
+            break;
+        }
+
+        llama_batch next_batch = llama_batch_get_one(&new_token, 1);
+        if (llama_decode(lc->ctx, next_batch) != 0) {
+            LOGE("llama_decode failed at generation step %d", n_generated);
+            break;
+        }
+
+        n_generated++;
+
+        if (n_generated % 5 == 0) {
+            double now = (double)ggml_time_ms();
+            double elapsed = now - t_start_ms;
+            LOGI("Vision gen: %d tokens @ %.2f tok/s",
+                 n_generated, elapsed > 0 ? (double)n_generated / (elapsed / 1000.0) : 0.0);
+        }
+    }
+
+    double elapsed_ms = (double)ggml_time_ms() - t_start_ms;
+    lc->tokens_per_sec = (elapsed_ms > 0.0)
+            ? (float)((double)n_generated / (elapsed_ms / 1000.0))
+            : 0.0f;
+
+    LOGI("Vision generation complete: %d tokens @ %.1f tok/s", n_generated, (double)lc->tokens_per_sec);
+
+    llama_sampler_free(sampler);
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
+        JNIEnv*      env,
+        jobject      /* thiz */,
+        jlong        ctxPtr,
+        jobjectArray jRoles,
+        jobjectArray jContents,
+        jbyteArray   jImageBytes,
+        jint         imageSize,
+        jfloat       temperature,
+        jfloat       topP,
+        jfloat       repeatPenalty,
+        jint         maxTokens,
+        jint         thinkingBudget,
+        jobject      tokenCallback)
+{
+    if (ctxPtr == 0L) return;
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+
+    int len = env->GetArrayLength(jRoles);
+    if (len != env->GetArrayLength(jContents)) {
+        LOGE("nativeGenerateChatWithImage: roles/contents length mismatch");
+        return;
+    }
+
+    std::vector<std::pair<std::string, std::string>> turns;
+    turns.reserve(len);
+    for (int i = 0; i < len; i++) {
+        auto jRole = (jstring)env->GetObjectArrayElement(jRoles, i);
+        auto jCont = (jstring)env->GetObjectArrayElement(jContents, i);
+        std::string role = jstring_to_std(env, jRole);
+        std::string cont = jstring_to_std(env, jCont);
+        env->DeleteLocalRef(jRole);
+        env->DeleteLocalRef(jCont);
+        if (role != "assistant" && role != "system") role = "user";
+        turns.emplace_back(std::move(role), std::move(cont));
+    }
+
+    // Get image bytes
+    jbyte* imgBytes = env->GetByteArrayElements(jImageBytes, nullptr);
+    if (!imgBytes) {
+        LOGE("nativeGenerateChatWithImage: failed to get image bytes");
+        return;
+    }
+
+    run_generate_with_image(env, lc, turns,
+            reinterpret_cast<const uint8_t*>(imgBytes),
+            (size_t)imageSize,
+            temperature, topP, repeatPenalty,
+            maxTokens, thinkingBudget,
+            tokenCallback);
+
+    env->ReleaseByteArrayElements(jImageBytes, imgBytes, JNI_ABORT);
 }

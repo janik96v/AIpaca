@@ -3,7 +3,9 @@ package com.aipaca.app
 import android.app.Application
 import android.system.Os
 import android.util.Log
+import com.aipaca.app.data.MmprojModelPrefs
 import com.aipaca.app.data.WhisperModelPrefs
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class AIpacaApp : Application() {
@@ -24,6 +26,16 @@ class AIpacaApp : Application() {
         if (savedWhisperPath != null) {
             EngineState.scope.launch {
                 EngineState.loadWhisperModel(savedWhisperPath)
+            }
+        }
+
+        // Restore mmproj from last session (non-blocking, requires model to be loaded first)
+        val savedMmprojPath = MmprojModelPrefs.getPath(this)
+        if (savedMmprojPath != null) {
+            EngineState.scope.launch {
+                // Wait until the LLM model is loaded — mmproj depends on it
+                EngineState.isLoaded.first { it }
+                EngineState.loadMmproj(savedMmprojPath)
             }
         }
     }

@@ -110,6 +110,22 @@ add_subdirectory(whisper.cpp)
 # Remove this once GPU acceleration is confirmed stable.
 target_compile_definitions(whisper PRIVATE WHISPER_DEBUG)
 
+# ---------------------------------------------------------------------------
+# mtmd — multimodal toolkit (vision encoder for image inference)
+#
+# Reuses the existing `ggml` and `llama` targets from llama.cpp.
+# ---------------------------------------------------------------------------
+set(LLAMA_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
+# mtmd's CMakeLists uses LLAMA_INSTALL_VERSION in set_target_properties.
+# When adding mtmd as a standalone subdirectory (outside llama.cpp's own tree),
+# this variable is not defined — set a placeholder to avoid a CMake error.
+if(NOT DEFINED LLAMA_INSTALL_VERSION)
+    set(LLAMA_INSTALL_VERSION "0.0.0" CACHE STRING "" FORCE)
+endif()
+# EXCLUDE_FROM_ALL: build only the `mtmd` library target, not the CLI executables
+# (llama-mtmd-cli etc.) which depend on desktop-only headers like console.h.
+add_subdirectory(llama.cpp/tools/mtmd EXCLUDE_FROM_ALL)
+
 # Our JNI bridge library
 add_library(aipaca SHARED llama_jni.cpp whisper_jni.cpp)
 
@@ -121,6 +137,7 @@ target_link_libraries(aipaca
     llama-common
     ggml
     whisper
+    mtmd
     ${log-lib}
     ${android-lib}
     OpenCL::OpenCL
@@ -130,5 +147,6 @@ target_include_directories(aipaca PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
     llama.cpp/common
+    llama.cpp/tools/mtmd
     whisper.cpp/include
 )

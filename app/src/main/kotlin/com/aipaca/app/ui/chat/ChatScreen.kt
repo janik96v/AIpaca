@@ -336,9 +336,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
                 val thinkEnabled = _thinkingEnabled.value
+                val params = GenerateParams(thinkingEnabled = thinkEnabled)
 
-                EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
-                    .collect { chunk ->
+                // Choose vision or text-only generation path
+                val flow = if (imageUri != null) {
+                    if (!EngineState.engine.isMmprojLoaded()) {
+                        _generationError.tryEmit("Load a vision projector first — go to Models tab")
+                        return@launch
+                    }
+                    val imageBytes = getApplication<Application>().contentResolver
+                        .openInputStream(imageUri)?.use { it.readBytes() }
+                    if (imageBytes == null || imageBytes.isEmpty()) {
+                        _generationError.tryEmit("Failed to read image")
+                        return@launch
+                    }
+                    EngineState.engine.generateChatWithImage(turns, imageBytes, params)
+                } else {
+                    EngineState.engine.generateChat(turns, params)
+                }
+
+                flow.collect { chunk ->
                         tokenCount++
                         val current = _messages.value
                         if (current.isNotEmpty()) {
@@ -470,6 +487,7 @@ fun ChatScreen(
     val gpuLayers             by EngineState.gpuLayers.collectAsState()
     val modelInfo             by EngineState.modelInfo.collectAsState()
     val contextSize           by EngineState.contextSize.collectAsState()
+    val isMmprojLoaded        by EngineState.isMmprojLoaded.collectAsState()
     // Reserve 25% of context for generation output; ~4 chars per token.
     val docCharLimit = ((contextSize * 0.75) * 4).toInt().coerceAtLeast(2_000)
 
@@ -639,7 +657,7 @@ fun ChatScreen(
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
                     supportsAttachments  = isLoaded,
-                    supportsMultimodal   = modelInfo.supportsMultimodal && isLoaded,
+                    supportsMultimodal   = isMmprojLoaded && isLoaded,
                     selectedImageUri     = selectedImageUri,
                     selectedDocumentName = selectedDocumentName,
                     onAttachImage = {
