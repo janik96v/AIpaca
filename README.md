@@ -244,7 +244,7 @@ app/src/main/
 - [x] Chat history persistence
 - [x] GPU acceleration (Adreno OpenCL)
 - [ ] Multi-request queuing
-- [ ] Multimodal / vision support (LLaVA)
+- [x] Multimodal / vision support (llama.cpp mtmd)
 - [ ] iOS port (shared llama.cpp core + SwiftUI)
 
 ---
