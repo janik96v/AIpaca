@@ -97,6 +97,25 @@ class LlamaCppEngine : InferenceEngine {
     /** Returns the model's chat template string, or null if unavailable. */
     private external fun nativeGetChatTemplate(ctxPtr: Long): String?
 
+    // ---- Vision / mmproj JNI -----------------------------------------------
+
+    private external fun nativeLoadMmproj(ctxPtr: Long, path: String, useGpu: Boolean): Boolean
+    private external fun nativeUnloadMmproj(ctxPtr: Long)
+    private external fun nativeIsMmprojLoaded(ctxPtr: Long): Boolean
+    private external fun nativeGenerateChatWithImage(
+        ctxPtr: Long,
+        roles: Array<String>,
+        contents: Array<String>,
+        imageBytes: ByteArray,
+        imageSize: Int,
+        temperature: Float,
+        topP: Float,
+        repeatPenalty: Float,
+        maxTokens: Int,
+        thinkingBudget: Int,
+        callback: TokenCallback
+    )
+
     // ---- Mutable state -----------------------------------------------------
 
     /** Holds the native LlamaContext* cast to Long; 0 means no model loaded. */
@@ -326,6 +345,101 @@ class LlamaCppEngine : InferenceEngine {
             ?.substringBeforeLast('.')
             ?: ""
     )
+
+    // ---- Vision / mmproj public API ----------------------------------------
+
+    suspend fun loadMmproj(path: String, useGpu: Boolean = true): Boolean =
+        withContext(Dispatchers.IO) {
+            val ptr = contextPtr.get()
+            if (ptr == 0L) {
+                Log.e(TAG, "loadMmproj: no model loaded")
+                return@withContext false
+            }
+            Log.i(TAG, "loadMmproj: $path  useGpu=$useGpu")
+            nativeLoadMmproj(ptr, path, useGpu)
+        }
+
+    fun unloadMmproj() {
+        val ptr = contextPtr.get()
+        if (ptr != 0L) {
+            nativeUnloadMmproj(ptr)
+        }
+    }
+
+    fun isMmprojLoaded(): Boolean {
+        val ptr = contextPtr.get()
+        return ptr != 0L && nativeIsMmprojLoaded(ptr)
+    }
+
+    fun generateChatWithImage(
+        turns: List<ChatTurn>,
+        imageBytes: ByteArray,
+        params: GenerateParams
+    ): Flow<GenerationChunk> = callbackFlow {
+        val ptr = contextPtr.get()
+        if (ptr == 0L) {
+            close(IllegalStateException("No model loaded"))
+            return@callbackFlow
+        }
+        if (!nativeIsMmprojLoaded(ptr)) {
+            close(IllegalStateException("No vision projector loaded"))
+            return@callbackFlow
+        }
+        val cleanTurns = turns
+            .filter { it.content.isNotBlank() }
+            .map { turn ->
+                val role = when (turn.role.lowercase()) {
+                    "system", "assistant", "user" -> turn.role.lowercase()
+                    else -> "user"
+                }
+                ChatTurn(role, turn.content)
+            }
+        if (cleanTurns.isEmpty()) {
+            close(IllegalArgumentException("No chat turns provided"))
+            return@callbackFlow
+        }
+
+        val startMs    = System.currentTimeMillis()
+        var tokenCount = 0
+
+        val callback = object : TokenCallback {
+            override fun onToken(content: String, thinking: String) {
+                tokenCount++
+                trySend(GenerationChunk(content = content, thinking = thinking))
+            }
+        }
+
+        try {
+            withContext(Dispatchers.IO) {
+                nativeGenerateChatWithImage(
+                    ctxPtr        = ptr,
+                    roles         = cleanTurns.map { it.role }.toTypedArray(),
+                    contents      = cleanTurns.map { it.content }.toTypedArray(),
+                    imageBytes    = imageBytes,
+                    imageSize     = imageBytes.size,
+                    temperature   = params.temperature,
+                    topP          = params.topP,
+                    repeatPenalty = params.repeatPenalty,
+                    maxTokens     = params.maxTokens,
+                    thinkingBudget = if (params.thinkingEnabled) -1 else 0,
+                    callback      = callback
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "generateChatWithImage exception", e)
+            close(e)
+            return@callbackFlow
+        } finally {
+            val elapsedSec   = (System.currentTimeMillis() - startMs) / 1000f
+            lastTokensPerSec = if (elapsedSec > 0f) tokenCount / elapsedSec else 0f
+            lastTotalTokens  = tokenCount
+            Log.d(TAG, "Vision gen done: $tokenCount tokens @ ${"%.1f".format(lastTokensPerSec)} tok/s")
+        }
+
+        close()
+
+        awaitClose { nativeStopGeneration(ptr) }
+    }
 
     /**
      * Expose llama.cpp system info string (CPU features, BLAS flags, etc.)

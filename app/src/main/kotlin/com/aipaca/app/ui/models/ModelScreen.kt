@@ -128,6 +128,12 @@ fun ModelScreen(modifier: Modifier = Modifier) {
     val isLoadingWhisper by EngineState.isLoadingWhisperModel.collectAsState()
     val whisperError    by EngineState.whisperError.collectAsState()
 
+    val modelInfo       by EngineState.modelInfo.collectAsState()
+    val isModelLoaded   by EngineState.isLoaded.collectAsState()
+    val mmprojPath      by EngineState.mmprojPath.collectAsState()
+    val isLoadingMmproj by EngineState.isLoadingMmproj.collectAsState()
+    val mmprojError     by EngineState.mmprojError.collectAsState()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -149,6 +155,25 @@ fun ModelScreen(modifier: Modifier = Modifier) {
             },
             onUnload         = { EngineState.unloadWhisper() }
         )
+
+        // ---- Vision projector section (shown whenever a model is loaded) ----
+        // Vision metadata lives in the mmproj file, not the main model GGUF,
+        // so we cannot reliably detect multimodal support from the model alone.
+        if (isModelLoaded) {
+            EditorialDivider(
+                color    = AlpacaColors.Line.Subtle,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            VisionProjectorSection(
+                mmprojPath      = mmprojPath,
+                isLoading       = isLoadingMmproj,
+                errorMessage    = mmprojError,
+                onModelSelected = { path ->
+                    scope.launch { EngineState.loadMmproj(path) }
+                },
+                onUnload        = { EngineState.unloadMmproj() }
+            )
+        }
 
         EditorialDivider(
             color    = AlpacaColors.Line.Subtle,
@@ -468,6 +493,61 @@ private fun WhisperModelSection(
                 isLoading       = isLoading
             )
             if (whisperPath != null && !isLoading) {
+                TextButton(onClick = onUnload) {
+                    Text("Unload", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            }
+        }
+    }
+}
+
+// ---- Vision projector section -----------------------------------------------
+
+@Composable
+private fun VisionProjectorSection(
+    mmprojPath: String?,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onModelSelected: (String) -> Unit,
+    onUnload: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        EditorialSectionMark(label = "VISION · MULTIMODAL PROJECTOR")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text  = "Load the mmproj GGUF companion file for your vision model. " +
+                    "This enables image understanding alongside text.",
+            style = AlpacaType.BodySm,
+            color = AlpacaColors.Text.Muted
+        )
+        Spacer(Modifier.height(4.dp))
+
+        val (statusText, statusTone) = when {
+            isLoading          -> "VISION · LOADING…" to MonoLabelTone.Warning
+            mmprojPath != null -> "VISION · ${mmprojPath.substringAfterLast('/').uppercase()} · READY" to MonoLabelTone.Accent
+            else               -> "NO VISION PROJECTOR LOADED" to MonoLabelTone.Muted
+        }
+        MonoLabel(text = statusText, tone = statusTone)
+
+        errorMessage?.let {
+            Text(text = it, style = AlpacaType.BodySm, color = AlpacaColors.State.Error)
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            ModelPickerButton(
+                label           = if (mmprojPath != null) "Change projector" else "Load projector",
+                onModelSelected = onModelSelected,
+                isLoading       = isLoading
+            )
+            if (mmprojPath != null && !isLoading) {
                 TextButton(onClick = onUnload) {
                     Text("Unload", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
                 }

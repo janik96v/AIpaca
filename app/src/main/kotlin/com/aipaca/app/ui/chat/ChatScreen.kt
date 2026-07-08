@@ -3,7 +3,10 @@ package com.aipaca.app.ui.chat
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
+import java.io.ByteArrayOutputStream
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
@@ -336,9 +339,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val turns = buildTurns(_messages.value.dropLast(1))
                 val thinkEnabled = _thinkingEnabled.value
+                val params = GenerateParams(thinkingEnabled = thinkEnabled)
 
-                EngineState.engine.generateChat(turns, GenerateParams(thinkingEnabled = thinkEnabled))
-                    .collect { chunk ->
+                // Choose vision or text-only generation path
+                val flow = if (imageUri != null) {
+                    if (!EngineState.engine.isMmprojLoaded()) {
+                        _generationError.tryEmit("Load a vision projector first — go to Models tab")
+                        return@launch
+                    }
+                    val rawBytes = getApplication<Application>().contentResolver
+                        .openInputStream(imageUri)?.use { it.readBytes() }
+                    if (rawBytes == null || rawBytes.isEmpty()) {
+                        _generationError.tryEmit("Failed to read image")
+                        return@launch
+                    }
+                    // Downscale large images to reduce vision token count
+                    val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
+                    EngineState.engine.generateChatWithImage(turns, imageBytes, params)
+                } else {
+                    EngineState.engine.generateChat(turns, params)
+                }
+
+                flow.collect { chunk ->
                         tokenCount++
                         val current = _messages.value
                         if (current.isNotEmpty()) {
@@ -408,6 +430,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun downscaleImageIfNeeded(rawBytes: ByteArray, maxLongEdge: Int): ByteArray {
+        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
+        val w = opts.outWidth
+        val h = opts.outHeight
+        if (w <= 0 || h <= 0) return rawBytes // can't decode dimensions, pass through
+        val longEdge = maxOf(w, h)
+        if (longEdge <= maxLongEdge) return rawBytes // already small enough
+
+        val scale = maxLongEdge.toFloat() / longEdge
+        val newW = (w * scale).toInt().coerceAtLeast(1)
+        val newH = (h * scale).toInt().coerceAtLeast(1)
+
+        val full = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return rawBytes
+        val scaled = Bitmap.createScaledBitmap(full, newW, newH, true)
+        if (scaled !== full) full.recycle()
+
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        scaled.recycle()
+        return out.toByteArray()
+    }
+
     private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
         val turns = messages.mapNotNull { msg ->
             if (msg.content.isBlank()) return@mapNotNull null
@@ -470,6 +515,7 @@ fun ChatScreen(
     val gpuLayers             by EngineState.gpuLayers.collectAsState()
     val modelInfo             by EngineState.modelInfo.collectAsState()
     val contextSize           by EngineState.contextSize.collectAsState()
+    val isMmprojLoaded        by EngineState.isMmprojLoaded.collectAsState()
     // Reserve 25% of context for generation output; ~4 chars per token.
     val docCharLimit = ((contextSize * 0.75) * 4).toInt().coerceAtLeast(2_000)
 
@@ -639,7 +685,7 @@ fun ChatScreen(
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
                     supportsAttachments  = isLoaded,
-                    supportsMultimodal   = modelInfo.supportsMultimodal && isLoaded,
+                    supportsMultimodal   = isMmprojLoaded && isLoaded,
                     selectedImageUri     = selectedImageUri,
                     selectedDocumentName = selectedDocumentName,
                     onAttachImage = {

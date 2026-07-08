@@ -2,6 +2,7 @@ package com.aipaca.app
 
 import android.content.Context
 import android.util.Log
+import com.aipaca.app.data.MmprojModelPrefs
 import com.aipaca.app.data.WhisperModelPrefs
 import com.aipaca.app.engine.BenchResult
 import com.aipaca.app.engine.ChatTurn
@@ -107,6 +108,20 @@ object EngineState {
     private val _whisperError = MutableStateFlow<String?>(null)
     val whisperError: StateFlow<String?> = _whisperError.asStateFlow()
 
+    // ---- Vision projector (mmproj) state -----------------------------------
+
+    private val _mmprojPath = MutableStateFlow<String?>(null)
+    val mmprojPath: StateFlow<String?> = _mmprojPath.asStateFlow()
+
+    private val _isMmprojLoaded = MutableStateFlow(false)
+    val isMmprojLoaded: StateFlow<Boolean> = _isMmprojLoaded.asStateFlow()
+
+    private val _isLoadingMmproj = MutableStateFlow(false)
+    val isLoadingMmproj: StateFlow<Boolean> = _isLoadingMmproj.asStateFlow()
+
+    private val _mmprojError = MutableStateFlow<String?>(null)
+    val mmprojError: StateFlow<String?> = _mmprojError.asStateFlow()
+
     // ---- Actions -----------------------------------------------------------
 
     /**
@@ -174,6 +189,11 @@ object EngineState {
         _modelInfo.value      = ModelInfo()
         _lastBenchmark.value  = BenchResult()
         _isBenchmarking.value = false
+        // Clear mmproj state — it depends on the model
+        _isMmprojLoaded.value = false
+        _mmprojPath.value     = null
+        _mmprojError.value    = null
+        MmprojModelPrefs.clearPath(appContext)
         scope.launch {
             engine.stopGeneration()
             engine.unload()
@@ -246,6 +266,42 @@ object EngineState {
         _whisperError.value = null
         WhisperModelPrefs.clearPath(appContext)
         Log.i(TAG, "Whisper model unloaded")
+    }
+
+    // ---- Vision projector (mmproj) actions ---------------------------------
+
+    suspend fun loadMmproj(path: String): Result<Unit> {
+        _mmprojError.value = null
+        _isLoadingMmproj.value = true
+        return try {
+            val ok = engine.loadMmproj(path)
+            if (ok) {
+                _isMmprojLoaded.value = true
+                _mmprojPath.value = path
+                MmprojModelPrefs.savePath(appContext, path)
+                Log.i(TAG, "mmproj loaded: $path")
+                Result.success(Unit)
+            } else {
+                _mmprojError.value = "Failed to load vision projector"
+                Log.e(TAG, "loadMmproj failed for $path")
+                Result.failure(IllegalStateException("Failed to load vision projector"))
+            }
+        } catch (e: Exception) {
+            _mmprojError.value = e.message ?: "Failed to load vision projector"
+            Log.e(TAG, "loadMmproj exception", e)
+            Result.failure(e)
+        } finally {
+            _isLoadingMmproj.value = false
+        }
+    }
+
+    fun unloadMmproj() {
+        engine.unloadMmproj()
+        _isMmprojLoaded.value = false
+        _mmprojPath.value = null
+        _mmprojError.value = null
+        MmprojModelPrefs.clearPath(appContext)
+        Log.i(TAG, "mmproj unloaded")
     }
 
     suspend fun benchmark(pp: Int = 128, tg: Int = 128, pl: Int = 1, nr: Int = 3): Result<BenchResult> {
