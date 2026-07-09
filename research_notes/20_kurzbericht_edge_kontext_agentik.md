@@ -166,8 +166,24 @@ konzeptioneller Rückenwind, aber Overkill für ein 3B-Modell auf dem Handy.
 
 ## 6. Offene Risiken / zu verifizieren
 
-- **KV-Quant × Adreno-OpenCL ohne Flash-Attention:** Korrektheit + Speed muss auf einem realen
-  Snapdragon-Gerät gemessen werden, bevor q8_0-KV Default wird (Analogie: Whisper-`flash_attn`-Bug).
+- **KV-Quant-Umsetzung (Stand: `feature/kv-cache-q8`, `llama_jni.cpp` `nativeLoadModel`):**
+  `type_k = GGML_TYPE_Q8_0` ist jetzt **immer** gesetzt (GPU- und CPU-Pfad) — Keys sind nie unter
+  q8_0, wie empfohlen. Für `type_v` wurde die llama.cpp-Randbedingung genutzt statt umgangen:
+  quantisiertes V **erfordert** Flash-Attention (`llama-context.cpp`: harter Fail "V cache
+  quantization requires flash_attn" wenn `type_v` quantisiert und FA disabled ist). Da FA auf
+  AIpacas Adreno/OpenCL-Pfad unverifiziert riskant ist (Analogie Whisper-`flash_attn`-Bug,
+  `lab_journal.md` 2026-06-05), gilt jetzt:
+  - **GPU-Offload aktiv** (`effective_gpu_layers > 0`): `flash_attn` bleibt **disabled**,
+    `type_v` bleibt **F16** (nur Keys quantisiert → ~25 % KV-RAM-Ersparnis statt ~50 %, aber
+    sicher ohne FA).
+  - **CPU-only** (`effective_gpu_layers == 0`): `flash_attn` wird **enabled** (CPU-FA ist die
+    gut getestete llama.cpp-Referenzimplementierung, nicht vom Adreno-OpenCL-Bug betroffen),
+    `type_v = Q8_0` → volle ~50 % KV-RAM-Ersparnis.
+  - **Noch zu verifizieren auf echtem Snapdragon-Gerät:** ob `FLASH_ATTN_EXT` im OpenCL-Backend
+    für llama.cpps Decode-Graph (nicht nur Whisper) tatsächlich fehlerhaft ist. Falls sich FA auf
+    Adreno als korrekt herausstellt, kann der GPU-Zweig ebenfalls auf `flash_attn=enabled` +
+    `type_v=Q8_0` umgestellt werden (Code-Kommentar in `llama_jni.cpp` markiert die Stelle mit
+    einem TODO).
 - **Effektiver Kontext von Qwen2.5-3B bei 8K+** unter Tool-Last: mit einer echten Tavily-Recherchefrage
   gegen das geladene GGUF messen (nicht nur nominell vertrauen).
 - **Prefill-Peak-RAM** bei `n_batch = n_ctx` auf 8-GB-Geräten mit 8192er-Kontext.

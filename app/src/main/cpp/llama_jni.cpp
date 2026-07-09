@@ -356,6 +356,44 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
     cparams.n_threads              = static_cast<uint32_t>(nThreads);
     cparams.n_threads_batch        = static_cast<uint32_t>(nThreads);
 
+    // ---- KV-cache quantization (Hebel A, research_notes/20_kurzbericht_edge_kontext_agentik.md §5.2) ----
+    // q8_0 symmetric halves KV RAM (~36 -> ~19 KB/token for Qwen2.5-3B) at practically
+    // no quality cost. "Keys nie unter q8_0": coarser Key quantization distorts Q*K^T
+    // and degrades tool-calling, so the Key cache is q8_0 on every path below.
+    //
+    // llama.cpp constraint (verified in llama-context.cpp): quantizing the K cache does
+    // NOT require Flash Attention (the non-FA path computes Q*K^T via a mul_mat that
+    // natively dequantizes K), but quantizing the V cache DOES require Flash Attention —
+    // llama_init_from_model() hard-fails ("V cache quantization requires flash_attn") if
+    // type_v is quantized while flash_attn is disabled.
+    //
+    // Flash Attention is a known risk on AIpaca's Adreno/OpenCL GPU backend: the same
+    // FLASH_ATTN_EXT OpenCL kernel produced incorrect results for whisper.cpp on this
+    // GPU family (docs/lab_journal.md, 2026-06-05) and is force-disabled for the mtmd/
+    // vision context in this file for that reason (see nativeLoadMmproj below). Whether
+    // llama.cpp's own decode graph is affected the same way has NOT been verified on a
+    // real Adreno device yet. Until that verification happens, GPU-offloaded contexts
+    // keep flash_attn disabled and therefore only quantize Keys (V stays f16). The
+    // CPU-only path is not exposed to the Adreno OpenCL FA bug (CPU FA is llama.cpp's
+    // well-tested reference implementation), so it safely enables flash_attn and
+    // quantizes both Keys and Values to q8_0 for the full KV-RAM halving.
+    constexpr ggml_type kKvCacheTypeK        = GGML_TYPE_Q8_0; // Keys: always q8_0, GPU and CPU
+    constexpr ggml_type kKvCacheTypeVGpuFa   = GGML_TYPE_F16;  // GPU path: FA unverified on Adreno -> V stays f16
+    constexpr ggml_type kKvCacheTypeVCpuFa   = GGML_TYPE_Q8_0; // CPU path: FA safe -> V also q8_0
+    const bool gpu_offload = (effective_gpu_layers > 0);
+    cparams.type_k          = kKvCacheTypeK;
+    if (gpu_offload) {
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED; // TODO verify FA on-device before enabling
+        cparams.type_v           = kKvCacheTypeVGpuFa;
+    } else {
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;  // required for quantized V cache
+        cparams.type_v           = kKvCacheTypeVCpuFa;
+    }
+    LOGI("KV-cache quant: type_k=Q8_0 type_v=%s flash_attn=%s (gpu_offload=%s)",
+         gpu_offload ? "F16" : "Q8_0",
+         gpu_offload ? "disabled" : "enabled",
+         gpu_offload ? "true" : "false");
+
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
         LOGE("nativeLoadModel: failed to create context");
