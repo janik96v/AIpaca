@@ -151,7 +151,7 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.server.status.pages)
 
-    // Ktor client (e.g. Hugging Face model tree API)
+    // Ktor client (HF model tree API + MCP Streamable HTTP)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
