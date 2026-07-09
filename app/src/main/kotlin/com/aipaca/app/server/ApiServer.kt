@@ -20,7 +20,6 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -66,9 +65,6 @@ object ApiServer {
     val requestCount = AtomicLong(0L)
 
     private var server: ApplicationEngine? = null
-
-    /** Mutex to ensure only one generate call runs at a time through the API. */
-    private val generateMutex = Mutex()
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -273,7 +269,7 @@ object ApiServer {
                     val thinkText = StringBuilder()
                     val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                         try {
-                            generateMutex.withLock {
+                            engineState.generateMutex.withLock {
                                 engineState.engine.generateChat(chatTurns, params).collect { chunk ->
                                     fullText.append(chunk.content)
                                     thinkText.append(chunk.thinking)
@@ -347,7 +343,7 @@ object ApiServer {
 
                         val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                             try {
-                                generateMutex.withLock {
+                                engineState.generateMutex.withLock {
                                     engineState.engine.generateChat(chatTurns, params).collect { generationChunk ->
                                         val output = if (request.includeThinking)
                                             generationChunk.thinking + generationChunk.content

@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 
 private const val TAG = "EngineState"
 
@@ -47,6 +48,17 @@ object EngineState {
 
     val engine: LlamaCppEngine = LlamaCppEngine()
     val whisperEngine: WhisperEngine = WhisperEngine()
+
+    /**
+     * Shared serialization lock for anything that calls [engine].generateChat().
+     *
+     * There are two generation consumers in the process — the OpenAI-compatible
+     * server ([com.aipaca.app.server.ApiServer]) and the on-device agent loop
+     * ([com.aipaca.app.agent.AgentLoop]). Both MUST acquire this mutex before
+     * calling into the engine; llama.cpp has exactly one context and concurrent
+     * decode calls corrupt native state / crash (see spec_issue_43_agent_mode.md §6.2).
+     */
+    val generateMutex: Mutex = Mutex()
 
     // ---- Coroutine scope ---------------------------------------------------
 
