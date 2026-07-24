@@ -377,22 +377,22 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
     // CPU-only path is not exposed to the Adreno OpenCL FA bug (CPU FA is llama.cpp's
     // well-tested reference implementation), so it safely enables flash_attn and
     // quantizes both Keys and Values to q8_0 for the full KV-RAM halving.
-    constexpr ggml_type kKvCacheTypeK        = GGML_TYPE_Q8_0; // Keys: always q8_0, GPU and CPU
-    constexpr ggml_type kKvCacheTypeVGpuFa   = GGML_TYPE_F16;  // GPU path: FA unverified on Adreno -> V stays f16
-    constexpr ggml_type kKvCacheTypeVCpuFa   = GGML_TYPE_Q8_0; // CPU path: FA safe -> V also q8_0
+    // KV-cache quantization is only safe on the CPU path for now.
+    // On the GPU (Adreno/OpenCL) path, q8_0 KV tensors may trigger unsupported
+    // kernel paths or crashes — keep KV at f16 (the llama.cpp default).
+    // CPU-only: enable flash_attn (well-tested CPU reference impl) + q8_0 for
+    // both K and V, giving ~50% KV-RAM savings.
     const bool gpu_offload = (effective_gpu_layers > 0);
-    cparams.type_k          = kKvCacheTypeK;
     if (gpu_offload) {
-        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_DISABLED; // TODO verify FA on-device before enabling
-        cparams.type_v           = kKvCacheTypeVGpuFa;
+        // GPU path: keep defaults (type_k=F16, type_v=F16, flash_attn=disabled)
+        // TODO: verify q8_0 KV + FA on real Adreno device before enabling
+        LOGI("KV-cache quant: DISABLED (GPU offload active, Adreno compatibility)");
     } else {
-        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;  // required for quantized V cache
-        cparams.type_v           = kKvCacheTypeVCpuFa;
+        cparams.type_k          = GGML_TYPE_Q8_0;
+        cparams.type_v          = GGML_TYPE_Q8_0;
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        LOGI("KV-cache quant: type_k=Q8_0 type_v=Q8_0 flash_attn=enabled (CPU-only path)");
     }
-    LOGI("KV-cache quant: type_k=Q8_0 type_v=%s flash_attn=%s (gpu_offload=%s)",
-         gpu_offload ? "F16" : "Q8_0",
-         gpu_offload ? "disabled" : "enabled",
-         gpu_offload ? "true" : "false");
 
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
