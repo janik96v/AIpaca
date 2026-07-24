@@ -30,13 +30,14 @@ object ToolCallParser {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    // Android ICU regex requires } to be escaped as \\} and ] as \\]
     private val hermesToolCallRegex = Regex(
-        "<tool_call>\\s*(\\{.*?})\\s*</tool_call>",
+        "<tool_call>\\s*(\\{.*?\\})\\s*</tool_call>",
         RegexOption.DOT_MATCHES_ALL
     )
 
     private val mistralToolCallsRegex = Regex(
-        "\\[TOOL_CALLS]\\s*(\\[.*])",
+        "\\[TOOL_CALLS\\]\\s*(\\[.*\\])",
         RegexOption.DOT_MATCHES_ALL
     )
 

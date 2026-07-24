@@ -41,9 +41,10 @@ fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
         append("\n\nAvailable tools:\n")
         append(toolLines)
         append(
-            "\n\nTo call a tool, reply with exactly one tool call in your model's native format " +
-                "and nothing else. After the tool result is returned to you, give the user a final " +
-                "answer that cites the tool result."
+            "\n\nTo call a tool, reply with EXACTLY this format and nothing else:\n" +
+                "<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}\n</tool_call>\n\n" +
+                "After the tool result is returned to you, give the user a helpful final " +
+                "answer that incorporates the tool result. Do NOT repeat the tool call format in your final answer."
         )
     }
 }
