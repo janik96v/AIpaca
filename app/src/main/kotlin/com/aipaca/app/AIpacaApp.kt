@@ -4,6 +4,7 @@ import android.app.Application
 import android.system.Os
 import android.util.Log
 import com.aipaca.app.data.MmprojModelPrefs
+import com.aipaca.app.data.ModelDownloadManager
 import com.aipaca.app.data.WhisperModelPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -20,6 +21,9 @@ class AIpacaApp : Application() {
         // Inject context before touching EngineState so whisper prefs work.
         EngineState.init(this)
         EngineState   // touch to init
+
+        // Persists downloaded-model metadata and streams new downloads into internal storage.
+        ModelDownloadManager.init(this)
 
         // Restore whisper model from last session (non-blocking)
         val savedWhisperPath = WhisperModelPrefs.getPath(this)
