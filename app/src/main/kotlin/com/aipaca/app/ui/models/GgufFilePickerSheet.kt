@@ -49,6 +49,7 @@ import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.ln
 import kotlin.math.pow
 
@@ -308,8 +309,11 @@ private val cpuOnlyQuants = setOf("Q5_0", "Q5_1", "Q2_K", "Q3_K")
  * file name, by matching the known quantization tokens used across the
  * repo's Adreno OpenCL backend (see [ModelScreen]'s QuantGuide for the
  * authoritative list).
+ *
+ * `internal` (not `private`) so [GgufFilePickerSheetTest] can exercise it
+ * directly as a pure function, without pulling in Compose/Robolectric.
  */
-private fun gpuCompatibility(fileName: String): Pair<String, ChipTone> {
+internal fun gpuCompatibility(fileName: String): Pair<String, ChipTone> {
     val upper = fileName.uppercase()
     val matchedGpu = gpuCompatibleQuants.firstOrNull { upper.contains(it) }
     if (matchedGpu != null) return "GPU · $matchedGpu" to ChipTone.Success
@@ -320,16 +324,20 @@ private fun gpuCompatibility(fileName: String): Pair<String, ChipTone> {
     return "GPU · UNKNOWN" to ChipTone.Neutral
 }
 
-/** Formats a byte count as a human-readable size string, e.g. "2.4 GB". */
-private fun formatFileSize(bytes: Long): String {
+/**
+ * Formats a byte count as a human-readable size string, e.g. "2.4 GB".
+ *
+ * `internal` (not `private`) so [GgufFilePickerSheetTest] can exercise it directly.
+ */
+internal fun formatFileSize(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
     val digitGroups = (ln(bytes.toDouble()) / ln(1024.0)).toInt().coerceIn(0, units.size - 1)
     val value = bytes / 1024.0.pow(digitGroups)
     return if (digitGroups == 0) {
-        "${bytes} ${units[digitGroups]}"
+        "$bytes ${units[digitGroups]}"
     } else {
-        "%.1f %s".format(value, units[digitGroups])
+        String.format(Locale.US, "%.1f %s", value, units[digitGroups])
     }
 }
 
