@@ -59,6 +59,7 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -106,6 +107,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.aipaca.app.EngineState
+import com.aipaca.app.agent.AgentStep
+import com.aipaca.app.agent.newAgentLoop
+import com.aipaca.app.agent.tool.ToolRegistry
+import com.aipaca.app.agent.tool.TavilyMcp
+import com.aipaca.app.data.AgentPrefs
 import com.aipaca.app.data.ChatConversationStore
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
@@ -238,6 +244,30 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var generationJob: Job? = null
 
+    // ---- Agent state -------------------------------------------------------
+
+    val agentPrefs by lazy { AgentPrefs(getApplication()) }
+
+    private val _agentMode = MutableStateFlow(false)
+    val agentMode: StateFlow<Boolean> = _agentMode.asStateFlow()
+
+    private val _isAgentConfigured = MutableStateFlow(false)
+    val isAgentConfigured: StateFlow<Boolean> = _isAgentConfigured.asStateFlow()
+
+    fun refreshAgentConfigured() {
+        _isAgentConfigured.value = agentPrefs.isConfigured()
+    }
+
+    fun toggleAgentMode() {
+        if (!agentPrefs.isConfigured()) return
+        _agentMode.value = !_agentMode.value
+    }
+
+    fun enableAgentMode() {
+        _isAgentConfigured.value = agentPrefs.isConfigured()
+        if (agentPrefs.isConfigured()) _agentMode.value = true
+    }
+
     // ---- STT state ---------------------------------------------------------
 
     private val audioRecorder = com.aipaca.app.engine.AudioRecorder()
@@ -335,53 +365,108 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _isGenerating.value = true
 
         generationJob = viewModelScope.launch {
-            var tokenCount = 0
-            try {
-                val turns = buildTurns(_messages.value.dropLast(1))
-                val thinkEnabled = _thinkingEnabled.value
-                val params = GenerateParams(thinkingEnabled = thinkEnabled)
-
-                // Choose vision or text-only generation path
-                val flow = if (imageUri != null) {
-                    if (!EngineState.engine.isMmprojLoaded()) {
-                        _generationError.tryEmit("Load a vision projector first — go to Models tab")
+            if (_agentMode.value && imageUri == null) {
+                // ---- Agent path ----
+                var registry: ToolRegistry? = null
+                try {
+                    val client = TavilyMcp.buildClient(agentPrefs)
+                    if (client == null) {
+                        _generationError.tryEmit("Agent not configured — add Tavily API key")
                         return@launch
                     }
-                    val rawBytes = getApplication<Application>().contentResolver
-                        .openInputStream(imageUri)?.use { it.readBytes() }
-                    if (rawBytes == null || rawBytes.isEmpty()) {
-                        _generationError.tryEmit("Failed to read image")
-                        return@launch
-                    }
-                    // Downscale large images to reduce vision token count
-                    val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
-                    EngineState.engine.generateChatWithImage(turns, imageBytes, params)
-                } else {
-                    EngineState.engine.generateChat(turns, params)
-                }
+                    registry = ToolRegistry()
+                    registry.register(client)
+                    val loop = EngineState.newAgentLoop(registry)
+                    val turns = buildTurns(_messages.value.dropLast(1))
 
-                flow.collect { chunk ->
-                        tokenCount++
+                    fun updateAssistant(text: String) {
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
-                            val newContent = last.content + chunk.content
-                            val newThinking = if (thinkEnabled)
-                                last.thinkingContent + chunk.thinking
-                            else
-                                last.thinkingContent
-                            _messages.value = current.dropLast(1) +
-                                last.copy(content = newContent, thinkingContent = newThinking)
+                            _messages.value = current.dropLast(1) + last.copy(content = text)
                         }
                     }
-                if (tokenCount == 0) {
-                    _generationError.tryEmit("Generation failed — prompt may exceed context window")
+
+                    val steps = loop.run(goal = content, history = turns)
+                    val display = StringBuilder()
+                    for (step in steps) {
+                        when (step) {
+                            is AgentStep.ToolCall -> {
+                                display.appendLine("\uD83D\uDD0D *Searching: ${step.name}...*\n")
+                                updateAssistant(display.toString())
+                            }
+                            is AgentStep.ToolObservation -> {
+                                display.appendLine("\u2705 *Got results*\n")
+                                updateAssistant(display.toString())
+                            }
+                            is AgentStep.FinalAnswer -> {
+                                updateAssistant(step.text)
+                            }
+                            is AgentStep.Error -> {
+                                _generationError.tryEmit("Agent error: ${step.message}")
+                                if (display.isEmpty()) updateAssistant("Agent error: ${step.message}")
+                                else { display.appendLine("\n\nAgent error: ${step.message}"); updateAssistant(display.toString()) }
+                            }
+                            is AgentStep.Thinking -> { /* intermediate thinking, skip */ }
+                        }
+                    }
+                } catch (e: Exception) {
+                    _generationError.tryEmit("Agent error: ${e.message ?: "unknown error"}")
+                } finally {
+                    registry?.closeAll()
+                    _isGenerating.value = false
+                    persistCurrentConversation()
                 }
-            } catch (e: Exception) {
-                _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
-            } finally {
-                _isGenerating.value = false
-                persistCurrentConversation()
+            } else {
+                // ---- Normal chat path ----
+                var tokenCount = 0
+                try {
+                    val turns = buildTurns(_messages.value.dropLast(1))
+                    val thinkEnabled = _thinkingEnabled.value
+                    val params = GenerateParams(thinkingEnabled = thinkEnabled)
+
+                    // Choose vision or text-only generation path
+                    val flow = if (imageUri != null) {
+                        if (!EngineState.engine.isMmprojLoaded()) {
+                            _generationError.tryEmit("Load a vision projector first — go to Models tab")
+                            return@launch
+                        }
+                        val rawBytes = getApplication<Application>().contentResolver
+                            .openInputStream(imageUri)?.use { it.readBytes() }
+                        if (rawBytes == null || rawBytes.isEmpty()) {
+                            _generationError.tryEmit("Failed to read image")
+                            return@launch
+                        }
+                        // Downscale large images to reduce vision token count
+                        val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
+                        EngineState.engine.generateChatWithImage(turns, imageBytes, params)
+                    } else {
+                        EngineState.engine.generateChat(turns, params)
+                    }
+
+                    flow.collect { chunk ->
+                            tokenCount++
+                            val current = _messages.value
+                            if (current.isNotEmpty()) {
+                                val last = current.last()
+                                val newContent = last.content + chunk.content
+                                val newThinking = if (thinkEnabled)
+                                    last.thinkingContent + chunk.thinking
+                                else
+                                    last.thinkingContent
+                                _messages.value = current.dropLast(1) +
+                                    last.copy(content = newContent, thinkingContent = newThinking)
+                            }
+                        }
+                    if (tokenCount == 0) {
+                        _generationError.tryEmit("Generation failed — prompt may exceed context window")
+                    }
+                } catch (e: Exception) {
+                    _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
+                } finally {
+                    _isGenerating.value = false
+                    persistCurrentConversation()
+                }
             }
         }
     }
@@ -525,6 +610,9 @@ fun ChatScreen(
     val transcriptionError  by chatViewModel.transcriptionError.collectAsState()
     val whisperLoaded       = EngineState.whisperEngine.isLoaded
 
+    val agentMode           by chatViewModel.agentMode.collectAsState()
+    val isAgentConfigured   by chatViewModel.isAgentConfigured.collectAsState()
+
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
     val drawerState   = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -533,6 +621,7 @@ fun ChatScreen(
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var showAgentKeyDialog     by remember { mutableStateOf(false) }
     var pendingModelPath       by remember { mutableStateOf<String?>(null) }
 
     var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
@@ -684,6 +773,10 @@ fun ChatScreen(
                     onThinkingToggle = { chatViewModel.toggleThinking() },
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
+                    agentConfigured  = isAgentConfigured,
+                    agentMode        = agentMode,
+                    onAgentToggle    = { chatViewModel.toggleAgentMode() },
+                    onAgentSetup     = { showAgentKeyDialog = true },
                     supportsAttachments  = isLoaded,
                     supportsMultimodal   = isMmprojLoaded && isLoaded,
                     selectedImageUri     = selectedImageUri,
@@ -862,6 +955,29 @@ fun ChatScreen(
                 chatViewModel.updateSystemPrompt(editingSystemPrompt)
                 showSystemPromptDialog = false
             }
+        )
+    }
+
+    if (showAgentKeyDialog) {
+        AgentApiKeyDialog(
+            hasExistingKey = !chatViewModel.agentPrefs.getTavilyApiKey().isNullOrBlank(),
+            onSave = { key ->
+                chatViewModel.agentPrefs.saveTavilyApiKey(key)
+                chatViewModel.agentPrefs.setAgentEnabled(true)
+                chatViewModel.enableAgentMode()
+                showAgentKeyDialog = false
+            },
+            onContinue = {
+                chatViewModel.enableAgentMode()
+                showAgentKeyDialog = false
+            },
+            onClear = {
+                chatViewModel.agentPrefs.clearTavilyApiKey()
+                chatViewModel.agentPrefs.setAgentEnabled(false)
+                chatViewModel.refreshAgentConfigured()
+                // Stay on dialog so user can enter a new key
+            },
+            onDismiss = { showAgentKeyDialog = false }
         )
     }
 }
@@ -1105,6 +1221,10 @@ private fun ChatInputBar(
     onAttachImage: () -> Unit = {},
     onAttachDocument: () -> Unit = {},
     onClearAttachment: () -> Unit = {},
+    agentConfigured: Boolean = false,
+    agentMode: Boolean = false,
+    onAgentToggle: () -> Unit = {},
+    onAgentSetup: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     onMicClick: () -> Unit = {},
@@ -1211,6 +1331,13 @@ private fun ChatInputBar(
                             onClick  = onThinkingToggle
                         )
                     }
+                    Spacer(Modifier.width(8.dp))
+                    InputToggleChip(
+                        icon     = Icons.Outlined.TravelExplore,
+                        label    = "Agent",
+                        active   = agentMode,
+                        onClick  = { if (agentConfigured) onAgentToggle() else onAgentSetup() }
+                    )
                     if (supportsAttachments) {
                         Spacer(Modifier.width(4.dp))
                         var showAttachMenu by remember { mutableStateOf(false) }
@@ -1433,6 +1560,108 @@ private fun SystemPromptDialog(
             }
         }
     )
+}
+
+@Composable
+private fun AgentApiKeyDialog(
+    hasExistingKey: Boolean,
+    onSave: (String) -> Unit,
+    onContinue: () -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (hasExistingKey) {
+        // Key already stored — show masked, offer Continue or Delete
+        AlertDialog(
+            onDismissRequest    = onDismiss,
+            containerColor      = AlpacaColors.Surface.Card,
+            titleContentColor   = AlpacaColors.Text.Primary,
+            textContentColor    = AlpacaColors.Text.Body,
+            shape               = RoundedCornerShape(12.dp),
+            title = {
+                Column {
+                    Text("Agent mode", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Spacer(Modifier.height(4.dp))
+                    MonoLabel("TAVILY API KEY")
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "API key: ••••••••••••",
+                        style = AlpacaType.BodyMd,
+                        color = AlpacaColors.Text.Body
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Enable agent mode with the saved key, or delete it to enter a new one.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Subtle
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onClear) {
+                    Text("Delete key", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onContinue) {
+                    Text("Continue", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                }
+            }
+        )
+    } else {
+        // No key yet — show input field
+        var key by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest    = onDismiss,
+            containerColor      = AlpacaColors.Surface.Card,
+            titleContentColor   = AlpacaColors.Text.Primary,
+            textContentColor    = AlpacaColors.Text.Body,
+            shape               = RoundedCornerShape(12.dp),
+            title = {
+                Column {
+                    Text("Agent mode", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Spacer(Modifier.height(4.dp))
+                    MonoLabel("TAVILY API KEY FOR WEB SEARCH")
+                }
+            },
+            text = {
+                OutlinedTextField(
+                    value         = key,
+                    onValueChange = { key = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    placeholder   = { Text("tvly-...", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    shape         = RoundedCornerShape(6.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor          = AlpacaColors.Text.Primary,
+                        unfocusedTextColor        = AlpacaColors.Text.Primary,
+                        cursorColor               = AlpacaColors.Accent.Primary,
+                        focusedBorderColor        = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor      = AlpacaColors.Line.Hairline,
+                        focusedPlaceholderColor   = AlpacaColors.Text.Subtle,
+                        unfocusedPlaceholderColor = AlpacaColors.Text.Subtle
+                    )
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", style = AlpacaType.LabelLg, color = AlpacaColors.Text.Muted)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { onSave(key) },
+                    enabled = key.isNotBlank()
+                ) {
+                    Text("Save", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                }
+            }
+        )
+    }
 }
 
 // ---- Message bubble ---------------------------------------------------------
