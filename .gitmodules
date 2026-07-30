@@ -7,3 +7,6 @@
 [submodule "app/src/main/cpp/whisper.cpp"]
     path = app/src/main/cpp/whisper.cpp
     url = https://github.com/ggerganov/whisper.cpp.git
+[submodule "app/src/main/cpp/stable-diffusion.cpp"]
+	path = app/src/main/cpp/stable-diffusion.cpp
+	url = https://github.com/leejet/stable-diffusion.cpp.git

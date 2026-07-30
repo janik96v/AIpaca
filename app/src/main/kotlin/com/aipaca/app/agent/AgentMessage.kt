@@ -86,8 +86,11 @@ fun List<AgentMessage>.toMessagesJson(): String {
                                             add(
                                                 buildJsonObject {
                                                     put("id", call.id)
-                                                    put("name", call.name)
-                                                    put("arguments", parseArgumentsObject(call.argumentsJson))
+                                                    put("type", "function")
+                                                    put("function", buildJsonObject {
+                                                        put("name", call.name)
+                                                        put("arguments", parseArgumentsObject(call.argumentsJson))
+                                                    })
                                                 }
                                             )
                                         }

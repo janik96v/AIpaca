@@ -127,15 +127,15 @@ class AgentOrchestrator(
                 return@flow
             }
 
-            // Append assistant turn with the raw text including tool-call tokens, so the
-            // model sees what it generated and doesn't repeat the same call.
-            messages += AgentMessage.Assistant(content = result.rawContent)
+            // Append assistant turn with structured tool calls so the Jinja
+            // template renders them in the model's native format.
+            messages += AgentMessage.Assistant(
+                content = result.content,
+                toolCalls = result.toolCalls
+            )
 
-            // Execute each tool call, collect results, then feed them back.
-            // Use Gemma 4 format (<|tool_response>...<tool_response|>) when the
-            // tool call came from the Gemma 4 parser, otherwise Hermes format.
-            val isGemma4 = result.toolCalls.any { it.id.startsWith("gemma4_") }
-            val toolResponses = StringBuilder()
+            // Execute each tool call, collect results, feed them back as
+            // proper Tool messages (role="tool" with tool_call_id).
             for (tc in result.toolCalls) {
                 val args = parseArguments(tc.argumentsJson)
 
@@ -157,21 +157,13 @@ class AgentOrchestrator(
                     toolResult.text
                 }
 
-                if (isGemma4) {
-                    toolResponses.appendLine("<|tool_response>")
-                    toolResponses.appendLine(truncated)
-                    toolResponses.appendLine("<tool_response|>")
-                } else {
-                    toolResponses.appendLine("<tool_response>")
-                    toolResponses.appendLine(truncated)
-                    toolResponses.appendLine("</tool_response>")
-                }
+                Log.d(TAG, "Tool response size: ${truncated.length} chars")
+                messages += AgentMessage.Tool(
+                    toolCallId = tc.id,
+                    name = tc.name,
+                    content = truncated
+                )
             }
-
-            // Feed tool results back as a user message
-            val toolResponseText = toolResponses.toString().trim()
-            Log.d(TAG, "Tool response size: ${toolResponseText.length} chars")
-            messages += AgentMessage.User(content = toolResponseText)
         }
 
         // Exhausted tool rounds — ask for a final answer without tools

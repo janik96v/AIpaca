@@ -671,6 +671,22 @@ struct ThinkingStreamParser {
     }
 };
 
+// Returns true when the generation prompt already opened a thinking block
+// (e.g. Qwen3.5 appends "<think>\n"), so the stream parser should start
+// inside_thinking = true.
+static bool generation_prompt_opens_thinking(const std::string& gen_prompt,
+                                              const std::string& start_tag) {
+    if (start_tag.empty() || gen_prompt.size() < start_tag.size()) return false;
+    auto pos = gen_prompt.rfind(start_tag);
+    if (pos == std::string::npos) return false;
+    for (size_t i = pos + start_tag.size(); i < gen_prompt.size(); i++) {
+        if (gen_prompt[i] != '\n' && gen_prompt[i] != ' ' && gen_prompt[i] != '\r') {
+            return false;
+        }
+    }
+    return true;
+}
+
 static common_chat_params format_chat_with_common(
         const llama_model* model,
         const std::vector<std::pair<std::string, std::string>>& turns,
@@ -859,6 +875,11 @@ static void run_generate(
             !chat_params.thinking_end_tag.empty()) {
         thinking_parser.start_tag = chat_params.thinking_start_tag;
         thinking_parser.end_tag = chat_params.thinking_end_tag;
+        if (generation_prompt_opens_thinking(chat_params.generation_prompt,
+                                              chat_params.thinking_start_tag)) {
+            thinking_parser.inside_thinking = true;
+            LOGD("run_generate: generation prompt opened thinking block, starting inside_thinking=true");
+        }
     }
 
     int n_generated = 0;
@@ -1853,6 +1874,10 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateAgent(
     if (cp.supports_thinking && !cp.thinking_start_tag.empty() && !cp.thinking_end_tag.empty()) {
         thinking_parser.start_tag = cp.thinking_start_tag;
         thinking_parser.end_tag   = cp.thinking_end_tag;
+        if (generation_prompt_opens_thinking(cp.generation_prompt, cp.thinking_start_tag)) {
+            thinking_parser.inside_thinking = true;
+            LOGD("nativeGenerateAgent: generation prompt opened thinking block, starting inside_thinking=true");
+        }
     }
 
     // ---- 7. Generation loop (accumulate full text for tool-call parsing) -----
@@ -1939,6 +1964,9 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateAgent(
     try {
         common_chat_parser_params parser_params(cp);
         parser_params.parse_tool_calls = true;
+        parser_params.parser.load(cp.parser);  // PEG grammar for tool-call extraction
+        parser_params.reasoning_format = cp.supports_thinking
+            ? COMMON_REASONING_FORMAT_DEEPSEEK : COMMON_REASONING_FORMAT_NONE;
         parsed_msg = common_chat_parse(full_generated_text, /*is_partial=*/false, parser_params);
     } catch (const std::exception& e) {
         LOGW("nativeGenerateAgent: tool-call parse failed (%s), returning raw content", e.what());
