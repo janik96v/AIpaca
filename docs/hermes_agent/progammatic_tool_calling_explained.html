@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Programmatic Tool Calling — wie das Stub-Modul Tokens spart</title>
+<style>
+  :root{
+    --terra:#C0603F; --terra-soft:#E4A085; --ink:#2A2622; --paper:#F5EFE6;
+    --card:#FBF7F0; --line:#E0D5C4; --muted:#7A6F62; --good:#4E7A56; --bad:#B04A3A;
+    --code-bg:#2C2824; --code-ink:#EDE6DA; --accent2:#3E6B8C;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:40px 22px 90px}
+  h1{font-family:Georgia,"Times New Roman",serif; font-size:30px; line-height:1.2; margin:0 0 6px}
+  h2{font-family:Georgia,serif; font-size:21px; margin:44px 0 8px; display:flex; align-items:center; gap:10px}
+  h2 .n{background:var(--terra); color:#fff; width:28px; height:28px; border-radius:50%;
+    display:inline-flex; align-items:center; justify-content:center; font-size:15px; font-family:sans-serif; flex:0 0 auto}
+  .sub{color:var(--muted); font-size:15px; margin:0 0 4px}
+  p{margin:8px 0}
+  .lead{font-size:16px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:14px 0}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace; font-size:13px; background:#EFE7D9; padding:1px 5px; border-radius:4px}
+  pre{background:var(--code-bg); color:var(--code-ink); padding:16px 18px; border-radius:10px; overflow-x:auto;
+    font-family:"SF Mono",Menlo,Consolas,monospace; font-size:12.5px; line-height:1.6; margin:12px 0}
+  pre .c{color:#8A9A7B}    /* comment */
+  pre .k{color:#E0A05A}    /* keyword */
+  pre .s{color:#C99A79}    /* string */
+  pre .f{color:#7FB3D5}    /* func */
+  pre .m{color:#B98BC9}    /* meta */
+  .tag{display:inline-block; font-size:11px; letter-spacing:.5px; text-transform:uppercase;
+    padding:2px 9px; border-radius:20px; font-weight:600}
+  .tag.slow{background:#F3DAD3; color:var(--bad)}
+  .tag.fast{background:#D8E7DB; color:var(--good)}
+
+  /* Split compare */
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px}
+  @media(max-width:720px){.split{grid-template-columns:1fr}}
+  .panel{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--card)}
+  .panel h3{margin:0; padding:12px 16px; font-family:sans-serif; font-size:14px; display:flex; justify-content:space-between; align-items:center}
+  .panel.slow h3{background:#F6E4DE}
+  .panel.fast h3{background:#DFEBE1}
+  .panel .body{padding:14px 16px}
+
+  /* round-trip rows */
+  .rt{display:flex; align-items:center; gap:8px; font-size:12.5px; padding:5px 0; border-bottom:1px dashed var(--line)}
+  .rt:last-child{border-bottom:none}
+  .rt .badge{flex:0 0 auto; width:22px; height:22px; border-radius:6px; background:var(--terra-soft); color:#5a2c1c;
+    display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700}
+  .rt .grow{flex:1}
+  .rt .cost{color:var(--bad); font-weight:600; font-variant-numeric:tabular-nums}
+  .rt .cost.z{color:var(--muted); font-weight:400}
+
+  /* token meter */
+  .meter-wrap{margin-top:14px}
+  .meter{height:26px; border-radius:8px; background:#EAE0D0; overflow:hidden; position:relative; border:1px solid var(--line)}
+  .meter .fill{height:100%; display:flex; align-items:center; padding-left:10px; color:#fff; font-size:12px; font-weight:600; white-space:nowrap}
+  .fill.slow{background:linear-gradient(90deg,#B04A3A,#C0603F)}
+  .fill.fast{background:linear-gradient(90deg,#4E7A56,#6a9a72)}
+  .meterlabel{font-size:12.5px; color:var(--muted); margin:6px 2px 0}
+
+  /* architecture diagram */
+  .arch{display:grid; grid-template-columns:1fr 90px 1fr; gap:0; align-items:stretch; margin:16px 0}
+  @media(max-width:720px){.arch{grid-template-columns:1fr; gap:12px}}
+  .proc{border:2px solid var(--line); border-radius:14px; padding:16px; background:#fff}
+  .proc.parent{border-color:var(--accent2)}
+  .proc.child{border-color:var(--terra)}
+  .proc .ptitle{font-weight:700; font-size:14px; margin-bottom:2px}
+  .proc .psub{font-size:11.5px; color:var(--muted); margin-bottom:12px}
+  .chip{display:block; font-size:12px; background:var(--card); border:1px solid var(--line);
+    border-radius:8px; padding:7px 10px; margin:6px 0}
+  .chip.hi{border-color:var(--terra); background:#FBEDE6}
+  .chip.hi2{border-color:var(--accent2); background:#E9F0F6}
+  .pipe{position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px}
+  @media(max-width:720px){.pipe{flex-direction:row; padding:4px 0}}
+  .pipe .sock{font-size:11px; color:var(--muted); text-align:center; writing-mode:horizontal-tb}
+  .arrow{font-size:20px; color:var(--terra); line-height:1}
+  .arrow.down{color:var(--accent2)}
+  .socklabel{font-size:10.5px; background:var(--ink); color:#fff; padding:2px 7px; border-radius:20px; text-align:center}
+
+  .callout{border-left:4px solid var(--terra); background:#FBEDE6; padding:12px 16px; border-radius:0 10px 10px 0; margin:14px 0; font-size:14.5px}
+  .callout.edge{border-left-color:var(--good); background:#E3EFE5}
+  .flow{counter-reset:step; margin:14px 0; padding:0; list-style:none}
+  .flow li{position:relative; padding:8px 0 8px 42px; font-size:14px; border-bottom:1px solid var(--line)}
+  .flow li:last-child{border-bottom:none}
+  .flow li::before{counter-increment:step; content:counter(step); position:absolute; left:0; top:8px;
+    width:28px; height:28px; background:var(--ink); color:#fff; border-radius:50%; display:flex;
+    align-items:center; justify-content:center; font-size:13px; font-weight:600}
+  .kv{font-size:12px; color:var(--muted); margin-top:2px}
+  strong{color:var(--ink)}
+  .foot{margin-top:40px; font-size:12.5px; color:var(--muted); border-top:1px solid var(--line); padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Das token­sparende Stub-Modul</h1>
+  <p class="sub">Programmatic Tool Calling (PTC) in Hermes — <code>tools/code_execution_tool.py</code></p>
+  <p class="lead">Die Grundidee in einem Satz: Statt jedes Tool einzeln über das Modell laufen zu lassen (jedes Zwischenergebnis kostet Kontext), schreibt das Modell <strong>ein Python-Skript</strong>, das die Tools in einem Nebenprozess aufruft — und nur das fertige, kondensierte Ergebnis kommt zurück.</p>
+
+  <!-- ============ 1. Das Problem ============ -->
+  <h2><span class="n">1</span> Das Problem: jedes Tool-Ergebnis klebt im Kontext</h2>
+  <p>Ein normaler Agent, der 50 Webseiten einlesen und die relevante Zeile finden soll, macht 50 Runden. Jede Runde schiebt das <em>volle</em> Rohergebnis in den Kontext — und der Kontext wird bei jedem weiteren Model-Call komplett neu mitgeschickt.</p>
+
+  <div class="split">
+    <div class="panel slow">
+      <h3><span>Normaler Tool-Loop</span> <span class="tag slow">teuer</span></h3>
+      <div class="body">
+        <div class="rt"><span class="badge">1</span><span class="grow">web_extract(url&nbsp;1) → 12 KB Rohtext</span><span class="cost">+3k</span></div>
+        <div class="rt"><span class="badge">2</span><span class="grow">web_extract(url&nbsp;2) → 9 KB Rohtext</span><span class="cost">+2.4k</span></div>
+        <div class="rt"><span class="badge">3</span><span class="grow">web_extract(url&nbsp;3) → 15 KB Rohtext</span><span class="cost">+3.8k</span></div>
+        <div class="rt"><span class="badge">…</span><span class="grow">… 47 weitere Runden …</span><span class="cost">+…</span></div>
+        <div class="rt"><span class="badge">50</span><span class="grow">web_extract(url&nbsp;50)</span><span class="cost">+2.9k</span></div>
+        <div class="meter-wrap">
+          <div class="meter"><div class="fill slow" style="width:100%">≈ 150 000 Tokens im Kontext</div></div>
+          <div class="meterlabel">50 Model-Runden · alle Rohtexte bleiben liegen</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel fast">
+      <h3><span>Mit execute_code</span> <span class="tag fast">billig</span></h3>
+      <div class="body">
+        <div class="rt"><span class="badge">1</span><span class="grow">Modell schreibt <strong>1 Skript</strong></span><span class="cost z">~600</span></div>
+        <div class="rt"><span class="badge">↻</span><span class="grow">Skript loopt 50× im Nebenprozess</span><span class="cost z">0</span></div>
+        <div class="rt"><span class="badge">🔒</span><span class="grow">50 Rohtexte bleiben <strong>im Kind</strong></span><span class="cost z">0</span></div>
+        <div class="rt"><span class="badge">✓</span><span class="grow">Skript <code>print()</code>et 8 Treffer-Zeilen</span><span class="cost z">~400</span></div>
+        <div class="rt"><span class="badge">2</span><span class="grow">Modell liest nur das Ergebnis</span><span class="cost z">—</span></div>
+        <div class="meter-wrap">
+          <div class="meter"><div class="fill fast" style="width:8%">≈ 1 000</div></div>
+          <div class="meterlabel">2 Model-Runden · nur Skript + Endergebnis kosten Kontext</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="kv">* Zahlen illustrativ. Der Punkt ist die Größenordnung: Kontextkosten skalieren nicht mehr mit der Anzahl der Tool-Calls, sondern nur noch mit der Größe des <em>finalen</em> Outputs.</p>
+
+  <!-- ============ 2. Was das Modell generiert bekommt ============ -->
+  <h2><span class="n">2</span> Das „Stub-Modul": eine Attrappe der echten Tools</h2>
+  <p>Wenn eine Session startet, generiert Hermes zur Laufzeit eine Datei <code>hermes_tools.py</code>. Für jedes der 7 erlaubten Sandbox-Tools (<code>web_search, web_extract, read_file, write_file, search_files, patch, terminal</code>) steht darin eine winzige Funktion — ein <strong>Stub</strong>. Der Stub tut die Arbeit nicht selbst; er reicht den Aufruf nur an den Elternprozess durch.</p>
+
+  <p><strong>So sieht ein generierter Stub aus</strong> (aus <code>generate_hermes_tools_module</code>, Zeile 346):</p>
+<pre><span class="c"># hermes_tools.py — zur Laufzeit erzeugt, liegt neben dem Skript</span>
+<span class="k">def</span> <span class="f">web_extract</span>(urls: list, char_limit: int = <span class="k">None</span>):
+    <span class="s">"""Extract content from URLs. Returns dict with results list…"""</span>
+    <span class="k">return</span> <span class="f">_call</span>(<span class="s">'web_extract'</span>, {<span class="s">"urls"</span>: urls, <span class="s">"char_limit"</span>: char_limit})</pre>
+  <p>Der ganze Körper ist ein einziger <code>_call(...)</code>. Das Modell sieht in seiner Anleitung genau diese Signaturen und ruft sie im Skript auf, als wären es normale Python-Funktionen — z. B. <code>from hermes_tools import web_extract</code>.</p>
+
+  <p><strong>Und das ist <code>_call</code></strong> — die Brücke, die aus einem Funktionsaufruf eine Nachricht an den Elternprozess macht (Zeile 460):</p>
+<pre><span class="k">def</span> <span class="f">_call</span>(tool_name, args):
+    request = json.dumps({
+        <span class="s">"tool"</span>: tool_name,
+        <span class="s">"args"</span>: args,
+        <span class="s">"token"</span>: os.environ[<span class="s">"HERMES_RPC_TOKEN"</span>],   <span class="c"># Auth</span>
+    }) + <span class="s">"\n"</span>
+    <span class="k">with</span> _call_lock:                 <span class="c"># ein Socket, seriell</span>
+        conn = _connect()             <span class="c"># AF_UNIX Socket zum Parent</span>
+        conn.sendall(request.encode())
+        <span class="c"># … liest die Antwort bis zum Newline …</span>
+    <span class="k">return</span> json.loads(raw)</pre>
+
+  <div class="callout">Das Skript hat <strong>keinen</strong> direkten Zugriff auf Netzwerk-Keys, Suchmaschinen oder das Dateisystem-Tool. Es kann nur über das Socket „bitte web_extract" sagen. Der Elternprozess entscheidet, ob und wie das ausgeführt wird — dieselbe Kontrolle wie bei einem normalen Tool-Call.</p></div>
+
+  <!-- ============ 3. Die Architektur ============ -->
+  <h2><span class="n">3</span> Zwei Prozesse, ein Socket dazwischen</h2>
+  <p>Der Trick lebt von der Trennung in zwei Betriebssystem-Prozesse, die über ein privates Unix-Socket reden:</p>
+
+  <div class="arch">
+    <div class="proc parent">
+      <div class="ptitle" style="color:var(--accent2)">🖥️ Elternprozess (Agent)</div>
+      <div class="psub">hat Modell, Credentials, die echten Tools</div>
+      <span class="chip hi2">RPC-Server-Thread<br><span class="kv">lauscht am Socket, prüft Token</span></span>
+      <span class="chip">handle_function_call()<br><span class="kv">derselbe Dispatcher wie bei normalen Tool-Calls</span></span>
+      <span class="chip">🔑 echte Tools: web, Dateien, Terminal</span>
+    </div>
+
+    <div class="pipe">
+      <div class="socklabel">/tmp/hermes_rpc_&lt;uuid&gt;.sock</div>
+      <div class="arrow">⟶</div>
+      <div class="sock">JSON-Request<br>+ Token</div>
+      <div class="arrow down">⟵</div>
+      <div class="sock">JSON-Ergebnis</div>
+      <div class="socklabel">chmod 0600 · Token-Auth</div>
+    </div>
+
+    <div class="proc child">
+      <div class="ptitle" style="color:var(--terra)">📦 Kindprozess (Sandbox)</div>
+      <div class="psub">frischer Python, Environment von Keys gesäubert</div>
+      <span class="chip hi">script.py<br><span class="kv">das vom Modell geschriebene Skript</span></span>
+      <span class="chip hi">hermes_tools.py<br><span class="kv">die Stub-Attrappen → rufen _call()</span></span>
+      <span class="chip">🗑️ 50 Rohergebnisse leben & sterben hier</span>
+    </div>
+  </div>
+
+  <p><strong>Der komplette Ablauf eines <code>execute_code</code>-Turns:</strong></p>
+  <ol class="flow">
+    <li>Modell schreibt ein Skript und übergibt es dem <code>execute_code</code>-Tool.
+      <div class="kv">Das ganze Skript wird <em>vorab</em> genehmigt (Security-Guard), weil es beliebiges Python ausführen könnte.</div></li>
+    <li>Parent erzeugt <code>hermes_tools.py</code> (Stubs) + ein Zufalls-Token, öffnet ein privates Unix-Socket und startet einen Lausch-Thread.</li>
+    <li>Parent startet einen <strong>Kindprozess</strong> für das Skript — mit von API-Keys/Tokens gesäubertem Environment. Das Kind kennt nur Socket-Pfad und Token.</li>
+    <li>Das Skript ruft <code>web_extract(...)</code> auf → der Stub schickt JSON durchs Socket → der Parent führt das <em>echte</em> Tool aus → schickt das Ergebnis zurück. Das wiederholt sich, so oft das Skript will (bis 50×).</li>
+    <li>Alle Zwischenergebnisse bleiben als Variablen im Kind. Das Skript filtert/aggregiert und gibt per <code>print()</code> nur das Wesentliche aus.</li>
+    <li>Der Parent fängt <strong>nur den stdout</strong> des Skripts ab (gedeckelt auf 50 KB) und gibt <em>ihn</em> als Tool-Ergebnis ans Modell zurück.</li>
+  </ol>
+
+  <div class="callout"><strong>Das ist der „Zero-Context"-Kern:</strong> Die 50 web_extract-Ergebnisse laufen zwar wirklich durch den Agenten — aber sie fließen durch das Socket in den Kindprozess und verpuffen dort. Ins Kontextfenster des Modells kommt nur, was das Skript am Ende <code>print()</code>et.</div>
+
+  <!-- ============ 4. Konkretes Beispiel ============ -->
+  <h2><span class="n">4</span> Ein konkretes Skript</h2>
+  <p>So könnte das Modell „durchsuche diese 50 Release-Notes nach Breaking Changes" in einem Turn lösen:</p>
+<pre><span class="k">from</span> hermes_tools <span class="k">import</span> web_extract
+
+urls = [ <span class="s">"https://…/v1"</span>, <span class="s">"https://…/v2"</span>, <span class="c"># … 50 URLs</span> ]
+
+hits = []
+<span class="k">for</span> url <span class="k">in</span> urls:
+    res = web_extract([url])                    <span class="c"># ← RPC in den Parent, Rohtext bleibt hier</span>
+    text = res[<span class="s">"results"</span>][0][<span class="s">"content"</span>]
+    <span class="k">for</span> line <span class="k">in</span> text.splitlines():
+        <span class="k">if</span> <span class="s">"breaking change"</span> <span class="k">in</span> line.lower():
+            hits.append(f<span class="s">"{url}: {line.strip()}"</span>)
+
+<span class="c"># NUR das hier kostet Kontext:</span>
+<span class="k">print</span>(f<span class="s">"{len(hits)} Breaking Changes gefunden:"</span>)
+<span class="k">print</span>(<span class="s">"\n"</span>.join(hits[:20]))</pre>
+  <p>50 Seiten à ~10 KB (= ~150k Tokens Rohtext) werden gelesen, aber das Modell sieht am Ende nur die ~20 Treffer-Zeilen. Dazu kommen eingebaute Helfer im Stub-Modul (<code>json_parse</code>, <code>shell_quote</code>, <code>retry</code>) gegen typische Skript-Fallen.</p>
+
+  <!-- ============ 5. Edge / AIpaca ============ -->
+  <h2><span class="n">5</span> Warum das für AIpaca besonders zählt</h2>
+  <div class="callout edge">Der teuerste Constraint auf einem Handy ist das <strong>winzige Kontextfenster</strong> eines on-device-Modells. Ein 3B-Modell kann keine 50 Zwischenergebnisse halten — mit diesem Muster muss es das auch nicht. Es schreibt ein kleines Skript, und die Batch-Arbeit passiert außerhalb des Kontexts. Der Mechanismus ist reines OS-Handwerk (Subprozess + Socket), völlig modell-unabhängig.</div>
+  <p>Eine Anpassung fürs Handy: Androids Prozess-Isolation ist restriktiver als auf einem Server. Statt eines vollen Subprozesses würde man on-device eher einen <strong>eingebetteten Interpreter mit sauberem Namespace</strong> nehmen — aber das Grundprinzip „Modell schreibt Skript, Tools laufen außerhalb des Kontexts, nur das Ergebnis kommt zurück" bleibt identisch und ist genau das, was Multi-Step-Arbeit auf kleinen Modellen überhaupt erst ermöglicht.</p>
+
+  <div class="foot">
+    Quelle: <code>tools/code_execution_tool.py</code> — <code>SANDBOX_ALLOWED_TOOLS</code> (Z. 62), <code>_TOOL_STUBS</code> (Z. 300), <code>generate_hermes_tools_module</code> (Z. 346), <code>_call</code> (Z. 460), <code>_rpc_server_loop</code> (Z. 564), <code>execute_code</code> (Z. 1188). Token-Zahlen sind illustrativ.
+  </div>
+
+</div>
+</body>
+</html>
