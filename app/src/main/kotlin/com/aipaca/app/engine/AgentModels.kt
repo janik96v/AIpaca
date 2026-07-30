@@ -41,7 +41,9 @@ data class AgentChunk(
  */
 data class AgentResult(
     val content: String,
-    val toolCalls: List<AgentToolCall> = emptyList()
+    val toolCalls: List<AgentToolCall> = emptyList(),
+    /** Original raw text before fallback parsing stripped tool-call markup. */
+    val rawContent: String = content
 ) {
     val hasToolCalls: Boolean get() = toolCalls.isNotEmpty()
 }

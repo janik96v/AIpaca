@@ -15,9 +15,9 @@ import kotlinx.serialization.json.put
  * Kept compact on purpose: `research_notes/20_kurzbericht_edge_kontext_agentik.md` §4 (Hebel C)
  * flags tool-schema size as a binary enablement factor under tight on-device context budgets.
  *
- * Shape:
+ * Shape (OpenAI-compatible, required by `common_chat_tools_parse_oaicompat`):
  * ```
- * [ {"name":"tavily_search","description":"...","parameters":{"type":"object","properties":{...}}} ]
+ * [ {"type":"function","function":{"name":"tavily_search","description":"...","parameters":{"type":"object","properties":{...}}}} ]
  * ```
  */
 fun List<ToolSpec>.toToolsJson(): String {
@@ -25,9 +25,12 @@ fun List<ToolSpec>.toToolsJson(): String {
         this@toToolsJson.forEach { tool ->
             add(
                 buildJsonObject {
-                    put("name", tool.name)
-                    put("description", tool.description ?: "")
-                    put("parameters", tool.inputSchema ?: emptyObjectSchema())
+                    put("type", "function")
+                    put("function", buildJsonObject {
+                        put("name", tool.name)
+                        put("description", tool.description ?: "")
+                        put("parameters", tool.inputSchema ?: emptyObjectSchema())
+                    })
                 }
             )
         }

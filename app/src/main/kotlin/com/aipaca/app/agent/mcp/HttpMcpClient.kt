@@ -1,5 +1,6 @@
 package com.aipaca.app.agent.mcp
 
+import android.util.Log
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -18,6 +19,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.encodeToJsonElement
 import java.util.concurrent.atomic.AtomicLong
+
+private const val TAG = "HttpMcpClient"
 
 /** Thrown for MCP protocol-level failures (transport errors, JSON-RPC `error` objects). */
 class McpException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -65,6 +68,7 @@ class HttpMcpClient(
 
     override suspend fun connect() {
         if (connected) return
+        Log.d(TAG, "connect: sending initialize to $serverUrl")
 
         val initResponse = postRpc(
             JsonRpcRequest(
@@ -74,11 +78,14 @@ class HttpMcpClient(
             )
         )
         initResponse.error?.let {
+            Log.e(TAG, "connect: initialize failed: ${it.code} ${it.message}")
             throw McpException("MCP initialize failed: ${it.code} ${it.message}")
         }
+        Log.d(TAG, "connect: initialize OK, sending notifications/initialized")
 
         postNotification(JsonRpcNotification(method = "notifications/initialized"))
         connected = true
+        Log.d(TAG, "connect: fully connected")
     }
 
     override suspend fun listTools(): List<ToolSpec> {
@@ -93,6 +100,7 @@ class HttpMcpClient(
 
     override suspend fun callTool(name: String, arguments: JsonObject): ToolResult {
         ensureConnected()
+        Log.d(TAG, "callTool: $name with args=$arguments")
         val response = postRpc(
             JsonRpcRequest(
                 id = nextId(),
@@ -127,7 +135,14 @@ class HttpMcpClient(
 
     private suspend fun postRpc(request: JsonRpcRequest): JsonRpcResponse {
         val bodyStr = json.encodeToString(JsonRpcRequest.serializer(), request)
-        val httpResponse = sendRaw(bodyStr)
+        Log.d(TAG, "postRpc: method=${request.method}, id=${request.id}")
+        val httpResponse = try {
+            sendRaw(bodyStr)
+        } catch (e: Exception) {
+            Log.e(TAG, "postRpc: HTTP request failed for method=${request.method}", e)
+            throw McpException("HTTP request failed for ${request.method}: ${e.message}", e)
+        }
+        Log.d(TAG, "postRpc: got HTTP ${httpResponse.status} for method=${request.method}")
         captureSessionId(httpResponse)
         if (!httpResponse.status.isSuccess()) {
             throw McpException("MCP server returned HTTP ${httpResponse.status} for method=${request.method}")

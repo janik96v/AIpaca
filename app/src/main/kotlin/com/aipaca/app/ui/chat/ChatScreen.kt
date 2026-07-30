@@ -3,6 +3,7 @@ package com.aipaca.app.ui.chat
 import android.Manifest
 import android.app.Application
 import android.content.pm.PackageManager
+import android.util.Log
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
@@ -107,8 +108,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.aipaca.app.EngineState
+import com.aipaca.app.agent.AgentConfig
 import com.aipaca.app.agent.AgentStep
-import com.aipaca.app.agent.newAgentLoop
+import com.aipaca.app.agent.newAgentOrchestrator
 import com.aipaca.app.agent.tool.ToolRegistry
 import com.aipaca.app.agent.tool.TavilyMcp
 import com.aipaca.app.data.AgentPrefs
@@ -369,48 +371,96 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 // ---- Agent path ----
                 var registry: ToolRegistry? = null
                 try {
+                    Log.d("ChatViewModel", "Agent path: building MCP client...")
                     val client = TavilyMcp.buildClient(agentPrefs)
                     if (client == null) {
+                        Log.w("ChatViewModel", "Agent not configured — buildClient returned null")
                         _generationError.tryEmit("Agent not configured — add Tavily API key")
                         return@launch
                     }
                     registry = ToolRegistry()
-                    registry.register(client)
-                    val loop = EngineState.newAgentLoop(registry)
+                    Log.d("ChatViewModel", "Agent path: connecting to MCP server...")
+                    try {
+                        kotlinx.coroutines.withTimeout(15_000) {
+                            registry!!.register(client)
+                        }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        Log.e("ChatViewModel", "MCP connection timed out after 15s", e)
+                        _generationError.tryEmit("Agent error: MCP server connection timed out")
+                        return@launch
+                    }
+                    Log.d("ChatViewModel", "Agent path: MCP connected, tools=${registry!!.manifest().map { it.name }}")
+                    val agentConfig = AgentConfig(
+                        generateParams = GenerateParams(
+                            maxTokens = 1536,
+                            thinkingEnabled = _thinkingEnabled.value
+                        )
+                    )
+                    val orchestrator = EngineState.newAgentOrchestrator(registry!!, agentConfig)
                     val turns = buildTurns(_messages.value.dropLast(1))
+                    Log.d("ChatViewModel", "Agent path: starting orchestrator.run(), turns=${turns.size}")
 
-                    fun updateAssistant(text: String) {
+                    fun updateAssistant(text: String, thinking: String? = null) {
                         val current = _messages.value
                         if (current.isNotEmpty()) {
                             val last = current.last()
-                            _messages.value = current.dropLast(1) + last.copy(content = text)
+                            val updated = if (thinking != null) {
+                                last.copy(content = text, thinkingContent = thinking)
+                            } else {
+                                last.copy(content = text)
+                            }
+                            _messages.value = current.dropLast(1) + updated
                         }
                     }
 
-                    val steps = loop.run(goal = content, history = turns)
                     val display = StringBuilder()
-                    for (step in steps) {
+                    val streamedContent = StringBuilder()
+                    val thinkingBuffer = StringBuilder()
+                    orchestrator.run(goal = content, history = turns).collect { step ->
+                        Log.d("ChatViewModel", "Agent step: ${step::class.simpleName}")
                         when (step) {
+                            is AgentStep.Thinking -> {
+                                if (step.thinkingText.isNotEmpty()) {
+                                    thinkingBuffer.append(step.thinkingText)
+                                }
+                                if (step.partialText.isNotEmpty()) {
+                                    streamedContent.append(step.partialText)
+                                }
+                                updateAssistant(
+                                    text = display.toString() + streamedContent.toString(),
+                                    thinking = thinkingBuffer.toString()
+                                )
+                            }
                             is AgentStep.ToolCall -> {
+                                // Clear streamed content (may contain raw tool syntax)
+                                streamedContent.clear()
                                 display.appendLine("\uD83D\uDD0D *Searching: ${step.name}...*\n")
-                                updateAssistant(display.toString())
+                                updateAssistant(display.toString(), thinkingBuffer.toString())
                             }
                             is AgentStep.ToolObservation -> {
                                 display.appendLine("\u2705 *Got results*\n")
+                                streamedContent.clear()
+                                thinkingBuffer.clear()
                                 updateAssistant(display.toString())
                             }
                             is AgentStep.FinalAnswer -> {
-                                updateAssistant(step.text)
+                                // Show final answer below the search status
+                                val finalText = if (display.isNotEmpty()) {
+                                    display.toString() + step.text
+                                } else {
+                                    step.text
+                                }
+                                updateAssistant(finalText, thinkingBuffer.toString())
                             }
                             is AgentStep.Error -> {
                                 _generationError.tryEmit("Agent error: ${step.message}")
-                                if (display.isEmpty()) updateAssistant("Agent error: ${step.message}")
+                                if (display.isEmpty() && streamedContent.isEmpty()) updateAssistant("Agent error: ${step.message}")
                                 else { display.appendLine("\n\nAgent error: ${step.message}"); updateAssistant(display.toString()) }
                             }
-                            is AgentStep.Thinking -> { /* intermediate thinking, skip */ }
                         }
                     }
                 } catch (e: Exception) {
+                    Log.e("ChatViewModel", "Agent path exception", e)
                     _generationError.tryEmit("Agent error: ${e.message ?: "unknown error"}")
                 } finally {
                     registry?.closeAll()
@@ -890,8 +940,8 @@ fun ChatScreen(
     }
 
     pendingModelPath?.let { path ->
-        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
-        val recommended = 1024
+        val contextOptions = listOf(4096, 8192, 16384, 32768, 65536)
+        val recommended = 10240
         AlertDialog(
             onDismissRequest = { pendingModelPath = null },
             title = { Text("Context Window", style = AlpacaType.TitleMd) },

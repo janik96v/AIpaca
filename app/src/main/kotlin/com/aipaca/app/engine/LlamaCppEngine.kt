@@ -1,11 +1,19 @@
 package com.aipaca.app.engine
 
 import android.util.Log
+import com.aipaca.app.agent.AgentMessage
+import com.aipaca.app.agent.toMessagesJson
+import com.aipaca.app.agent.toToolsJson
+import com.aipaca.app.agent.mcp.ToolSpec
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -115,6 +123,20 @@ class LlamaCppEngine : InferenceEngine {
         thinkingBudget: Int,
         callback: TokenCallback
     )
+
+    // ---- Agent / tool-calling JNI -------------------------------------------
+
+    private external fun nativeGenerateAgent(
+        ctxPtr: Long,
+        messagesJson: String,
+        toolsJson: String,
+        temperature: Float,
+        topP: Float,
+        repeatPenalty: Float,
+        maxTokens: Int,
+        thinkingBudget: Int,
+        callback: TokenCallback
+    ): String
 
     // ---- Mutable state -----------------------------------------------------
 
@@ -447,6 +469,136 @@ class LlamaCppEngine : InferenceEngine {
      */
     fun getSystemInfo(): String =
         if (_isLoaded.get()) nativeGetSystemInfo() else "model not loaded"
+
+    // ---- Agent / tool-calling public API ------------------------------------
+
+    private val agentJson = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Generate with native tool-calling support.
+     *
+     * Streams [AgentChunk]s during generation, then returns a final [AgentResult]
+     * as the last emitted element (with [AgentChunk.content] = "" and tool calls
+     * in a trailing emission). The caller collects the flow and uses the JNI
+     * return value to build the structured [AgentResult].
+     */
+    fun generateAgent(
+        messages: List<AgentMessage>,
+        tools: List<ToolSpec>,
+        params: GenerateParams
+    ): Flow<AgentChunk> = callbackFlow {
+        val ptr = contextPtr.get()
+        if (ptr == 0L) {
+            close(IllegalStateException("No model loaded"))
+            return@callbackFlow
+        }
+
+        val messagesJson = messages.toMessagesJson()
+        val toolsJson = tools.toToolsJson()
+        Log.d(TAG, "generateAgent: ${messages.size} messages, toolsJson=${toolsJson.length} chars, thinkingBudget=${if (params.thinkingEnabled) -1 else 0}")
+        Log.d(TAG, "generateAgent messagesJson: ${messagesJson.take(500)}...")
+
+        val startMs    = System.currentTimeMillis()
+        var tokenCount = 0
+
+        val callback = object : TokenCallback {
+            override fun onToken(content: String, thinking: String) {
+                tokenCount++
+                trySend(AgentChunk(content = content, thinking = thinking))
+            }
+        }
+
+        try {
+            val resultJson = withContext(Dispatchers.IO) {
+                nativeGenerateAgent(
+                    ctxPtr         = ptr,
+                    messagesJson   = messagesJson,
+                    toolsJson      = toolsJson,
+                    temperature    = params.temperature,
+                    topP           = params.topP,
+                    repeatPenalty  = params.repeatPenalty,
+                    maxTokens      = params.maxTokens,
+                    thinkingBudget = if (params.thinkingEnabled) -1 else 0,
+                    callback       = callback
+                )
+            }
+
+            // Parse structured result from JNI return value
+            val result = parseAgentResult(resultJson)
+            // Emit a final chunk carrying the parsed tool calls (if any)
+            if (result.hasToolCalls) {
+                trySend(AgentChunk(content = "__AGENT_RESULT__:$resultJson"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "generateAgent exception", e)
+            close(e)
+            return@callbackFlow
+        } finally {
+            val elapsedSec   = (System.currentTimeMillis() - startMs) / 1000f
+            lastTokensPerSec = if (elapsedSec > 0f) tokenCount / elapsedSec else 0f
+            lastTotalTokens  = tokenCount
+            Log.d(TAG, "Agent gen done: $tokenCount tokens @ ${"%.1f".format(lastTokensPerSec)} tok/s")
+        }
+
+        close()
+        awaitClose { nativeStopGeneration(ptr) }
+    }
+
+    /**
+     * Convenience: run agent generation and collect the full [AgentResult] (non-streaming).
+     */
+    suspend fun generateAgentResult(
+        messages: List<AgentMessage>,
+        tools: List<ToolSpec>,
+        params: GenerateParams
+    ): AgentResult = withContext(Dispatchers.IO) {
+        val ptr = contextPtr.get()
+        if (ptr == 0L) throw IllegalStateException("No model loaded")
+
+        val messagesJson = messages.toMessagesJson()
+        val toolsJson = tools.toToolsJson()
+
+        val callback = object : TokenCallback {
+            override fun onToken(content: String, thinking: String) { /* discard streaming */ }
+        }
+
+        val resultJson = nativeGenerateAgent(
+            ctxPtr         = ptr,
+            messagesJson   = messagesJson,
+            toolsJson      = toolsJson,
+            temperature    = params.temperature,
+            topP           = params.topP,
+            repeatPenalty  = params.repeatPenalty,
+            maxTokens      = params.maxTokens,
+            thinkingBudget = if (params.thinkingEnabled) -1 else 0,
+            callback       = callback
+        )
+
+        parseAgentResult(resultJson)
+    }
+
+    private fun parseAgentResult(jsonStr: String): AgentResult {
+        return try {
+            val root = agentJson.parseToJsonElement(jsonStr).jsonObject
+            if (root.containsKey("error")) {
+                Log.e(TAG, "Agent JNI error: ${root["error"]}")
+                return AgentResult(content = root["error"]?.jsonPrimitive?.content ?: "unknown error")
+            }
+            val content = root["content"]?.jsonPrimitive?.content ?: ""
+            val toolCalls = root["tool_calls"]?.jsonArray?.map { elem ->
+                val obj = elem.jsonObject
+                AgentToolCall(
+                    id            = obj["id"]?.jsonPrimitive?.content ?: "",
+                    name          = obj["name"]?.jsonPrimitive?.content ?: "",
+                    argumentsJson = obj["arguments"]?.toString() ?: "{}"
+                )
+            } ?: emptyList()
+            AgentResult(content = content, toolCalls = toolCalls)
+        } catch (e: Exception) {
+            Log.e(TAG, "parseAgentResult failed", e)
+            AgentResult(content = jsonStr)
+        }
+    }
 
     override fun getModelInfo(): ModelInfo {
         val ptr = contextPtr.get()

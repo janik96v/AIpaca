@@ -16,7 +16,8 @@ import com.aipaca.app.engine.GenerateParams
 data class AgentConfig(
     val persona: String = "You are AIpaca's on-device agent: helpful, concise, and honest about uncertainty.",
     val systemPrompt: String = "You can call tools to look things up on the web when your own knowledge " +
-        "is insufficient or the user asks about current events. Only call a tool when it is actually needed.",
+        "is insufficient or the user asks about current events. Only call a tool when it is actually needed. " +
+        "Never simulate or pretend to use tools — always use the actual tool_call format.",
     val maxToolRounds: Int = 4,
     val generateParams: GenerateParams = GenerateParams(maxTokens = 768)
 )
@@ -29,22 +30,9 @@ data class AgentConfig(
  * size as a binary enablement factor under tight on-device context budgets.
  */
 fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
-    if (tools.isEmpty()) return "$persona\n\n$systemPrompt"
-    val toolLines = tools.joinToString("\n") { tool ->
-        val desc = tool.description?.takeIf { it.isNotBlank() } ?: "no description"
-        "- ${tool.name}: $desc"
-    }
-    return buildString {
-        append(persona)
-        append("\n\n")
-        append(systemPrompt)
-        append("\n\nAvailable tools:\n")
-        append(toolLines)
-        append(
-            "\n\nTo call a tool, reply with EXACTLY this format and nothing else:\n" +
-                "<tool_call>\n{\"name\": \"tool_name\", \"arguments\": {\"key\": \"value\"}}\n</tool_call>\n\n" +
-                "After the tool result is returned to you, give the user a helpful final " +
-                "answer that incorporates the tool result. Do NOT repeat the tool call format in your final answer."
-        )
-    }
+    // NOTE: Do NOT include tool-calling format instructions here.
+    // The Jinja chat template (applied via common_chat_templates_apply in C++) already
+    // renders the model's native tool-call syntax. Duplicating instructions here confuses
+    // the model and causes it to hallucinate fake tool calls as plain text.
+    return "$persona\n\n$systemPrompt"
 }

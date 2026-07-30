@@ -3,6 +3,7 @@
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "chat.h"
+#include "nlohmann/json.hpp"
 #include "mtmd.h"
 #include "mtmd-helper.h"
 #include <android/log.h>
@@ -1671,4 +1672,299 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
             tokenCallback);
 
     env->ReleaseByteArrayElements(jImageBytes, imgBytes, JNI_ABORT);
+}
+
+// ---------------------------------------------------------------------------
+// nativeGenerateAgent
+//   Native tool-calling generation: applies Jinja tool templates, generates
+//   with streaming, then parses tool calls via llama.cpp's PEG parser.
+//   Returns JSON: {"content":"...","tool_calls":[{"id","name","arguments":{}}]}
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateAgent(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr,
+        jstring  jMessagesJson,
+        jstring  jToolsJson,
+        jfloat   temperature,
+        jfloat   topP,
+        jfloat   repeatPenalty,
+        jint     maxTokens,
+        jint     thinkingBudget,
+        jobject  tokenCallback)
+{
+    using json = nlohmann::ordered_json;
+
+    if (ctxPtr == 0L) {
+        LOGE("nativeGenerateAgent: null context pointer");
+        return env->NewStringUTF("{\"error\":\"null context\"}");
+    }
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    lc->stop_flag.store(false);
+
+    // ---- 1. Parse incoming JSON messages + tools ----------------------------
+    std::string messagesStr = jstring_to_std(env, jMessagesJson);
+    std::string toolsStr    = jstring_to_std(env, jToolsJson);
+
+    std::vector<common_chat_msg>  messages;
+    std::vector<common_chat_tool> tools;
+    try {
+        auto messagesObj = json::parse(messagesStr);
+        messages = common_chat_msgs_parse_oaicompat(messagesObj);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: failed to parse messagesJson: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"invalid messagesJson\"}");
+    }
+    try {
+        auto toolsObj = json::parse(toolsStr);
+        tools = common_chat_tools_parse_oaicompat(toolsObj);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: failed to parse toolsJson: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"invalid toolsJson\"}");
+    }
+
+    LOGI("nativeGenerateAgent: %zu messages, %zu tools, temp=%.2f maxTok=%d thinkBudget=%d",
+         messages.size(), tools.size(), (double)temperature, (int)maxTokens, (int)thinkingBudget);
+
+    // ---- 2. Apply Jinja chat template with tools ----------------------------
+    const llama_model* model = lc->model;
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+
+    common_chat_params cp;
+    try {
+        auto tmpls = common_chat_templates_init(model, "");
+
+        common_chat_templates_inputs inputs;
+        inputs.add_generation_prompt = true;
+        inputs.use_jinja             = true;
+        inputs.enable_thinking       = (thinkingBudget != 0);
+        inputs.reasoning_format      = (thinkingBudget != 0)
+                                         ? COMMON_REASONING_FORMAT_DEEPSEEK
+                                         : COMMON_REASONING_FORMAT_NONE;
+        inputs.messages              = messages;
+        inputs.tools                 = tools;
+        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        inputs.parallel_tool_calls   = false;
+
+        cp = common_chat_templates_apply(tmpls.get(), inputs);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: template apply failed: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"template apply failed\"}");
+    }
+
+    LOGD("nativeGenerateAgent: prompt_len=%zu format=%d supports_thinking=%d",
+         cp.prompt.size(), (int)cp.format, cp.supports_thinking ? 1 : 0);
+
+    // Log the last 500 chars of the rendered prompt to debug template issues
+    if (cp.prompt.size() > 500) {
+        LOGD("nativeGenerateAgent: prompt tail: ...%s", cp.prompt.substr(cp.prompt.size() - 500).c_str());
+    } else {
+        LOGD("nativeGenerateAgent: prompt: %s", cp.prompt.c_str());
+    }
+
+    // ---- 3. Tokenize --------------------------------------------------------
+    std::vector<llama_token> tokens(cp.prompt.size() + 64);
+    int n_tokens = llama_tokenize(
+            vocab, cp.prompt.c_str(), (int32_t)cp.prompt.size(),
+            tokens.data(), (int32_t)tokens.size(),
+            /*add_special=*/true, /*parse_special=*/true);
+    if (n_tokens < 0) {
+        tokens.resize(-n_tokens + 4);
+        n_tokens = llama_tokenize(
+                vocab, cp.prompt.c_str(), (int32_t)cp.prompt.size(),
+                tokens.data(), (int32_t)tokens.size(),
+                /*add_special=*/true, /*parse_special=*/true);
+    }
+    if (n_tokens <= 0) {
+        LOGE("nativeGenerateAgent: tokenisation failed");
+        return env->NewStringUTF("{\"error\":\"tokenisation failed\"}");
+    }
+    tokens.resize(n_tokens);
+
+    // Truncate to context window
+    const uint32_t n_ctx   = llama_n_ctx(lc->ctx);
+    const uint32_t reserve = std::max<uint32_t>(64u, n_ctx / 10u);
+    const uint32_t max_prompt_tokens = n_ctx > reserve ? n_ctx - reserve : n_ctx;
+    if ((uint32_t)n_tokens > max_prompt_tokens) {
+        LOGW("nativeGenerateAgent: truncating prompt %d → %u tokens", n_tokens, max_prompt_tokens);
+        tokens.erase(tokens.begin(), tokens.begin() + (n_tokens - (int)max_prompt_tokens));
+        n_tokens = (int)max_prompt_tokens;
+    }
+
+    LOGI("nativeGenerateAgent: %d prompt tokens (ctx=%u)", n_tokens, n_ctx);
+
+    // ---- 4. Callback setup --------------------------------------------------
+    jclass cbClass = env->GetObjectClass(tokenCallback);
+    jmethodID onTokMid = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;Ljava/lang/String;)V");
+    if (onTokMid == nullptr) {
+        LOGE("nativeGenerateAgent: could not find onToken on callback");
+        return env->NewStringUTF("{\"error\":\"callback method not found\"}");
+    }
+
+    // ---- 5. Prefill ---------------------------------------------------------
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+    llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
+    if (llama_decode(lc->ctx, batch) != 0) {
+        LOGE("nativeGenerateAgent: prefill decode failed");
+        return env->NewStringUTF("{\"error\":\"prefill failed\"}");
+    }
+
+    // ---- 6. Sampler chain ---------------------------------------------------
+    llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+            /*penalty_last_n=*/64,
+            /*penalty_repeat=*/repeatPenalty,
+            /*penalty_freq=*/0.0f,
+            /*penalty_present=*/0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    // Think suppression
+    ThinkSuppressor suppressor;
+    bool suppress_thinking = (thinkingBudget == 0);
+    if (suppress_thinking) {
+        auto tokenize_fn = [&](const std::string& text) -> std::vector<llama_token> {
+            std::vector<llama_token> toks(text.size() + 4);
+            int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
+                                   toks.data(), (int32_t)toks.size(),
+                                   /*add_special=*/false, /*parse_special=*/true);
+            if (n > 0) { toks.resize(n); } else { toks.clear(); }
+            return toks;
+        };
+        auto add_tag_pair = [&](const std::string& open, const std::string& close) {
+            auto ot = tokenize_fn(open);
+            auto ct = tokenize_fn(close);
+            if (!ot.empty() && !ct.empty()) {
+                suppressor.tag_pairs.push_back({ ot, ct });
+            }
+        };
+        if (!cp.thinking_start_tag.empty() && !cp.thinking_end_tag.empty()) {
+            add_tag_pair(cp.thinking_start_tag, cp.thinking_end_tag);
+        }
+        add_tag_pair("<think>", "</think>");
+    }
+
+    // Thinking stream parser for streaming thinking/content split
+    ThinkingStreamParser thinking_parser;
+    if (cp.supports_thinking && !cp.thinking_start_tag.empty() && !cp.thinking_end_tag.empty()) {
+        thinking_parser.start_tag = cp.thinking_start_tag;
+        thinking_parser.end_tag   = cp.thinking_end_tag;
+    }
+
+    // ---- 7. Generation loop (accumulate full text for tool-call parsing) -----
+    int n_generated = 0;
+    std::string full_generated_text;
+    std::string utf8_tail;
+
+    while (n_generated < maxTokens && !lc->stop_flag.load()) {
+        llama_token new_token;
+
+        if (suppress_thinking && suppressor.state == ThinkSuppressor::FORCING_CLOSE) {
+            new_token = suppressor.get_forced_token();
+            llama_sampler_accept(sampler, new_token);
+        } else {
+            new_token = llama_sampler_sample(sampler, lc->ctx, -1);
+        }
+
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            LOGD("nativeGenerateAgent: EOS after %d tokens", n_generated);
+            break;
+        }
+
+        if (suppress_thinking && suppressor.state != ThinkSuppressor::FORCING_CLOSE) {
+            suppressor.should_suppress(new_token);
+        }
+
+        const bool is_control = llama_vocab_is_control(vocab, new_token);
+
+        char piece_buf[512] = {};
+        int piece_len = llama_token_to_piece(
+                vocab, new_token, piece_buf, sizeof(piece_buf) - 1,
+                /*lstrip=*/0, /*special=*/is_control);
+        if (piece_len < 0) break;
+        piece_buf[piece_len] = '\0';
+
+        std::string piece = utf8_tail + std::string(piece_buf, piece_len);
+        utf8_tail.clear();
+        size_t tail_len = utf8_incomplete_tail(piece);
+        if (tail_len > 0) {
+            utf8_tail = piece.substr(piece.size() - tail_len);
+            piece.resize(piece.size() - tail_len);
+        }
+
+        // Accumulate raw text for tool-call parsing after generation
+        full_generated_text += piece;
+
+        // Stream to Kotlin via callback
+        if (is_control && !thinking_parser.should_consume_control_piece(piece)) {
+            // skip control tokens
+        } else {
+            auto parsed = thinking_parser.feed(piece);
+            if (!parsed.content.empty() || !parsed.thinking.empty()) {
+                jstring jContent  = env->NewStringUTF(parsed.content.c_str());
+                jstring jThinking = env->NewStringUTF(parsed.thinking.c_str());
+                env->CallVoidMethod(tokenCallback, onTokMid, jContent, jThinking);
+                env->DeleteLocalRef(jContent);
+                env->DeleteLocalRef(jThinking);
+            }
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            LOGE("nativeGenerateAgent: exception in callback; stopping");
+            break;
+        }
+
+        llama_batch next_batch = llama_batch_get_one(&new_token, 1);
+        if (llama_decode(lc->ctx, next_batch) != 0) {
+            LOGE("nativeGenerateAgent: decode failed at step %d", n_generated);
+            break;
+        }
+        n_generated++;
+    }
+
+    lc->tokens_per_sec = 0.0f; // will be set by Kotlin layer via elapsed time
+    llama_sampler_free(sampler);
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+    LOGI("nativeGenerateAgent: generated %d tokens, full_text_len=%zu",
+         n_generated, full_generated_text.size());
+
+    // ---- 8. Parse tool calls from generated text ----------------------------
+    common_chat_msg parsed_msg;
+    try {
+        common_chat_parser_params parser_params(cp);
+        parser_params.parse_tool_calls = true;
+        parsed_msg = common_chat_parse(full_generated_text, /*is_partial=*/false, parser_params);
+    } catch (const std::exception& e) {
+        LOGW("nativeGenerateAgent: tool-call parse failed (%s), returning raw content", e.what());
+        parsed_msg.content = full_generated_text;
+    }
+
+    // ---- 9. Build result JSON -----------------------------------------------
+    json result = json::object();
+    result["content"] = parsed_msg.content;
+
+    json tc_array = json::array();
+    for (const auto& tc : parsed_msg.tool_calls) {
+        json call = json::object();
+        call["id"]   = tc.id;
+        call["name"] = tc.name;
+        // arguments is a JSON string — parse it into an object for the Kotlin side
+        try {
+            call["arguments"] = json::parse(tc.arguments);
+        } catch (...) {
+            call["arguments"] = json::object();
+        }
+        tc_array.push_back(call);
+    }
+    result["tool_calls"] = tc_array;
+
+    std::string result_str = result.dump();
+    LOGI("nativeGenerateAgent: result=%s", result_str.c_str());
+    return env->NewStringUTF(result_str.c_str());
 }

@@ -64,7 +64,7 @@ interface InferenceEngine {
     suspend fun loadModel(
         modelPath: String,
         nThreads: Int    = 4,
-        contextSize: Int = 1024,
+        contextSize: Int = 10240,
         nGpuLayers: Int  = -1   // -1 = all layers; 0 = CPU only
     ): Result<Unit>
 
