@@ -14,7 +14,7 @@ private const val KEY_ENTRIES = "entries_json"
 
 /** Kind of model a [DownloadedModelEntry] represents. */
 @Serializable
-enum class ModelType { LLM, WHISPER }
+enum class ModelType { LLM, WHISPER, MMPROJ }
 
 /**
  * A single downloaded-from-Hugging-Face model file that has been persisted to

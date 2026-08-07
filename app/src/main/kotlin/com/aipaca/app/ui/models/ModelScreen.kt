@@ -23,6 +23,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -118,6 +120,20 @@ private val recommendedModels = listOf(
         notes                   = "Qwen3 generation model. Tested with Q4_0 quantization."
     ),
     RecommendedModel(
+        name                    = "Qwen3.5 4B",
+        manufacturer            = "unsloth",
+        manufacturerDescription = "Unsloth AI — specializes in memory-efficient, fast fine-tuning and GGUF exports of open models.",
+        features                = "Native multimodal agents, advanced reasoning, coding, multilingual support",
+        size                    = "~2.7 GB",
+        quantization            = "Q4_K_M",
+        architecture            = "Qwen3.5 (Alibaba Cloud)",
+        downloadUrl             = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF",
+        repoId                  = "unsloth/Qwen3.5-4B-GGUF",
+        modelType               = ModelType.LLM,
+        tested                  = true,
+        notes                   = "Qwen3.5 generation model. Tested with Q4_K_M quantization."
+    ),
+    RecommendedModel(
         name                    = "HY-MT 1.5 1.8B",
         manufacturer            = "tencent",
         manufacturerDescription = "Tencent AI Lab. HunyuanTranslate team, specializing in neural machine translation.",
@@ -190,9 +206,18 @@ fun ModelScreen(modifier: Modifier = Modifier) {
     val isLoadingMmproj by EngineState.isLoadingMmproj.collectAsState()
     val mmprojError     by EngineState.mmprojError.collectAsState()
 
+    val isLoadingModel  by EngineState.isLoadingModel.collectAsState()
+    val loadedModelPath by EngineState.modelPath.collectAsState()
+
     val downloadProgress by ModelDownloadManager.downloadProgress.collectAsState()
     val downloadedModels by ModelDownloadManager.downloadedModels.collectAsState()
     var pickerModel by remember { mutableStateOf<RecommendedModel?>(null) }
+    var mmprojPickerRepoId by remember { mutableStateOf<String?>(null) }
+    var pendingModelEntry by remember { mutableStateOf<DownloadedModelEntry?>(null) }
+    var loadingFilePath by remember { mutableStateOf<String?>(null) }
+
+    // Clear loadingFilePath when loading finishes
+    if (!isLoadingModel) loadingFilePath = null
 
     Column(
         modifier = modifier
@@ -255,13 +280,15 @@ fun ModelScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(horizontal = 24.dp)
             )
             DownloadedModelsSection(
-                entries = downloadedModels,
+                entries         = downloadedModels,
+                loadingFilePath = loadingFilePath,
+                loadedModelPath = loadedModelPath,
+                loadedMmprojPath = mmprojPath,
                 onLoad  = { entry ->
-                    scope.launch {
-                        when (entry.modelType) {
-                            ModelType.LLM     -> EngineState.loadModel(entry.filePath)
-                            ModelType.WHISPER -> EngineState.loadWhisperModel(entry.filePath)
-                        }
+                    when (entry.modelType) {
+                        ModelType.LLM     -> pendingModelEntry = entry
+                        ModelType.WHISPER -> scope.launch { EngineState.loadWhisperModel(entry.filePath) }
+                        ModelType.MMPROJ  -> scope.launch { EngineState.loadMmproj(entry.filePath) }
                     }
                 },
                 onDelete = { entry -> ModelDownloadManager.deleteDownload(entry.repoId, entry.fileName) }
@@ -310,7 +337,79 @@ fun ModelScreen(modifier: Modifier = Modifier) {
                     modelType   = model.modelType,
                     downloadUrl = file.downloadUrl
                 )
+                val repoId = model.repoId
                 pickerModel = null
+                // Offer mmproj download if this is an LLM repo
+                if (model.modelType == ModelType.LLM) {
+                    mmprojPickerRepoId = repoId
+                }
+            }
+        )
+    }
+
+    mmprojPickerRepoId?.let { repoId ->
+        MmprojFilePickerSheet(
+            repoId = repoId,
+            onDismiss = { mmprojPickerRepoId = null },
+            onFileSelected = { file ->
+                ModelDownloadManager.startDownload(
+                    repoId      = repoId,
+                    fileName    = file.name,
+                    modelType   = ModelType.MMPROJ,
+                    downloadUrl = file.downloadUrl
+                )
+                mmprojPickerRepoId = null
+            }
+        )
+    }
+
+    pendingModelEntry?.let { entry ->
+        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
+        val recommended = 1024
+        AlertDialog(
+            onDismissRequest = { pendingModelEntry = null },
+            title = { Text("Context Window", style = AlpacaType.TitleMd) },
+            text = {
+                Column {
+                    Text(
+                        "Choose how many tokens the model can hold in memory at once. " +
+                            "Larger = more document/history, but uses more RAM and is slower to start.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Muted
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    contextOptions.forEach { size ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingModelEntry = null
+                                    loadingFilePath = entry.filePath
+                                    scope.launch {
+                                        EngineState.loadModel(entry.filePath, contextSize = size)
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "$size tokens",
+                                style = AlpacaType.BodyMd,
+                                color = AlpacaColors.Text.Primary
+                            )
+                            if (size == recommended) {
+                                MonoLabel(text = "RECOMMENDED", tone = MonoLabelTone.Accent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingModelEntry = null }) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -759,6 +858,9 @@ private fun ActiveDownloadRow(
 @Composable
 private fun DownloadedModelsSection(
     entries: List<DownloadedModelEntry>,
+    loadingFilePath: String?,
+    loadedModelPath: String?,
+    loadedMmprojPath: String?,
     onLoad: (DownloadedModelEntry) -> Unit,
     onDelete: (DownloadedModelEntry) -> Unit,
     modifier: Modifier = Modifier
@@ -771,10 +873,16 @@ private fun DownloadedModelsSection(
     ) {
         EditorialSectionMark(label = "DOWNLOADED · ${entries.size}")
         entries.forEach { entry ->
+            val isLoaded = when (entry.modelType) {
+                ModelType.MMPROJ -> loadedMmprojPath == entry.filePath
+                else -> loadedModelPath == entry.filePath
+            }
             DownloadedModelRow(
-                entry    = entry,
-                onLoad   = { onLoad(entry) },
-                onDelete = { onDelete(entry) }
+                entry     = entry,
+                isLoading = loadingFilePath == entry.filePath,
+                isLoaded  = isLoaded,
+                onLoad    = { onLoad(entry) },
+                onDelete  = { onDelete(entry) }
             )
         }
     }
@@ -783,6 +891,8 @@ private fun DownloadedModelsSection(
 @Composable
 private fun DownloadedModelRow(
     entry: DownloadedModelEntry,
+    isLoading: Boolean,
+    isLoaded: Boolean,
     onLoad: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
@@ -811,8 +921,34 @@ private fun DownloadedModelRow(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment     = Alignment.CenterVertically
         ) {
-            TextButton(onClick = onLoad) {
-                Text("Load", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+            when {
+                isLoading -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = AlpacaColors.Accent.Primary
+                        )
+                        Text("Loading…", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                    }
+                }
+                isLoaded -> {
+                    Text(
+                        "Loaded",
+                        style = AlpacaType.LabelLg,
+                        color = AlpacaColors.State.Success,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+                else -> {
+                    TextButton(onClick = onLoad) {
+                        Text("Load", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                    }
+                }
             }
             TextButton(onClick = onDelete) {
                 Text("Delete", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)

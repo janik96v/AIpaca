@@ -109,11 +109,55 @@ class HuggingFaceApi(
         httpClient.close()
     }
 
+    /**
+     * Fetches the file tree for [repoId] and returns only the mmproj (multimodal projector)
+     * GGUF files — the vision adapter companions to a main model GGUF.
+     *
+     * @throws HuggingFaceApiException on transport errors or a non-2xx HTTP response.
+     */
+    suspend fun listMmprojFiles(repoId: String): List<HfFile> {
+        val url = treeUrl(repoId)
+        val response: HttpResponse = try {
+            httpClient.get(url)
+        } catch (e: Exception) {
+            throw HuggingFaceApiException("Failed to reach Hugging Face for repo=$repoId", e)
+        }
+        if (!response.status.isSuccess()) {
+            throw HuggingFaceApiException("Hugging Face returned HTTP ${response.status} for repo=$repoId")
+        }
+        val raw = response.bodyAsText()
+        val entries = try {
+            json.decodeFromString(ListSerializer(HfTreeEntry.serializer()), raw)
+        } catch (e: Exception) {
+            throw HuggingFaceApiException("Failed to parse Hugging Face tree response for repo=$repoId", e)
+        }
+        return entries
+            .asSequence()
+            .filter { it.type == "file" && isMmprojFile(it.path) }
+            .map { entry ->
+                HfFile(
+                    name = entry.path,
+                    sizeBytes = entry.lfs?.size?.takeIf { it > 0 } ?: entry.size,
+                    downloadUrl = resolveUrl(repoId, entry.path)
+                )
+            }
+            .toList()
+    }
+
     companion object {
         private val MODEL_EXTENSIONS = setOf("gguf", "bin")
 
+        /** True for downloadable model files, excluding mmproj companion files. */
         private fun isModelFile(path: String): Boolean =
-            MODEL_EXTENSIONS.contains(path.substringAfterLast('.', "").lowercase())
+            MODEL_EXTENSIONS.contains(path.substringAfterLast('.', "").lowercase()) &&
+                !isMmprojFile(path)
+
+        /** True for mmproj (multimodal projector) GGUF files — e.g. `mmproj-F16.gguf`. */
+        internal fun isMmprojFile(path: String): Boolean {
+            val name = path.substringAfterLast('/')
+            return name.lowercase().contains("mmproj") &&
+                name.substringAfterLast('.', "").lowercase() == "gguf"
+        }
 
         private fun treeUrl(repoId: String): String =
             "https://huggingface.co/api/models/$repoId/tree/main"

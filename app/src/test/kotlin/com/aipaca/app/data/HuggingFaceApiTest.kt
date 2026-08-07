@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -30,6 +31,8 @@ class HuggingFaceApiTest {
           {"type":"file","oid":"1a51dee18d79e82a14574214c505cd004fc010de","size":2825940672,"lfs":{"oid":"c0dd304d761e8e05d082cc2902d7624a7f87858fdfaa4ef098330ffe767ff0d3","size":2825940672,"pointerSize":135},"path":"llama-2-7b-chat.Q2_K.gguf"},
           {"type":"file","oid":"9e1fc06ff5d6ca3b37ba9a329d150debf2b6acd4","size":4081004224,"lfs":{"oid":"08a5566d61d7cb6b420c3e4387a39e0078e1f2fe5f055f3a03887385304d4bfa","size":4081004224,"pointerSize":135},"path":"llama-2-7b-chat.Q4_K_M.gguf"},
           {"type":"file","oid":"aabbccdd0011223344556677889900aabbccdd0","size":75000000,"path":"ggml-model-tiny.bin"},
+          {"type":"file","oid":"ff11223344556677889900aabbccddee00112233","size":560000000,"lfs":{"oid":"ee00112233445566778899aabbccddee00112233","size":560000000,"pointerSize":135},"path":"mmproj-F16.gguf"},
+          {"type":"file","oid":"ff22334455667788990011aabbccddee00223344","size":1120000000,"lfs":{"oid":"dd00112233445566778899aabbccddee00223344","size":1120000000,"pointerSize":135},"path":"mmproj-F32.gguf"},
           {"type":"directory","oid":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef","size":0,"path":"subfolder"}
         ]
     """.trimIndent()
@@ -85,6 +88,57 @@ class HuggingFaceApiTest {
         assertTrue(files.none { it.name == "config.json" })
         assertTrue(files.none { it.name == ".gitattributes" })
         assertTrue(files.none { it.name == "subfolder" })
+    }
+
+    @Test
+    fun `listModelFiles excludes mmproj files`() = runTest {
+        val api = HuggingFaceApi(httpClient = mockClient(sampleTreeJson))
+
+        val files = api.listModelFiles(repoId)
+
+        assertTrue(files.none { it.name.contains("mmproj") })
+    }
+
+    @Test
+    fun `listMmprojFiles returns only mmproj gguf entries`() = runTest {
+        val api = HuggingFaceApi(httpClient = mockClient(sampleTreeJson))
+
+        val files = api.listMmprojFiles(repoId)
+
+        assertEquals(2, files.size)
+
+        val f16 = files.single { it.name == "mmproj-F16.gguf" }
+        assertEquals(560_000_000L, f16.sizeBytes)
+        assertEquals(
+            "https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/mmproj-F16.gguf",
+            f16.downloadUrl
+        )
+
+        val f32 = files.single { it.name == "mmproj-F32.gguf" }
+        assertEquals(1_120_000_000L, f32.sizeBytes)
+    }
+
+    @Test
+    fun `listMmprojFiles returns empty list when no mmproj files exist`() = runTest {
+        val json = """[
+            {"type":"file","oid":"x","size":100000,"path":"model-Q4_0.gguf"}
+        ]"""
+        val api = HuggingFaceApi(httpClient = mockClient(json))
+
+        val files = api.listMmprojFiles(repoId)
+
+        assertTrue(files.isEmpty())
+    }
+
+    @Test
+    fun `isMmprojFile matches mmproj gguf files case-insensitively`() {
+        assertTrue(HuggingFaceApi.isMmprojFile("mmproj-F16.gguf"))
+        assertTrue(HuggingFaceApi.isMmprojFile("mmproj-BF16.gguf"))
+        assertTrue(HuggingFaceApi.isMmprojFile("MMPROJ-F32.gguf"))
+        assertTrue(HuggingFaceApi.isMmprojFile("model-mmproj-f16.gguf"))
+        assertFalse(HuggingFaceApi.isMmprojFile("mmproj-F16.bin"))
+        assertFalse(HuggingFaceApi.isMmprojFile("model-Q4_K_M.gguf"))
+        assertFalse(HuggingFaceApi.isMmprojFile("README.md"))
     }
 
     @Test

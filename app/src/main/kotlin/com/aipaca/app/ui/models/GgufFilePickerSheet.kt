@@ -42,6 +42,7 @@ import com.aipaca.app.data.HuggingFaceApi
 import com.aipaca.app.data.HuggingFaceApiException
 import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.components.EditorialDivider
+import com.aipaca.app.ui.components.InlineCTA
 import com.aipaca.app.ui.components.MonoLabel
 import com.aipaca.app.ui.components.MonoLabelTone
 import com.aipaca.app.ui.components.StatusChip
@@ -173,6 +174,166 @@ fun GgufFilePickerSheet(
                 }
             }
         }
+    }
+}
+
+// ---- Mmproj picker sheet ------------------------------------------------
+
+/**
+ * Material3 modal bottom sheet listing the mmproj (multimodal projector) GGUF
+ * files available in a Hugging Face repo, so the user can optionally download
+ * a vision adapter alongside the main model.
+ *
+ * Fetches via [HuggingFaceApi.listMmprojFiles] on first composition. Each row
+ * shows the file name and a human-readable size. The user can pick one to
+ * download or tap "Skip" to dismiss without downloading.
+ *
+ * @param repoId        Hugging Face repo id, e.g. `"unsloth/gemma-4-E2B-it-GGUF"`.
+ * @param onDismiss     Called when the sheet should close.
+ * @param onFileSelected Called with the tapped mmproj file.
+ * @param api           Injectable [HuggingFaceApi] — tests can supply a fake.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MmprojFilePickerSheet(
+    repoId: String,
+    onDismiss: () -> Unit,
+    onFileSelected: (HfFile) -> Unit,
+    modifier: Modifier = Modifier,
+    sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    api: HuggingFaceApi = remember { HuggingFaceApi() }
+) {
+    val scope = rememberCoroutineScope()
+    var uiState by remember(repoId) { mutableStateOf<PickerUiState>(PickerUiState.Loading) }
+
+    fun load() {
+        uiState = PickerUiState.Loading
+        scope.launch {
+            uiState = try {
+                val files = api.listMmprojFiles(repoId)
+                if (files.isEmpty()) {
+                    // No mmproj files — auto-dismiss
+                    onDismiss()
+                    return@launch
+                }
+                PickerUiState.Loaded(files)
+            } catch (e: HuggingFaceApiException) {
+                // Network error fetching mmproj list — just dismiss silently
+                // (the main model download already started, don't block on this)
+                onDismiss()
+                return@launch
+            }
+        }
+    }
+
+    LaunchedEffect(repoId) { load() }
+
+    fun dismiss() {
+        scope.launch {
+            sheetState.hide()
+        }.invokeOnCompletion {
+            onDismiss()
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = ::dismiss,
+        sheetState = sheetState,
+        modifier = modifier,
+        containerColor = AlpacaColors.Surface.Elevated
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+        ) {
+            MonoLabel(text = "VISION ADAPTER", tone = MonoLabelTone.Accent)
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Download vision projector?",
+                style = AlpacaType.TitleMd,
+                color = AlpacaColors.Text.Primary
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "This repo has mmproj files for image understanding. " +
+                    "Pick one to download, or skip.",
+                style = AlpacaType.BodySm,
+                color = AlpacaColors.Text.Muted
+            )
+            Spacer(Modifier.height(16.dp))
+            EditorialDivider(color = AlpacaColors.Line.Subtle)
+        }
+
+        when (val state = uiState) {
+            is PickerUiState.Loading -> PickerLoadingState()
+            is PickerUiState.Error -> {
+                // Shouldn't reach here (we dismiss on error), but handle gracefully
+                dismiss()
+            }
+            is PickerUiState.Loaded -> {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(bottom = 8.dp)
+                ) {
+                    items(state.files, key = { it.name }) { file ->
+                        MmprojFileRow(
+                            file = file,
+                            onClick = {
+                                onFileSelected(file)
+                                dismiss()
+                            }
+                        )
+                        EditorialDivider(
+                            color = AlpacaColors.Line.Subtle,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    InlineCTA(text = "Skip", onClick = ::dismiss)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MmprojFileRow(
+    file: HfFile,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = file.name,
+                style = AlpacaType.BodyMd,
+                color = AlpacaColors.Text.Primary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = formatFileSize(file.sizeBytes),
+                style = AlpacaType.BodySm,
+                color = AlpacaColors.Text.Muted
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        StatusChip(text = "VISION", tone = ChipTone.Neutral)
     }
 }
 
