@@ -1366,28 +1366,59 @@ private fun ChatInputBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    InputToggleChip(
-                        icon     = Icons.Outlined.SmartToy,
-                        label    = "Sys",
-                        active   = systemPrompt.isNotBlank(),
-                        onClick  = onSystemPromptClick
-                    )
-                    if (supportsThinking) {
-                        Spacer(Modifier.width(8.dp))
-                        InputToggleChip(
-                            icon     = Icons.Outlined.Psychology,
-                            label    = "Think",
-                            active   = thinkingEnabled,
-                            onClick  = onThinkingToggle
-                        )
+                    // Modes overflow menu (Sys, Think, Agent)
+                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || agentMode
+                    var showModeMenu by remember { mutableStateOf(false) }
+                    Box {
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showModeMenu = true }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Outlined.Menu,
+                                contentDescription = "Modes",
+                                tint               = if (anyModeActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted,
+                                modifier           = Modifier.size(18.dp)
+                            )
+                            Text(
+                                "Modes",
+                                style = AlpacaType.LabelMd,
+                                color = if (anyModeActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted
+                            )
+                        }
+                        DropdownMenu(
+                            expanded         = showModeMenu,
+                            onDismissRequest = { showModeMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text        = { Text("System Prompt", style = AlpacaType.BodyMd,
+                                    color = if (systemPrompt.isNotBlank()) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.SmartToy, null, Modifier.size(18.dp),
+                                    tint = if (systemPrompt.isNotBlank()) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onSystemPromptClick() }
+                            )
+                            if (supportsThinking) {
+                                DropdownMenuItem(
+                                    text        = { Text("Thinking", style = AlpacaType.BodyMd,
+                                        color = if (thinkingEnabled) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                    leadingIcon = { Icon(Icons.Outlined.Psychology, null, Modifier.size(18.dp),
+                                        tint = if (thinkingEnabled) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                    onClick     = { onThinkingToggle() }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text        = { Text("Agent", style = AlpacaType.BodyMd,
+                                    color = if (agentMode) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.TravelExplore, null, Modifier.size(18.dp),
+                                    tint = if (agentMode) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { if (agentConfigured) onAgentToggle() else { showModeMenu = false; onAgentSetup() } }
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(8.dp))
-                    InputToggleChip(
-                        icon     = Icons.Outlined.TravelExplore,
-                        label    = "Agent",
-                        active   = agentMode,
-                        onClick  = { if (agentConfigured) onAgentToggle() else onAgentSetup() }
-                    )
                     if (supportsAttachments) {
                         Spacer(Modifier.width(4.dp))
                         var showAttachMenu by remember { mutableStateOf(false) }
