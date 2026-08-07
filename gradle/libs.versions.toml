@@ -13,6 +13,9 @@ coilCompose = "2.7.0"
 androidxSecurityCrypto = "1.1.0-alpha06"
 zxingCore = "3.5.3"
 pdfboxAndroid = "2.0.27.0"
+junit = "4.13.2"
+kotlinTest = "2.0.21"
+kotlinxCoroutinesTest = "1.9.0"
 
 [libraries]
 # AndroidX Core
@@ -46,6 +49,12 @@ ktor-server-content-negotiation = { group = "io.ktor", name = "ktor-server-conte
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json-jvm", version.ref = "ktor" }
 ktor-server-status-pages = { group = "io.ktor", name = "ktor-server-status-pages-jvm", version.ref = "ktor" }
 
+# Ktor client (for outbound HTTP calls, e.g. the Hugging Face model tree API)
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core-jvm", version.ref = "ktor" }
+ktor-client-cio = { group = "io.ktor", name = "ktor-client-cio-jvm", version.ref = "ktor" }
+ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation-jvm", version.ref = "ktor" }
+ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock-jvm", version.ref = "ktor" }
+
 # Security
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "androidxSecurityCrypto" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
@@ -54,6 +63,11 @@ pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref
 # Kotlinx
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
+
+# Test
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+kotlin-test = { group = "org.jetbrains.kotlin", name = "kotlin-test", version.ref = "kotlinTest" }
 
 # Coil
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coilCompose" }

@@ -23,6 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,6 +41,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.aipaca.app.EngineState
+import com.aipaca.app.data.DownloadProgress
+import com.aipaca.app.data.DownloadState
+import com.aipaca.app.data.DownloadedModelEntry
+import com.aipaca.app.data.ModelDownloadManager
+import com.aipaca.app.data.ModelType
 import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.components.EditorialDivider
 import com.aipaca.app.ui.components.EditorialMasthead
@@ -63,6 +71,8 @@ private data class RecommendedModel(
     val quantization: String,
     val architecture: String,
     val downloadUrl: String,
+    val repoId: String,
+    val modelType: ModelType,
     val tested: Boolean,
     val experimental: Boolean = false,
     val notes: String? = null
@@ -78,6 +88,8 @@ private val recommendedModels = listOf(
         quantization            = "Q4_0",
         architecture            = "Gemma 4 (Google DeepMind)",
         downloadUrl             = "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF",
+        repoId                  = "unsloth/gemma-4-E2B-it-GGUF",
+        modelType               = ModelType.LLM,
         tested                  = true
     ),
     RecommendedModel(
@@ -89,6 +101,8 @@ private val recommendedModels = listOf(
         quantization            = "Q4_0",
         architecture            = "Qwen 2.5 (Alibaba Cloud)",
         downloadUrl             = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF",
+        repoId                  = "Qwen/Qwen2.5-3B-Instruct-GGUF",
+        modelType               = ModelType.LLM,
         tested                  = true
     ),
     RecommendedModel(
@@ -100,8 +114,24 @@ private val recommendedModels = listOf(
         quantization            = "Q4_0",
         architecture            = "Qwen3 (Alibaba Cloud)",
         downloadUrl             = "https://huggingface.co/Qwen/Qwen3-4B-GGUF",
+        repoId                  = "Qwen/Qwen3-4B-GGUF",
+        modelType               = ModelType.LLM,
         tested                  = true,
         notes                   = "Qwen3 generation model. Tested with Q4_0 quantization."
+    ),
+    RecommendedModel(
+        name                    = "Qwen3.5 4B",
+        manufacturer            = "unsloth",
+        manufacturerDescription = "Unsloth AI — specializes in memory-efficient, fast fine-tuning and GGUF exports of open models.",
+        features                = "Native multimodal agents, advanced reasoning, coding, multilingual support",
+        size                    = "~2.7 GB",
+        quantization            = "Q4_K_M",
+        architecture            = "Qwen3.5 (Alibaba Cloud)",
+        downloadUrl             = "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF",
+        repoId                  = "unsloth/Qwen3.5-4B-GGUF",
+        modelType               = ModelType.LLM,
+        tested                  = true,
+        notes                   = "Qwen3.5 generation model. Tested with Q4_K_M quantization."
     ),
     RecommendedModel(
         name                    = "HY-MT 1.5 1.8B",
@@ -112,14 +142,56 @@ private val recommendedModels = listOf(
         quantization            = "TBD",
         architecture            = "HY-MT 1.5 (Tencent)",
         downloadUrl             = "https://huggingface.co/tencent/HY-MT1.5-1.8B-GGUF/tree/main",
+        repoId                  = "tencent/HY-MT1.5-1.8B-GGUF",
+        modelType               = ModelType.LLM,
         tested                  = false,
         experimental            = true,
         notes                   = "GGUF variant not yet confirmed. Visit the Hugging Face page to check for compatible quantizations."
+    ),
+    RecommendedModel(
+        name                    = "Whisper Tiny",
+        manufacturer            = "ggerganov",
+        manufacturerDescription = "whisper.cpp — GGML-format ports of OpenAI's Whisper speech recognition models.",
+        features                = "On-device speech-to-text, fastest / smallest Whisper tier",
+        size                    = "~75 MB",
+        quantization            = "F16",
+        architecture            = "Whisper Tiny (OpenAI)",
+        downloadUrl             = "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+        repoId                  = "ggerganov/whisper.cpp",
+        modelType               = ModelType.WHISPER,
+        tested                  = true
+    ),
+    RecommendedModel(
+        name                    = "Whisper Base",
+        manufacturer            = "ggerganov",
+        manufacturerDescription = "whisper.cpp — GGML-format ports of OpenAI's Whisper speech recognition models.",
+        features                = "On-device speech-to-text, balanced speed/accuracy",
+        size                    = "~140 MB",
+        quantization            = "F16",
+        architecture            = "Whisper Base (OpenAI)",
+        downloadUrl             = "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+        repoId                  = "ggerganov/whisper.cpp",
+        modelType               = ModelType.WHISPER,
+        tested                  = true
+    ),
+    RecommendedModel(
+        name                    = "Whisper Small",
+        manufacturer            = "ggerganov",
+        manufacturerDescription = "whisper.cpp — GGML-format ports of OpenAI's Whisper speech recognition models.",
+        features                = "On-device speech-to-text, higher accuracy tier",
+        size                    = "~460 MB",
+        quantization            = "F16",
+        architecture            = "Whisper Small (OpenAI)",
+        downloadUrl             = "https://huggingface.co/ggerganov/whisper.cpp/tree/main",
+        repoId                  = "ggerganov/whisper.cpp",
+        modelType               = ModelType.WHISPER,
+        tested                  = true
     )
 )
 
 // ---- Screen -----------------------------------------------------------------
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ModelScreen(modifier: Modifier = Modifier) {
     val scrollState     = rememberScrollState()
@@ -133,6 +205,19 @@ fun ModelScreen(modifier: Modifier = Modifier) {
     val mmprojPath      by EngineState.mmprojPath.collectAsState()
     val isLoadingMmproj by EngineState.isLoadingMmproj.collectAsState()
     val mmprojError     by EngineState.mmprojError.collectAsState()
+
+    val isLoadingModel  by EngineState.isLoadingModel.collectAsState()
+    val loadedModelPath by EngineState.modelPath.collectAsState()
+
+    val downloadProgress by ModelDownloadManager.downloadProgress.collectAsState()
+    val downloadedModels by ModelDownloadManager.downloadedModels.collectAsState()
+    var pickerModel by remember { mutableStateOf<RecommendedModel?>(null) }
+    var mmprojPickerRepoId by remember { mutableStateOf<String?>(null) }
+    var pendingModelEntry by remember { mutableStateOf<DownloadedModelEntry?>(null) }
+    var loadingFilePath by remember { mutableStateOf<String?>(null) }
+
+    // Clear loadingFilePath when loading finishes
+    if (!isLoadingModel) loadingFilePath = null
 
     Column(
         modifier = modifier
@@ -175,6 +260,41 @@ fun ModelScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        // ---- Active downloads section ----
+        val activeDownloads = downloadProgress.values.filter { it.state == DownloadState.DOWNLOADING }
+        if (activeDownloads.isNotEmpty()) {
+            EditorialDivider(
+                color    = AlpacaColors.Line.Subtle,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            ActiveDownloadsSection(
+                downloads = activeDownloads,
+                onCancel  = { repoId, fileName -> ModelDownloadManager.cancelDownload(repoId, fileName) }
+            )
+        }
+
+        // ---- Downloaded models section ----
+        if (downloadedModels.isNotEmpty()) {
+            EditorialDivider(
+                color    = AlpacaColors.Line.Subtle,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+            DownloadedModelsSection(
+                entries         = downloadedModels,
+                loadingFilePath = loadingFilePath,
+                loadedModelPath = loadedModelPath,
+                loadedMmprojPath = mmprojPath,
+                onLoad  = { entry ->
+                    when (entry.modelType) {
+                        ModelType.LLM     -> pendingModelEntry = entry
+                        ModelType.WHISPER -> scope.launch { EngineState.loadWhisperModel(entry.filePath) }
+                        ModelType.MMPROJ  -> scope.launch { EngineState.loadMmproj(entry.filePath) }
+                    }
+                },
+                onDelete = { entry -> ModelDownloadManager.deleteDownload(entry.repoId, entry.fileName) }
+            )
+        }
+
         EditorialDivider(
             color    = AlpacaColors.Line.Subtle,
             modifier = Modifier.padding(horizontal = 24.dp)
@@ -185,7 +305,8 @@ fun ModelScreen(modifier: Modifier = Modifier) {
         recommendedModels.forEachIndexed { index, model ->
             ModelEntry(
                 index = index + 1,
-                model = model
+                model = model,
+                onDownloadClick = { pickerModel = model }
             )
             if (index < recommendedModels.size - 1) {
                 EditorialDivider(
@@ -203,6 +324,94 @@ fun ModelScreen(modifier: Modifier = Modifier) {
         QuantGuide()
 
         Spacer(Modifier.height(32.dp))
+    }
+
+    pickerModel?.let { model ->
+        GgufFilePickerSheet(
+            repoId = model.repoId,
+            onDismiss = { pickerModel = null },
+            onFileSelected = { file ->
+                ModelDownloadManager.startDownload(
+                    repoId      = model.repoId,
+                    fileName    = file.name,
+                    modelType   = model.modelType,
+                    downloadUrl = file.downloadUrl
+                )
+                val repoId = model.repoId
+                pickerModel = null
+                // Offer mmproj download if this is an LLM repo
+                if (model.modelType == ModelType.LLM) {
+                    mmprojPickerRepoId = repoId
+                }
+            }
+        )
+    }
+
+    mmprojPickerRepoId?.let { repoId ->
+        MmprojFilePickerSheet(
+            repoId = repoId,
+            onDismiss = { mmprojPickerRepoId = null },
+            onFileSelected = { file ->
+                ModelDownloadManager.startDownload(
+                    repoId      = repoId,
+                    fileName    = file.name,
+                    modelType   = ModelType.MMPROJ,
+                    downloadUrl = file.downloadUrl
+                )
+                mmprojPickerRepoId = null
+            }
+        )
+    }
+
+    pendingModelEntry?.let { entry ->
+        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
+        val recommended = 1024
+        AlertDialog(
+            onDismissRequest = { pendingModelEntry = null },
+            title = { Text("Context Window", style = AlpacaType.TitleMd) },
+            text = {
+                Column {
+                    Text(
+                        "Choose how many tokens the model can hold in memory at once. " +
+                            "Larger = more document/history, but uses more RAM and is slower to start.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Muted
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    contextOptions.forEach { size ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingModelEntry = null
+                                    loadingFilePath = entry.filePath
+                                    scope.launch {
+                                        EngineState.loadModel(entry.filePath, contextSize = size)
+                                    }
+                                }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "$size tokens",
+                                style = AlpacaType.BodyMd,
+                                color = AlpacaColors.Text.Primary
+                            )
+                            if (size == recommended) {
+                                MonoLabel(text = "RECOMMENDED", tone = MonoLabelTone.Accent)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { pendingModelEntry = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -325,6 +534,7 @@ private fun QuantGuideRow(entry: QuantEntry, modifier: Modifier = Modifier) {
 private fun ModelEntry(
     index: Int,
     model: RecommendedModel,
+    onDownloadClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -409,13 +619,22 @@ private fun ModelEntry(
 
                 Spacer(Modifier.height(16.dp))
 
-                InlineCTA(
-                    text    = "Open on Hugging Face",
-                    onClick = {
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(model.downloadUrl))
-                        context.startActivity(intent)
-                    }
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment     = Alignment.CenterVertically
+                ) {
+                    InlineCTA(
+                        text    = "Download",
+                        onClick = onDownloadClick
+                    )
+                    InlineCTA(
+                        text    = "Open on Hugging Face",
+                        onClick = {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(model.downloadUrl))
+                            context.startActivity(intent)
+                        }
+                    )
+                }
             }
         }
     }
@@ -551,6 +770,188 @@ private fun VisionProjectorSection(
                 TextButton(onClick = onUnload) {
                     Text("Unload", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
                 }
+            }
+        }
+    }
+}
+
+// ---- Active downloads section ------------------------------------------------
+
+@Composable
+private fun ActiveDownloadsSection(
+    downloads: List<DownloadProgress>,
+    onCancel: (String, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        EditorialSectionMark(label = "DOWNLOADING")
+        downloads.forEach { progress ->
+            ActiveDownloadRow(
+                progress = progress,
+                onCancel = { onCancel(progress.repoId, progress.fileName) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActiveDownloadRow(
+    progress: DownloadProgress,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier              = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            Text(
+                text     = progress.fileName,
+                style    = AlpacaType.BodyMd,
+                color    = AlpacaColors.Text.Primary,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(12.dp))
+            TextButton(onClick = onCancel) {
+                Text("Cancel", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        if (progress.fraction >= 0f) {
+            LinearProgressIndicator(
+                progress = { progress.fraction },
+                color    = AlpacaColors.Accent.Primary,
+                trackColor = AlpacaColors.Surface.Elevated,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = "${formatFileSize(progress.bytesRead)} / ${formatFileSize(progress.totalBytes)}",
+                style = AlpacaType.BodySm,
+                color = AlpacaColors.Text.Muted
+            )
+        } else {
+            LinearProgressIndicator(
+                color    = AlpacaColors.Accent.Primary,
+                trackColor = AlpacaColors.Surface.Elevated,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = formatFileSize(progress.bytesRead),
+                style = AlpacaType.BodySm,
+                color = AlpacaColors.Text.Muted
+            )
+        }
+    }
+}
+
+// ---- Downloaded models section ------------------------------------------------
+
+@Composable
+private fun DownloadedModelsSection(
+    entries: List<DownloadedModelEntry>,
+    loadingFilePath: String?,
+    loadedModelPath: String?,
+    loadedMmprojPath: String?,
+    onLoad: (DownloadedModelEntry) -> Unit,
+    onDelete: (DownloadedModelEntry) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        EditorialSectionMark(label = "DOWNLOADED · ${entries.size}")
+        entries.forEach { entry ->
+            val isLoaded = when (entry.modelType) {
+                ModelType.MMPROJ -> loadedMmprojPath == entry.filePath
+                else -> loadedModelPath == entry.filePath
+            }
+            DownloadedModelRow(
+                entry     = entry,
+                isLoading = loadingFilePath == entry.filePath,
+                isLoaded  = isLoaded,
+                onLoad    = { onLoad(entry) },
+                onDelete  = { onDelete(entry) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadedModelRow(
+    entry: DownloadedModelEntry,
+    isLoading: Boolean,
+    isLoaded: Boolean,
+    onLoad: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier              = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text     = entry.fileName,
+                style    = AlpacaType.BodyMd,
+                color    = AlpacaColors.Text.Primary,
+                maxLines = 1
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = "${entry.modelType.name} · ${formatFileSize(entry.sizeBytes)}",
+                style = AlpacaType.BodySm,
+                color = AlpacaColors.Text.Muted
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment     = Alignment.CenterVertically
+        ) {
+            when {
+                isLoading -> {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = AlpacaColors.Accent.Primary
+                        )
+                        Text("Loading…", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                    }
+                }
+                isLoaded -> {
+                    Text(
+                        "Loaded",
+                        style = AlpacaType.LabelLg,
+                        color = AlpacaColors.State.Success,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    )
+                }
+                else -> {
+                    TextButton(onClick = onLoad) {
+                        Text("Load", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                    }
+                }
+            }
+            TextButton(onClick = onDelete) {
+                Text("Delete", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
             }
         }
     }
