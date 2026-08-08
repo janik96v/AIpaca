@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -169,6 +170,11 @@ dependencies {
 
     // PDF text extraction (API < 35 fallback)
     implementation(libs.pdfbox.android)
+
+    // Room (FTS5 cross-session recall)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     // Debug
     debugImplementation(libs.androidx.compose.ui.tooling)

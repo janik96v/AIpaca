@@ -3,12 +3,14 @@ package com.aipaca.app
 import android.content.Context
 import android.util.Log
 import com.aipaca.app.data.MmprojModelPrefs
+import com.aipaca.app.data.OllamaPrefs
 import com.aipaca.app.data.WhisperModelPrefs
 import com.aipaca.app.engine.BenchResult
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.engine.LlamaCppEngine
 import com.aipaca.app.engine.ModelInfo
+import com.aipaca.app.engine.OllamaEngine
 import com.aipaca.app.engine.WhisperEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +50,7 @@ object EngineState {
 
     val engine: LlamaCppEngine = LlamaCppEngine()
     val whisperEngine: WhisperEngine = WhisperEngine()
+    val ollamaEngine: OllamaEngine = OllamaEngine()
 
     /**
      * Shared serialization lock for anything that calls [engine].generateChat().
@@ -133,6 +136,60 @@ object EngineState {
 
     private val _mmprojError = MutableStateFlow<String?>(null)
     val mmprojError: StateFlow<String?> = _mmprojError.asStateFlow()
+
+    // ---- Ollama remote LLM state -------------------------------------------
+
+    private val _useOllama = MutableStateFlow(false)
+    val useOllama: StateFlow<Boolean> = _useOllama.asStateFlow()
+
+    private val _ollamaModelName = MutableStateFlow("")
+    val ollamaModelName: StateFlow<String> = _ollamaModelName.asStateFlow()
+
+    /**
+     * Enable Ollama remote mode. The local llama.cpp engine is preserved but inactive.
+     * [isLoaded] reflects Ollama readiness so the rest of the app treats it as "model loaded".
+     */
+    fun enableOllama(serverUrl: String, model: String) {
+        ollamaEngine.serverUrl = serverUrl
+        ollamaEngine.modelName = model
+        _ollamaModelName.value = model
+        _useOllama.value = true
+        // Synthetic "loaded" state so chat/agent paths proceed
+        _isLoaded.value = true
+        _modelInfo.value = ModelInfo(
+            quant = "remote",
+            modelName = "Ollama: $model",
+            supportsThinking = true,
+            supportsMultimodal = false
+        )
+        OllamaPrefs.setEnabled(appContext, true)
+        OllamaPrefs.saveServerUrl(appContext, serverUrl)
+        OllamaPrefs.saveModelName(appContext, model)
+        Log.i(TAG, "Ollama enabled: $serverUrl model=$model")
+    }
+
+    fun disableOllama() {
+        _useOllama.value = false
+        _ollamaModelName.value = ""
+        OllamaPrefs.setEnabled(appContext, false)
+        // Restore real model state
+        _isLoaded.value = engine.isLoaded()
+        if (engine.isLoaded()) {
+            _modelInfo.value = engine.getModelInfo()
+        } else {
+            _modelInfo.value = ModelInfo()
+        }
+        Log.i(TAG, "Ollama disabled, local model loaded=${engine.isLoaded()}")
+    }
+
+    /** Restore Ollama mode from persisted preferences (called during init). */
+    fun restoreOllamaIfEnabled() {
+        if (OllamaPrefs.isEnabled(appContext)) {
+            val url = OllamaPrefs.getServerUrl(appContext)
+            val model = OllamaPrefs.getModelName(appContext)
+            enableOllama(url, model)
+        }
+    }
 
     // ---- Actions -----------------------------------------------------------
 

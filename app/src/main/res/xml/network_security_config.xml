@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Allow cleartext (HTTP) traffic so the app can reach Ollama on the local network.
+  Ollama's default is plain HTTP on port 11434; requiring TLS would need extra
+  reverse-proxy setup that is impractical for a development/testing tool.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

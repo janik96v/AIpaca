@@ -22,6 +22,9 @@ class AIpacaApp : Application() {
         EngineState.init(this)
         EngineState   // touch to init
 
+        // Restore Ollama remote mode if it was active last session
+        EngineState.restoreOllamaIfEnabled()
+
         // Persists downloaded-model metadata and streams new downloads into internal storage.
         ModelDownloadManager.init(this)
 

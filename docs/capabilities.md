@@ -28,7 +28,36 @@ Models with DeepSeek-style thinking tokens (e.g., `<think>...</think>`) are supp
 
 ---
 
-## 2. Vision / Multimodal
+## 2. Remote LLM (Ollama)
+
+AIpaca can route generation through a remote Ollama server running on the local network instead of the on-device model. This is designed to test the agentic pipeline with larger models (e.g. Qwen3 30B) running on a desktop machine while the app acts purely as an orchestration front-end.
+
+**How it works:**
+- `OllamaEngine` connects to Ollama's OpenAI-compatible API (`/v1/chat/completions`) via Ktor HTTP client with SSE streaming
+- Server URL and model name are configured through a connection dialog in the Modes menu and persisted via `OllamaPrefs` (plain SharedPreferences — not sensitive)
+- `EngineState.useOllama` StateFlow controls which engine is active; toggled via `enableOllama()` / `disableOllama()`
+- `ChatViewModel.sendMessage()` routes to `OllamaEngine.generateChat()` when Ollama is active
+- `AgentOrchestrator` accepts an optional `OllamaEngine?` and routes agent generation through it when present, using Ollama's native OpenAI tool-calling format instead of the Jinja/PEG parser path
+- Connectivity can be tested via `OllamaEngine.listModels()`, which probes Ollama's `/api/tags` endpoint
+
+**Capabilities:**
+- Chat mode: streaming token generation with `<think>...</think>` tag parsing for thinking models (e.g. Qwen3)
+- Agent mode: full tool-calling pipeline, with streamed tool call deltas accumulated and parsed from SSE chunks
+- Stop generation on demand (atomic flag, compatible with ongoing SSE reads)
+- 5-minute request timeout for large slow models
+
+**Network access:**
+- `network_security_config.xml` allows cleartext HTTP for local network access (Ollama typically runs on plain HTTP port 11434)
+- Default server: `http://192.168.1.100:11434`, default model: `qwen3:30b`
+
+**Key differences from on-device inference:**
+- No `generateMutex` — HTTP calls are stateless and do not block the on-device engine
+- No GPU probing or quantization concerns — the remote server handles all of that
+- Tool calls use Ollama's native OpenAI format rather than llama.cpp's Jinja template + PEG parser
+
+---
+
+## 3. Vision / Multimodal
 
 AIpaca supports image+text inference using llama.cpp's `mtmd` (multimodal) library.
 
@@ -51,7 +80,7 @@ AIpaca supports image+text inference using llama.cpp's `mtmd` (multimodal) libra
 
 ---
 
-## 3. Speech-to-Text (STT)
+## 4. Speech-to-Text (STT)
 
 On-device transcription via whisper.cpp (v1.8.4), sharing the same GGML backend as llama.cpp.
 
@@ -65,9 +94,9 @@ On-device transcription via whisper.cpp (v1.8.4), sharing the same GGML backend 
 
 ---
 
-## 4. Agent Mode
+## 5. Agent Mode
 
-AIpaca includes a native on-device agent that can call external tools via the Model Context Protocol (MCP).
+AIpaca includes a native on-device agent that can call external tools via the Model Context Protocol (MCP) and built-in local tools. It also supports routing through a remote Ollama engine for testing with larger models.
 
 ### Agent Loop
 
@@ -80,7 +109,7 @@ User Goal
   ↓
   Tool call detected? → Yes
     ↓
-    Execute tool via MCP client
+    Execute tool (MCP or local)
     ↓
     Append observation to conversation
     ↓
@@ -89,13 +118,16 @@ User Goal
   Tool call detected? → No
     ↓
   Final answer (grounded in tool results)
+  ↓
+[LearnPass] Counter-triggered post-turn review (background)
 ```
 
 **Key design decisions:**
-- **Native tool calling** — uses llama.cpp's Jinja template system + PEG parser (`common_chat_parse`) for structured tool call extraction, not regex
+- **Native tool calling** — uses llama.cpp's Jinja template system + PEG parser (`common_chat_parse`) for structured tool call extraction, not regex (on-device path)
+- **OpenAI tool calling** — uses Ollama's native streamed tool call delta format when `OllamaEngine` is active
 - **Proper message roles** — Assistant messages carry `tool_calls`, Tool messages carry results with `tool_call_id` — matching the OpenAI tool-calling protocol
 - **Max 4 tool rounds** per query (configurable via `AgentConfig.maxToolRounds`)
-- **Thread safety** — all engine calls serialized via `EngineState.generateMutex` (server and agent share one engine)
+- **Thread safety** — on-device engine calls serialized via `EngineState.generateMutex`; Ollama calls are stateless HTTP and do not acquire the mutex
 
 ### Tool Calling
 
@@ -121,13 +153,69 @@ AIpaca includes a hand-rolled MCP client (`HttpMcpClient`) supporting:
 - Tool discovery via `tools/list`
 - Tool execution via `tools/call`
 
+### Agent Memory
+
+The agent has persistent memory across sessions, implemented as a set of plain-text files in app-internal storage (`filesDir/agent_memory/`).
+
+**Memory files:**
+- `agent_memory.md` — environment facts, project conventions, corrections (max ~2200 chars / ~800 tokens)
+- `agent_user.md` — user preferences, communication style, name (max ~1375 chars / ~500 tokens)
+
+**How it works:**
+- Entries are separated by the `§` character (Hermes Agent convention)
+- When a file exceeds its character limit after an addition, oldest entries are trimmed (FIFO)
+- Both files are injected into the agent's system prompt at the start of each turn so the model has cross-session context
+- An `AntiPoisoning` guard rejects writes that contain transient errors or negative claims, preventing the model from permanently recording dead-end states
+
+### Skills
+
+The agent can store and retrieve reusable procedures as named skill files (`filesDir/agent_skills/<name>.md`).
+
+**Skill file format:** YAML frontmatter (`name`, `description`, `category`) followed by a markdown procedure body.
+
+**How it works:**
+- The agent receives a compact skill index (name + one-line description for each skill) injected into its system prompt
+- Skills are loaded on demand via `skill_view` — this progressive disclosure keeps context size bounded
+- New skills or updates are written via `skill_manage`
+- Limits: max 50 skills, max 4000 chars per skill body
+
+### Session Search
+
+The `session_search` tool lets the agent search past conversations using SQLite FTS5 full-text search with BM25 ranking. No LLM calls are made — it is pure SQL.
+
+**`MessageDatabase`** (Room + FTS5) indexes all conversation messages. For each matching session, the tool returns a "bookend" snippet:
+- First 5 messages (goal context)
+- Match window (1 message before + matching message + 1 message after)
+- Last 5 messages (resolution)
+
+Up to 5 sessions are returned per query, capped at 6000 characters total.
+
+### LearnPass
+
+After each agent turn (once the user has their answer), a counter-triggered background pass examines a digest of the recent conversation and decides whether to extract skills or memory entries.
+
+**Trigger thresholds** (both default to 10):
+- Every 10 user turns → memory review
+- Every 10 tool iterations → skill review
+- When both thresholds are hit simultaneously → combined review
+
+**How it works:**
+- Uses a restricted `ToolRegistry` with only `memory` and `skill_manage` (never calls external MCP tools)
+- Receives only the last 6-8 messages as a digest, not full history
+- Capped at 4 tool rounds and 512 output tokens — review is deliberately cheap
+- The current memory snapshot is injected into the review prompt so the model avoids writing duplicates
+
 ### Current Tools
 
 | Tool | Source | Description |
 |---|---|---|
-| Tavily Web Search | MCP server | Search the web for current information |
+| `tavily_search` | MCP server | Search the web for current information |
+| `memory` | Local | Add, replace, or remove entries in persistent memory files |
+| `skill_view` | Local | Load the full procedure of a named skill |
+| `skill_manage` | Local | Create, patch, or delete a skill |
+| `session_search` | Local | FTS5 full-text search over past conversation sessions |
 
-The `ToolRegistry` aggregates tools from multiple MCP server connections into a flat manifest.
+The `ToolRegistry` aggregates tools from all MCP server connections and registered local tools into a single flat manifest.
 
 ### Streaming UI
 
@@ -140,7 +228,7 @@ Agent steps are streamed to the UI in real-time:
 
 ---
 
-## 5. OpenAI-Compatible REST API Server
+## 6. OpenAI-Compatible REST API Server
 
 AIpaca exposes an HTTPS server on port 8443 that implements the OpenAI chat completions API.
 
@@ -179,7 +267,7 @@ The server runs as an Android foreground service (`ApiService`) with a persisten
 
 ---
 
-## 6. Security
+## 7. Security
 
 ### Authentication — Ed25519 Asymmetric Keys
 
@@ -208,7 +296,7 @@ AIpaca uses SSH-style public key authentication:
 
 ---
 
-## 7. User Interface
+## 8. User Interface
 
 Built with Jetpack Compose and Material 3 (dark theme).
 
@@ -217,7 +305,8 @@ Built with Jetpack Compose and Material 3 (dark theme).
 - Input field with send button
 - Microphone button for speech-to-text
 - Image/PDF attachment picker
-- Agent mode toggle (when enabled in settings)
+- Modes overflow menu: System prompt, Thinking, Agent, and Ollama toggles
+- Ollama connection dialog (server URL + model name, test connectivity)
 - Collapsible thinking blocks for reasoning models
 - Drawer menu with conversation history and settings
 
@@ -242,7 +331,7 @@ Built with Jetpack Compose and Material 3 (dark theme).
 
 ---
 
-## 8. Data Persistence
+## 9. Data Persistence
 
 | Component | Storage | Purpose |
 |---|---|---|
@@ -250,9 +339,13 @@ Built with Jetpack Compose and Material 3 (dark theme).
 | `AgentPrefs` | EncryptedSharedPreferences | Tavily API key, MCP server URL, agent toggle |
 | `WhisperModelPrefs` | SharedPreferences | Last used STT model path |
 | `MmprojModelPrefs` | SharedPreferences | Last used multimodal projector path |
+| `OllamaPrefs` | SharedPreferences | Ollama server URL, model name, enabled state |
 | `AuthorizedKeysStore` | EncryptedSharedPreferences | Paired client public keys |
+| `MemoryStore` | Plain files (filesDir/agent_memory/) | Agent cross-session memory entries |
+| `SkillStore` | Plain files (filesDir/agent_skills/) | Agent learned skill procedures |
+| `MessageDatabase` | Room SQLite + FTS5 | Indexed conversation messages for session_search |
 
-Conversations are stored as serialized `StoredConversation` objects with ID, title, messages, and timestamps.
+Conversations are stored as serialized `StoredConversation` objects with ID, title, messages, and timestamps. Agent memory files use plain text (not encrypted) because they contain only model-extracted summaries, not raw user messages.
 
 
 

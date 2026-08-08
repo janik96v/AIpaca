@@ -8,6 +8,9 @@ private const val PREFS_NAME = "agent_prefs"
 private const val KEY_TAVILY_API_KEY = "tavily_api_key"
 private const val KEY_MCP_SERVER_URL = "mcp_server_url"
 private const val KEY_AGENT_ENABLED = "agent_enabled"
+private const val KEY_ITERS_SINCE_SKILL = "iters_since_skill"
+private const val KEY_TURNS_SINCE_MEMORY = "turns_since_memory"
+private const val KEY_MIGRATED_TO_FTS = "migrated_to_fts"
 
 /** Default Tavily remote MCP endpoint (Streamable HTTP). API key is appended as a query param. */
 const val DEFAULT_TAVILY_MCP_BASE_URL = "https://mcp.tavily.com/mcp/"
@@ -59,4 +62,17 @@ class AgentPrefs(context: Context) {
 
     /** True once both an API key and consent are present — the minimum to connect. */
     fun isConfigured(): Boolean = isAgentEnabled() && !getTavilyApiKey().isNullOrBlank()
+
+    // ---- Learn pass counters ------------------------------------------------
+
+    fun getItersSinceSkill(): Int = prefs.getInt(KEY_ITERS_SINCE_SKILL, 0)
+    fun setItersSinceSkill(count: Int) { prefs.edit().putInt(KEY_ITERS_SINCE_SKILL, count).apply() }
+
+    fun getTurnsSinceMemory(): Int = prefs.getInt(KEY_TURNS_SINCE_MEMORY, 0)
+    fun setTurnsSinceMemory(count: Int) { prefs.edit().putInt(KEY_TURNS_SINCE_MEMORY, count).apply() }
+
+    // ---- FTS5 migration flag ------------------------------------------------
+
+    fun hasMigratedToFts(): Boolean = prefs.getBoolean(KEY_MIGRATED_TO_FTS, false)
+    fun setMigratedToFts(done: Boolean) { prefs.edit().putBoolean(KEY_MIGRATED_TO_FTS, done).apply() }
 }

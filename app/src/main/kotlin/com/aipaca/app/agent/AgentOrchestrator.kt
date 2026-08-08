@@ -10,6 +10,7 @@ import com.aipaca.app.engine.AgentResult
 import com.aipaca.app.engine.AgentToolCall
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.LlamaCppEngine
+import com.aipaca.app.engine.OllamaEngine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
@@ -51,10 +52,16 @@ class AgentOrchestrator(
     private val generateMutex: Mutex,
     private val tools: ToolRegistry,
     private val config: AgentConfig = AgentConfig(),
-    private val isModelLoaded: () -> Boolean = { engine.isLoaded() }
+    private val isModelLoaded: () -> Boolean = { engine.isLoaded() },
+    private val ollamaEngine: OllamaEngine? = null
 ) {
 
     private val lenientJson = Json { ignoreUnknownKeys = true }
+    private val useOllama: Boolean get() = ollamaEngine != null
+
+    /** Run [block] under generateMutex for local engine, or directly for Ollama (HTTP is stateless). */
+    private suspend fun <T> withEngineLock(block: suspend () -> T): T =
+        if (useOllama) block() else generateMutex.withLock { block() }
 
     /**
      * Runs the native agent loop for a user [goal], emitting [AgentStep]s as they happen.
@@ -93,7 +100,7 @@ class AgentOrchestrator(
 
             // Generate with streaming so the UI gets real-time token feedback
             val result: AgentResult = try {
-                generateMutex.withLock {
+                withEngineLock {
                     collectAgentStreaming(messages, manifest) { chunk ->
                         if (chunk.content.isNotEmpty() || chunk.thinking.isNotEmpty()) {
                             emit(AgentStep.Thinking(
@@ -199,7 +206,15 @@ class AgentOrchestrator(
         val contentBuilder = StringBuilder()
         var agentResult: AgentResult? = null
 
-        engine.generateAgent(messages, tools, config.generateParams).collect { chunk ->
+        // Use Ollama engine if available, otherwise local llama.cpp
+        val agentFlow = if (ollamaEngine != null) {
+            ollamaEngine.resetThinkingState()
+            ollamaEngine.generateAgent(messages, tools, config.generateParams)
+        } else {
+            engine.generateAgent(messages, tools, config.generateParams)
+        }
+
+        agentFlow.collect { chunk ->
             if (chunk.content.startsWith("__AGENT_RESULT__:")) {
                 // Sentinel chunk from LlamaCppEngine carrying parsed tool calls
                 val resultJson = chunk.content.removePrefix("__AGENT_RESULT__:")
@@ -508,5 +523,6 @@ fun EngineState.newAgentOrchestrator(
     generateMutex = generateMutex,
     tools = tools,
     config = config,
-    isModelLoaded = { isLoaded.value }
+    isModelLoaded = { isLoaded.value },
+    ollamaEngine = if (useOllama.value) ollamaEngine else null
 )

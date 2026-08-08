@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
@@ -250,6 +251,12 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     val agentPrefs by lazy { AgentPrefs(getApplication()) }
 
+    // Memory, skills, and session search stores (lazy — only created when agent mode is first used)
+    private val memoryStore by lazy { com.aipaca.app.agent.memory.MemoryStore(getApplication()) }
+    private val skillStore by lazy { com.aipaca.app.agent.memory.SkillStore(getApplication()) }
+    private val messageDb by lazy { com.aipaca.app.data.MessageDatabase.getInstance(getApplication()) }
+    private val messageDao by lazy { messageDb.messageDao() }
+
     private val _agentMode = MutableStateFlow(false)
     val agentMode: StateFlow<Boolean> = _agentMode.asStateFlow()
 
@@ -334,6 +341,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _messages.value = conversation.messages
             _systemPrompt.value = conversation.systemPrompt
         }
+        // One-time backfill of existing conversations into FTS5 index
+        migrateExistingConversationsToFts()
     }
 
     fun sendMessage(
@@ -390,7 +399,24 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         return@launch
                     }
                     Log.d("ChatViewModel", "Agent path: MCP connected, tools=${registry!!.manifest().map { it.name }}")
+
+                    // Register local tools: memory, skills, session search
+                    registry!!.registerLocal(
+                        com.aipaca.app.agent.mcp.ToolSpec(name = com.aipaca.app.agent.memory.MemoryTool.NAME, description = com.aipaca.app.agent.memory.MemoryTool.DESCRIPTION, inputSchema = com.aipaca.app.agent.memory.MemoryTool.INPUT_SCHEMA)
+                    ) { args -> com.aipaca.app.agent.memory.MemoryTool.run(args, memoryStore) }
+                    registry!!.registerLocal(com.aipaca.app.agent.memory.SkillTools.viewSpec()) { args -> com.aipaca.app.agent.memory.SkillTools.view(args, skillStore) }
+                    registry!!.registerLocal(com.aipaca.app.agent.memory.SkillTools.manageSpec()) { args -> com.aipaca.app.agent.memory.SkillTools.manage(args, skillStore) }
+                    registry!!.registerLocal(com.aipaca.app.agent.memory.SessionSearchTool.spec()) { args -> com.aipaca.app.agent.memory.SessionSearchTool.run(args, messageDao) }
+
+                    // Frozen snapshots — loaded once, writes during session only appear next session
+                    val memorySnap = memoryStore.read(com.aipaca.app.agent.memory.MemoryStore.MEMORY_FILE)
+                    val userSnap = memoryStore.read(com.aipaca.app.agent.memory.MemoryStore.USER_FILE)
+                    val skillIdx = skillStore.index().joinToString("\n") { (name, desc) -> "- $name: $desc" }
+
                     val agentConfig = AgentConfig(
+                        memorySnapshot = memorySnap,
+                        userSnapshot = userSnap,
+                        skillIndex = skillIdx,
                         generateParams = GenerateParams(
                             maxTokens = 1536,
                             thinkingEnabled = _thinkingEnabled.value
@@ -416,6 +442,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val display = StringBuilder()
                     val streamedContent = StringBuilder()
                     val thinkingBuffer = StringBuilder()
+                    var toolIterationsThisRun = 0
                     orchestrator.run(goal = content, history = turns).collect { step ->
                         Log.d("ChatViewModel", "Agent step: ${step::class.simpleName}")
                         when (step) {
@@ -432,6 +459,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                             }
                             is AgentStep.ToolCall -> {
+                                toolIterationsThisRun++
                                 // Clear streamed content (may contain raw tool syntax)
                                 streamedContent.clear()
                                 display.appendLine("\uD83D\uDD0D *Searching: ${step.name}...*\n")
@@ -459,6 +487,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
+
+                    // ---- Learn pass: counter-triggered review ----
+                    val itersSinceSkill = agentPrefs.getItersSinceSkill() + toolIterationsThisRun
+                    val turnsSinceMemory = agentPrefs.getTurnsSinceMemory() + 1
+                    val shouldReviewSkills = itersSinceSkill >= com.aipaca.app.agent.memory.LearnPass.SKILL_REVIEW_THRESHOLD
+                    val shouldReviewMemory = turnsSinceMemory >= com.aipaca.app.agent.memory.LearnPass.MEMORY_REVIEW_THRESHOLD
+
+                    if (shouldReviewSkills || shouldReviewMemory) {
+                        Log.i("ChatViewModel", "Learn pass triggered: skills=$shouldReviewSkills (iters=$itersSinceSkill), memory=$shouldReviewMemory (turns=$turnsSinceMemory)")
+                        val digestMessages = _messages.value.takeLast(8).map { msg ->
+                            when (msg.role) {
+                                com.aipaca.app.model.Role.USER -> com.aipaca.app.agent.AgentMessage.User(msg.content)
+                                com.aipaca.app.model.Role.ASSISTANT -> com.aipaca.app.agent.AgentMessage.Assistant(msg.content)
+                                com.aipaca.app.model.Role.SYSTEM -> com.aipaca.app.agent.AgentMessage.System(msg.content)
+                            }
+                        }
+                        val reviewType = when {
+                            shouldReviewSkills && shouldReviewMemory -> com.aipaca.app.agent.memory.ReviewType.BOTH
+                            shouldReviewSkills -> com.aipaca.app.agent.memory.ReviewType.SKILL
+                            else -> com.aipaca.app.agent.memory.ReviewType.MEMORY
+                        }
+                        // Run sequentially after user gets their answer (on background dispatcher)
+                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                            com.aipaca.app.agent.memory.LearnPass.run(
+                                conversationDigest = digestMessages,
+                                reviewType = reviewType,
+                                memoryStore = memoryStore,
+                                skillStore = skillStore,
+                                memorySnapshot = memorySnap,
+                                userSnapshot = userSnap,
+                                engine = EngineState.engine,
+                                generateMutex = EngineState.generateMutex
+                            )
+                            agentPrefs.setItersSinceSkill(0)
+                            agentPrefs.setTurnsSinceMemory(0)
+                        }
+                    } else {
+                        agentPrefs.setItersSinceSkill(itersSinceSkill)
+                        agentPrefs.setTurnsSinceMemory(turnsSinceMemory)
+                    }
                 } catch (e: Exception) {
                     Log.e("ChatViewModel", "Agent path exception", e)
                     _generationError.tryEmit("Agent error: ${e.message ?: "unknown error"}")
@@ -466,6 +534,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     registry?.closeAll()
                     _isGenerating.value = false
                     persistCurrentConversation()
+                    // Index messages into FTS5 for cross-session recall
+                    indexCurrentConversationToFts()
                 }
             } else {
                 // ---- Normal chat path ----
@@ -475,8 +545,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val thinkEnabled = _thinkingEnabled.value
                     val params = GenerateParams(thinkingEnabled = thinkEnabled)
 
-                    // Choose vision or text-only generation path
-                    val flow = if (imageUri != null) {
+                    // Choose generation path: Ollama remote, vision, or local text
+                    val flow = if (EngineState.useOllama.value && imageUri == null) {
+                        EngineState.ollamaEngine.resetThinkingState()
+                        EngineState.ollamaEngine.generateChat(turns, params)
+                    } else if (imageUri != null) {
                         if (!EngineState.engine.isMmprojLoaded()) {
                             _generationError.tryEmit("Load a vision projector first — go to Models tab")
                             return@launch
@@ -523,6 +596,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun stopGeneration() {
         EngineState.engine.stopGeneration()
+        EngineState.ollamaEngine.stopGeneration()
         generationJob?.cancel()
         _isGenerating.value = false
     }
@@ -629,6 +703,66 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
     }
+
+    /** Index current conversation messages into Room/FTS5 for cross-session recall. */
+    private fun indexCurrentConversationToFts() {
+        val conversationId = activeConversationId ?: return
+        val currentMessages = _messages.value
+        if (currentMessages.isEmpty()) return
+
+        val title = currentMessages
+            .firstOrNull { it.role == Role.USER }
+            ?.content?.replace(Regex("\\s+"), " ")?.take(42) ?: "Untitled"
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val entities = currentMessages
+                    .filter { it.content.isNotBlank() }
+                    .map { msg ->
+                        com.aipaca.app.data.MessageEntity(
+                            id = msg.id,
+                            sessionId = conversationId,
+                            role = msg.role.name.lowercase(),
+                            content = msg.content,
+                            timestamp = msg.timestamp,
+                            sessionTitle = title
+                        )
+                    }
+                messageDao.insertAll(entities)
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "FTS indexing failed", e)
+            }
+        }
+    }
+
+    /** One-time migration: backfill existing conversations into Room/FTS5. */
+    fun migrateExistingConversationsToFts() {
+        if (agentPrefs.hasMigratedToFts()) return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val conversations = conversationStore.loadConversations()
+                for (conv in conversations) {
+                    val entities = conv.messages
+                        .filter { it.content.isNotBlank() }
+                        .map { msg ->
+                            com.aipaca.app.data.MessageEntity(
+                                id = msg.id,
+                                sessionId = conv.id,
+                                role = msg.role.name.lowercase(),
+                                content = msg.content,
+                                timestamp = msg.timestamp,
+                                sessionTitle = conv.title
+                            )
+                        }
+                    if (entities.isNotEmpty()) messageDao.insertAll(entities)
+                }
+                agentPrefs.setMigratedToFts(true)
+                Log.i("ChatViewModel", "FTS migration complete: ${conversations.size} conversations indexed")
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "FTS migration failed", e)
+            }
+        }
+    }
 }
 
 // ---- Screen -----------------------------------------------------------------
@@ -662,6 +796,8 @@ fun ChatScreen(
 
     val agentMode           by chatViewModel.agentMode.collectAsState()
     val isAgentConfigured   by chatViewModel.isAgentConfigured.collectAsState()
+    val ollamaActive        by EngineState.useOllama.collectAsState()
+    val ollamaModelName     by EngineState.ollamaModelName.collectAsState()
 
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
@@ -672,6 +808,7 @@ fun ChatScreen(
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
     var showAgentKeyDialog     by remember { mutableStateOf(false) }
+    var showOllamaDialog       by remember { mutableStateOf(false) }
     var pendingModelPath       by remember { mutableStateOf<String?>(null) }
 
     var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
@@ -827,6 +964,9 @@ fun ChatScreen(
                     agentMode        = agentMode,
                     onAgentToggle    = { chatViewModel.toggleAgentMode() },
                     onAgentSetup     = { showAgentKeyDialog = true },
+                    ollamaActive     = ollamaActive,
+                    ollamaModelName  = ollamaModelName,
+                    onOllamaClick    = { showOllamaDialog = true },
                     supportsAttachments  = isLoaded,
                     supportsMultimodal   = isMmprojLoaded && isLoaded,
                     selectedImageUri     = selectedImageUri,
@@ -1028,6 +1168,23 @@ fun ChatScreen(
                 // Stay on dialog so user can enter a new key
             },
             onDismiss = { showAgentKeyDialog = false }
+        )
+    }
+
+    if (showOllamaDialog) {
+        OllamaConnectionDialog(
+            isConnected      = ollamaActive,
+            currentUrl       = com.aipaca.app.data.OllamaPrefs.getServerUrl(context),
+            currentModel     = com.aipaca.app.data.OllamaPrefs.getModelName(context),
+            onConnect        = { url, model ->
+                EngineState.enableOllama(url, model)
+                showOllamaDialog = false
+            },
+            onDisconnect     = {
+                EngineState.disableOllama()
+                showOllamaDialog = false
+            },
+            onDismiss        = { showOllamaDialog = false }
         )
     }
 }
@@ -1275,6 +1432,9 @@ private fun ChatInputBar(
     agentMode: Boolean = false,
     onAgentToggle: () -> Unit = {},
     onAgentSetup: () -> Unit = {},
+    ollamaActive: Boolean = false,
+    ollamaModelName: String = "",
+    onOllamaClick: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     onMicClick: () -> Unit = {},
@@ -1366,8 +1526,8 @@ private fun ChatInputBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Modes overflow menu (Sys, Think, Agent)
-                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || agentMode
+                    // Modes overflow menu (Sys, Think, Agent, Ollama)
+                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || agentMode || ollamaActive
                     var showModeMenu by remember { mutableStateOf(false) }
                     Box {
                         Row(
@@ -1416,6 +1576,15 @@ private fun ChatInputBar(
                                 leadingIcon = { Icon(Icons.Outlined.TravelExplore, null, Modifier.size(18.dp),
                                     tint = if (agentMode) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
                                 onClick     = { if (agentConfigured) onAgentToggle() else { showModeMenu = false; onAgentSetup() } }
+                            )
+                            DropdownMenuItem(
+                                text        = { Text(
+                                    if (ollamaActive) "Ollama: $ollamaModelName" else "Ollama",
+                                    style = AlpacaType.BodyMd,
+                                    color = if (ollamaActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp),
+                                    tint = if (ollamaActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onOllamaClick() }
                             )
                         }
                     }
@@ -1908,6 +2077,98 @@ private fun ChatScreenEmptyPreview() {
 }
 
 @Preview(showBackground = true, name = "MessageBubbles")
+// ---- Ollama connection dialog -----------------------------------------------
+
+@Composable
+private fun OllamaConnectionDialog(
+    isConnected: Boolean,
+    currentUrl: String,
+    currentModel: String,
+    onConnect: (url: String, model: String) -> Unit,
+    onDisconnect: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var url by remember { mutableStateOf(currentUrl) }
+    var model by remember { mutableStateOf(currentModel) }
+
+    AlertDialog(
+        onDismissRequest    = onDismiss,
+        containerColor      = AlpacaColors.Surface.Card,
+        titleContentColor   = AlpacaColors.Text.Primary,
+        textContentColor    = AlpacaColors.Text.Body,
+        shape               = RoundedCornerShape(12.dp),
+        title = {
+            Column {
+                Text("Ollama Remote LLM", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                Spacer(Modifier.height(4.dp))
+                MonoLabel(if (isConnected) "CONNECTED" else "DISCONNECTED")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Connect to Ollama running on your computer. Both devices must be on the same network.",
+                    style = AlpacaType.BodySm,
+                    color = AlpacaColors.Text.Subtle
+                )
+                OutlinedTextField(
+                    value         = url,
+                    onValueChange = { url = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    label         = { Text("Server URL", style = AlpacaType.LabelMd) },
+                    placeholder   = { Text("http://192.168.1.100:11434", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(6.dp),
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor = AlpacaColors.Line.Hairline,
+                        cursorColor          = AlpacaColors.Accent.Primary
+                    )
+                )
+                OutlinedTextField(
+                    value         = model,
+                    onValueChange = { model = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    label         = { Text("Model name", style = AlpacaType.LabelMd) },
+                    placeholder   = { Text("qwen3:30b", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(6.dp),
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor = AlpacaColors.Line.Hairline,
+                        cursorColor          = AlpacaColors.Accent.Primary
+                    )
+                )
+            }
+        },
+        dismissButton = {
+            if (isConnected) {
+                TextButton(onClick = onDisconnect) {
+                    Text("Disconnect", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", style = AlpacaType.LabelLg, color = AlpacaColors.Text.Muted)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConnect(url.trim(), model.trim()) },
+                enabled = url.isNotBlank() && model.isNotBlank()
+            ) {
+                Text(
+                    if (isConnected) "Update" else "Connect",
+                    style = AlpacaType.LabelLg,
+                    color = AlpacaColors.Accent.Primary
+                )
+            }
+        }
+    )
+}
+
 @Composable
 private fun MessageBubbleUserPreview() {
     AIpacaTheme {

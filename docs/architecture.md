@@ -10,10 +10,17 @@ EngineState (process-scoped singleton)
     |                                          |-- mtmd (vision)
     |                                          +-- Adreno OpenCL / CPU fallback
     |-- WhisperEngine ---> whisper_jni.cpp --> whisper.cpp (GPU/CPU)
+    |-- OllamaEngine ----> Ktor HTTP Client --> Ollama server (local network)
+    |                                          +-- OpenAI-compatible /v1/chat/completions
     +-- AgentOrchestrator
-         |-- Native tool-calling (Jinja + PEG parser)
-         |-- ToolRegistry (aggregated MCP tools)
-         +-- HttpMcpClient (Streamable HTTP/SSE)
+         |-- Native tool-calling (Jinja + PEG parser)  [LlamaCppEngine path]
+         |-- OpenAI tool-calling (streamed deltas)      [OllamaEngine path]
+         |-- ToolRegistry
+         |   |-- MCP tools (HttpMcpClient, Streamable HTTP/SSE)
+         |   +-- Local tools (memory, skill_view, skill_manage, session_search)
+         |-- MemoryStore / SkillStore (filesystem, filesDir/agent_memory|skills)
+         |-- MessageDatabase (Room + FTS5, session_search index)
+         +-- LearnPass (counter-triggered post-turn review)
 
 --- parallel ---
 
@@ -24,7 +31,7 @@ OpenAI-compatible REST API (/v1/chat/completions)
 Open WebUI / OpenClaw / LangChain / curl
 ```
 
-**Key constraint**: One `llama_context` per process. Server and agent serialize all engine calls via `EngineState.generateMutex`.
+**Key constraint**: One `llama_context` per process. Server and agent serialize all engine calls via `EngineState.generateMutex`. The `OllamaEngine` path is stateless HTTP and does not acquire the mutex.
 
 ---
 
@@ -43,13 +50,23 @@ app/src/main/
 |   |   |-- mcp/                        # Model Context Protocol client
 |   |   |   |-- HttpMcpClient.kt        # Streamable HTTP/SSE transport
 |   |   |   +-- McpModels.kt            # JSON-RPC 2.0 + MCP types
-|   |   +-- tool/
-|   |       |-- ToolRegistry.kt         # Aggregates tools from MCP servers
-|   |       +-- TavilyMcp.kt            # Tavily web search integration
+|   |   |-- tool/
+|   |   |   |-- ToolRegistry.kt         # Aggregates MCP + local tools
+|   |   |   +-- TavilyMcp.kt            # Tavily web search integration
+|   |   +-- memory/                     # Agent memory + skills system
+|   |       |-- MemoryStore.kt          # Filesystem-backed memory files (agent_memory.md, agent_user.md)
+|   |       |-- MemoryTool.kt           # "memory" tool: add/replace/remove memory entries
+|   |       |-- SkillStore.kt           # Filesystem-backed skill files (agent_skills/<name>.md)
+|   |       |-- SkillTools.kt           # "skill_view" + "skill_manage" tools
+|   |       |-- Skill.kt                # Skill data class
+|   |       |-- SessionSearchTool.kt    # "session_search" tool: FTS5 cross-session recall
+|   |       |-- LearnPass.kt            # Counter-triggered post-turn memory/skill extraction
+|   |       +-- AntiPoisoning.kt        # Guards against persisting transient errors
 |   |-- engine/                         # Inference engines
 |   |   |-- InferenceEngine.kt          # Interface + data classes
 |   |   |-- LlamaCppEngine.kt           # LLM JNI wrapper + vision
 |   |   |-- WhisperEngine.kt            # STT engine
+|   |   |-- OllamaEngine.kt             # Remote LLM via Ollama HTTP API
 |   |   +-- AudioRecorder.kt            # Microphone input
 |   |-- server/                         # OpenAI-compatible API server
 |   |   |-- ApiServer.kt                # Ktor HTTPS server
@@ -70,7 +87,9 @@ app/src/main/
 |   +-- data/                           # Encrypted persistence
 |       |-- ChatConversationStore.kt    # Conversation history (AES256-GCM)
 |       |-- AgentPrefs.kt               # Agent config (API keys, MCP URL)
-|       +-- MmprojModelPrefs.kt         # Multimodal projector path
+|       |-- MmprojModelPrefs.kt         # Multimodal projector path
+|       |-- OllamaPrefs.kt              # Ollama server URL, model name, enabled state
+|       +-- MessageDatabase.kt          # Room DB + FTS5 index for session_search
 +-- cpp/
     |-- CMakeLists.txt                  # Native build config (OpenCL, mtmd)
     |-- llama_jni.cpp                   # LLM JNI bridge (~2K lines)
@@ -88,12 +107,15 @@ app/src/main/
 |---|---|
 | Language | Kotlin 2.0, C++17 |
 | UI | Jetpack Compose + Material 3 |
-| LLM | llama.cpp (custom Adreno fork: `janik96v/llama.cpp`) |
+| LLM (on-device) | llama.cpp (custom Adreno fork: `janik96v/llama.cpp`) |
+| LLM (remote) | Ollama via Ktor HTTP Client (OpenAI-compatible API) |
 | STT | whisper.cpp 1.8.4 |
 | Vision | llama.cpp mtmd library |
 | GPU | Adreno OpenCL with optimized kernels |
 | Server | Ktor 2.3 (Netty, HTTPS) |
 | MCP Client | Ktor HTTP Client (Streamable HTTP/SSE) |
+| Agent Memory | Filesystem plain-text files (app-internal storage) |
+| Session Search | Room + SQLite FTS5 (BM25 ranking) |
 | Security | Ed25519, TLS (PKCS12), AES256-GCM |
 | Serialization | kotlinx.serialization, nlohmann/json (C++) |
 | Build | Gradle (Kotlin DSL), CMake, NDK r27.2 |
