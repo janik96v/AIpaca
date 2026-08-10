@@ -263,18 +263,27 @@ object ApiServer {
                 val completionId = "chatcmpl-${UUID.randomUUID()}"
                 val createdAt = System.currentTimeMillis() / 1000
 
+                val useOllama = engineState.useOllama.value
+
                 if (!request.stream) {
                     // ---- Non-streaming path ----------------------------------
                     val fullText = StringBuilder()
                     val thinkText = StringBuilder()
                     val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                         try {
-                            engineState.generateMutex.withLock {
-                                engineState.engine.generateChat(chatTurns, params).collect { chunk ->
+                            val generateBlock: suspend () -> Unit = {
+                                val flow = if (useOllama) {
+                                    engineState.ollamaEngine.generateChat(chatTurns, params)
+                                } else {
+                                    engineState.engine.generateChat(chatTurns, params)
+                                }
+                                flow.collect { chunk ->
                                     fullText.append(chunk.content)
                                     thinkText.append(chunk.thinking)
                                 }
                             }
+                            if (useOllama) generateBlock()
+                            else engineState.generateMutex.withLock { generateBlock() }
                             true
                         } catch (e: Exception) {
                             Log.e(TAG, "Generation error", e)
@@ -343,8 +352,13 @@ object ApiServer {
 
                         val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                             try {
-                                engineState.generateMutex.withLock {
-                                    engineState.engine.generateChat(chatTurns, params).collect { generationChunk ->
+                                val generateBlock: suspend () -> Unit = {
+                                    val flow = if (useOllama) {
+                                        engineState.ollamaEngine.generateChat(chatTurns, params)
+                                    } else {
+                                        engineState.engine.generateChat(chatTurns, params)
+                                    }
+                                    flow.collect { generationChunk ->
                                         val output = if (request.includeThinking)
                                             generationChunk.thinking + generationChunk.content
                                         else
@@ -367,6 +381,8 @@ object ApiServer {
                                         }
                                     }
                                 }
+                                if (useOllama) generateBlock()
+                                else engineState.generateMutex.withLock { generateBlock() }
                                 true
                             } catch (e: Exception) {
                                 Log.e(TAG, "Streaming generation error", e)

@@ -90,7 +90,7 @@ pubkey_b64 = base64.b64encode(
 ).decode()
 
 # Pairing
-server = input("Server URL (e.g. https://192.168.1.42:8443): ").strip().rstrip("/")
+server = input("Server URL (e.g. https://192.168.1.250:8443): ").strip().rstrip("/")
 pin    = input("PIN shown on phone: ").strip()
 name   = input("Device name [My Mac]: ").strip() or "My Mac"
 
