@@ -1,15 +1,9 @@
 package com.aipaca.app.ui.chat
 
 import android.Manifest
-import android.app.Application
 import android.content.pm.PackageManager
-import android.util.Log
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
-import java.io.ByteArrayOutputStream
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -71,7 +65,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -88,10 +81,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -104,20 +97,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.aipaca.app.EngineState
-import com.aipaca.app.agent.AgentConfig
-import com.aipaca.app.agent.AgentStep
-import com.aipaca.app.agent.newAgentOrchestrator
-import com.aipaca.app.agent.tool.ToolRegistry
-import com.aipaca.app.agent.tool.TavilyMcp
-import com.aipaca.app.data.AgentPrefs
-import com.aipaca.app.data.ChatConversationStore
-import com.aipaca.app.engine.ChatTurn
-import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.model.ChatMessage
 import com.aipaca.app.model.Role
 import com.aipaca.app.model.StoredConversation
@@ -126,644 +108,13 @@ import com.aipaca.app.ui.components.EditorialSectionMark
 import com.aipaca.app.ui.components.MonoLabel
 import com.aipaca.app.ui.components.MonoLabelTone
 import com.aipaca.app.ui.components.ModelPickerButton
-import com.aipaca.app.ui.components.StatusChip
-import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
-
-// ---- Think-tag stream parser ------------------------------------------------
-
-data class ThinkParseResult(val content: String, val thinking: String)
-
-class ThinkTagParser {
-    private data class TagPair(val open: String, val close: String)
-    private val tagPairs = listOf(
-        TagPair("<think>", "</think>"),
-        TagPair("<|channel>thought\n", "<channel|>")
-    )
-
-    private var insideThink = false
-    private var activeClose: String? = null
-    private var buffer = ""
-
-    private fun couldBePartialTag(text: String, tag: String): Boolean {
-        for (i in 1 until tag.length) {
-            if (text.endsWith(tag.substring(0, i))) return true
-        }
-        return false
-    }
-
-    private fun couldBeAnyPartialOpen(text: String): Boolean {
-        return tagPairs.any { couldBePartialTag(text, it.open) }
-    }
-
-    fun feed(token: String): ThinkParseResult {
-        buffer += token
-        val contentParts = StringBuilder()
-        val thinkParts   = StringBuilder()
-
-        while (buffer.isNotEmpty()) {
-            if (insideThink) {
-                val closeTag = activeClose ?: break
-                val idx = buffer.indexOf(closeTag)
-                if (idx >= 0) {
-                    thinkParts.append(buffer.substring(0, idx))
-                    buffer = buffer.substring(idx + closeTag.length)
-                    insideThink = false
-                    activeClose = null
-                } else if (couldBePartialTag(buffer, closeTag)) {
-                    break
-                } else {
-                    thinkParts.append(buffer)
-                    buffer = ""
-                }
-            } else {
-                var bestIdx = -1
-                var bestPair: TagPair? = null
-                for (pair in tagPairs) {
-                    val idx = buffer.indexOf(pair.open)
-                    if (idx >= 0 && (bestIdx < 0 || idx < bestIdx)) {
-                        bestIdx = idx
-                        bestPair = pair
-                    }
-                }
-                if (bestPair != null && bestIdx >= 0) {
-                    contentParts.append(buffer.substring(0, bestIdx))
-                    buffer = buffer.substring(bestIdx + bestPair.open.length)
-                    insideThink = true
-                    activeClose = bestPair.close
-                } else if (couldBeAnyPartialOpen(buffer)) {
-                    break
-                } else {
-                    contentParts.append(buffer)
-                    buffer = ""
-                }
-            }
-        }
-        return ThinkParseResult(contentParts.toString(), thinkParts.toString())
-    }
-}
-
-// ---- ViewModel --------------------------------------------------------------
-
-class ChatViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val conversationStore = ChatConversationStore(application)
-    private var activeConversationId: String? = null
-
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
-
-    private val _conversations = MutableStateFlow<List<StoredConversation>>(emptyList())
-    val conversations: StateFlow<List<StoredConversation>> = _conversations.asStateFlow()
-
-    private val _activeConversationId = MutableStateFlow<String?>(null)
-    val currentConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
-
-    private val _systemPrompt = MutableStateFlow("")
-    val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
-
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
-
-    private val _generationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val generationError: SharedFlow<String> = _generationError.asSharedFlow()
-
-    private val _thinkingEnabled = MutableStateFlow(true)
-    val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
-
-    private var generationJob: Job? = null
-
-    // ---- Agent state -------------------------------------------------------
-
-    val agentPrefs by lazy { AgentPrefs(getApplication()) }
-
-    // Memory, skills, and session search stores (lazy — only created when agent mode is first used)
-    private val memoryStore by lazy { com.aipaca.app.agent.memory.MemoryStore(getApplication()) }
-    private val skillStore by lazy { com.aipaca.app.agent.memory.SkillStore(getApplication()) }
-    private val messageDb by lazy { com.aipaca.app.data.MessageDatabase.getInstance(getApplication()) }
-    private val messageDao by lazy { messageDb.messageDao() }
-
-    private val _agentMode = MutableStateFlow(false)
-    val agentMode: StateFlow<Boolean> = _agentMode.asStateFlow()
-
-    private val _isAgentConfigured = MutableStateFlow(false)
-    val isAgentConfigured: StateFlow<Boolean> = _isAgentConfigured.asStateFlow()
-
-    fun refreshAgentConfigured() {
-        _isAgentConfigured.value = agentPrefs.isConfigured()
-    }
-
-    fun toggleAgentMode() {
-        if (!agentPrefs.isConfigured()) return
-        _agentMode.value = !_agentMode.value
-    }
-
-    fun enableAgentMode() {
-        _isAgentConfigured.value = agentPrefs.isConfigured()
-        if (agentPrefs.isConfigured()) _agentMode.value = true
-    }
-
-    // ---- STT state ---------------------------------------------------------
-
-    private val audioRecorder = com.aipaca.app.engine.AudioRecorder()
-
-    private val _isRecording = MutableStateFlow(false)
-    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
-
-    private val _isTranscribing = MutableStateFlow(false)
-    val isTranscribing: StateFlow<Boolean> = _isTranscribing.asStateFlow()
-
-    private val _transcriptionResult = MutableStateFlow<String?>(null)
-    val transcriptionResult: StateFlow<String?> = _transcriptionResult.asStateFlow()
-
-    private val _transcriptionError = MutableStateFlow<String?>(null)
-    val transcriptionError: StateFlow<String?> = _transcriptionError.asStateFlow()
-
-    private var recordingJob: Job? = null
-
-    fun startRecording() {
-        if (_isRecording.value || _isGenerating.value) return
-        _isRecording.value = true
-        _transcriptionError.value = null
-
-        recordingJob = viewModelScope.launch {
-            try {
-                val samples = audioRecorder.record()  // suspends until stopRecording()
-                _isRecording.value = false
-                _isTranscribing.value = true
-                val result = EngineState.whisperEngine.transcribe(samples)
-                result.fold(
-                    onSuccess  = { text -> _transcriptionResult.value = text },
-                    onFailure  = { e   -> _transcriptionError.value = e.message ?: "Transcription failed" }
-                )
-            } catch (e: Exception) {
-                _transcriptionError.value = e.message ?: "Recording failed"
-            } finally {
-                _isRecording.value = false
-                _isTranscribing.value = false
-            }
-        }
-    }
-
-    fun stopRecording() {
-        audioRecorder.stopRecording()
-        // recordingJob continues — it transitions to transcription automatically
-    }
-
-    fun consumeTranscriptionResult() {
-        _transcriptionResult.value = null
-    }
-
-    fun toggleThinking() {
-        _thinkingEnabled.value = !_thinkingEnabled.value
-    }
-
-    init {
-        val storedConversations = conversationStore.loadConversations()
-        _conversations.value = storedConversations
-        storedConversations.firstOrNull()?.let { conversation ->
-            activeConversationId = conversation.id
-            _activeConversationId.value = conversation.id
-            _messages.value = conversation.messages
-            _systemPrompt.value = conversation.systemPrompt
-        }
-        // One-time backfill of existing conversations into FTS5 index
-        migrateExistingConversationsToFts()
-    }
-
-    fun sendMessage(
-        userText: String,
-        imageUri: Uri? = null,
-        documentName: String? = null,
-        documentText: String? = null
-    ) {
-        val content = buildString {
-            if (!documentText.isNullOrBlank()) append("[Document: $documentName]\n$documentText\n\n")
-            if (userText.isNotBlank()) append(userText.trim())
-        }.trim()
-        if (content.isBlank() && imageUri == null) return
-
-        if (activeConversationId == null) {
-            activeConversationId = UUID.randomUUID().toString()
-            _activeConversationId.value = activeConversationId
-        }
-
-        val userMsg = ChatMessage(
-            role = Role.USER,
-            content = content,
-            attachedImageUri = imageUri?.toString(),
-            attachedDocumentName = documentName,
-            displayText = if (documentName != null) userText.trim().ifBlank { null } else null
-        )
-        val assistantMsg = ChatMessage(role = Role.ASSISTANT, content = "")
-
-        _messages.value = _messages.value + userMsg + assistantMsg
-        persistCurrentConversation()
-        _isGenerating.value = true
-
-        generationJob = viewModelScope.launch {
-            if (_agentMode.value && imageUri == null) {
-                // ---- Agent path ----
-                var registry: ToolRegistry? = null
-                try {
-                    Log.d("ChatViewModel", "Agent path: building MCP client...")
-                    val client = TavilyMcp.buildClient(agentPrefs)
-                    if (client == null) {
-                        Log.w("ChatViewModel", "Agent not configured — buildClient returned null")
-                        _generationError.tryEmit("Agent not configured — add Tavily API key")
-                        return@launch
-                    }
-                    registry = ToolRegistry()
-                    Log.d("ChatViewModel", "Agent path: connecting to MCP server...")
-                    try {
-                        kotlinx.coroutines.withTimeout(15_000) {
-                            registry!!.register(client)
-                        }
-                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                        Log.e("ChatViewModel", "MCP connection timed out after 15s", e)
-                        _generationError.tryEmit("Agent error: MCP server connection timed out")
-                        return@launch
-                    }
-                    Log.d("ChatViewModel", "Agent path: MCP connected, tools=${registry!!.manifest().map { it.name }}")
-
-                    // Register local tools: memory, skills, session search
-                    registry!!.registerLocal(
-                        com.aipaca.app.agent.mcp.ToolSpec(name = com.aipaca.app.agent.memory.MemoryTool.NAME, description = com.aipaca.app.agent.memory.MemoryTool.DESCRIPTION, inputSchema = com.aipaca.app.agent.memory.MemoryTool.INPUT_SCHEMA)
-                    ) { args -> com.aipaca.app.agent.memory.MemoryTool.run(args, memoryStore) }
-                    registry!!.registerLocal(com.aipaca.app.agent.memory.SkillTools.viewSpec()) { args -> com.aipaca.app.agent.memory.SkillTools.view(args, skillStore) }
-                    registry!!.registerLocal(com.aipaca.app.agent.memory.SkillTools.manageSpec()) { args -> com.aipaca.app.agent.memory.SkillTools.manage(args, skillStore) }
-                    registry!!.registerLocal(com.aipaca.app.agent.memory.SessionSearchTool.spec()) { args -> com.aipaca.app.agent.memory.SessionSearchTool.run(args, messageDao) }
-
-                    // Frozen snapshots — loaded once, writes during session only appear next session
-                    val memorySnap = memoryStore.read(com.aipaca.app.agent.memory.MemoryStore.MEMORY_FILE)
-                    val userSnap = memoryStore.read(com.aipaca.app.agent.memory.MemoryStore.USER_FILE)
-                    val skillIdx = skillStore.index().joinToString("\n") { (name, desc) -> "- $name: $desc" }
-
-                    val agentConfig = AgentConfig(
-                        memorySnapshot = memorySnap,
-                        userSnapshot = userSnap,
-                        skillIndex = skillIdx,
-                        generateParams = GenerateParams(
-                            maxTokens = 1536,
-                            thinkingEnabled = _thinkingEnabled.value
-                        )
-                    )
-                    val orchestrator = EngineState.newAgentOrchestrator(registry!!, agentConfig)
-                    val turns = buildTurns(_messages.value.dropLast(1))
-                    Log.d("ChatViewModel", "Agent path: starting orchestrator.run(), turns=${turns.size}")
-
-                    fun updateAssistant(text: String, thinking: String? = null) {
-                        val current = _messages.value
-                        if (current.isNotEmpty()) {
-                            val last = current.last()
-                            val updated = if (thinking != null) {
-                                last.copy(content = text, thinkingContent = thinking)
-                            } else {
-                                last.copy(content = text)
-                            }
-                            _messages.value = current.dropLast(1) + updated
-                        }
-                    }
-
-                    val display = StringBuilder()
-                    val streamedContent = StringBuilder()
-                    val thinkingBuffer = StringBuilder()
-                    var toolIterationsThisRun = 0
-                    orchestrator.run(goal = content, history = turns).collect { step ->
-                        Log.d("ChatViewModel", "Agent step: ${step::class.simpleName}")
-                        when (step) {
-                            is AgentStep.Thinking -> {
-                                if (step.thinkingText.isNotEmpty()) {
-                                    thinkingBuffer.append(step.thinkingText)
-                                }
-                                if (step.partialText.isNotEmpty()) {
-                                    streamedContent.append(step.partialText)
-                                }
-                                updateAssistant(
-                                    text = display.toString() + streamedContent.toString(),
-                                    thinking = thinkingBuffer.toString()
-                                )
-                            }
-                            is AgentStep.ToolCall -> {
-                                toolIterationsThisRun++
-                                // Clear streamed content (may contain raw tool syntax)
-                                streamedContent.clear()
-                                display.appendLine("\uD83D\uDD0D *Searching: ${step.name}...*\n")
-                                updateAssistant(display.toString(), thinkingBuffer.toString())
-                            }
-                            is AgentStep.ToolObservation -> {
-                                display.appendLine("\u2705 *Got results*\n")
-                                streamedContent.clear()
-                                thinkingBuffer.clear()
-                                updateAssistant(display.toString())
-                            }
-                            is AgentStep.FinalAnswer -> {
-                                // Show final answer below the search status
-                                val finalText = if (display.isNotEmpty()) {
-                                    display.toString() + step.text
-                                } else {
-                                    step.text
-                                }
-                                updateAssistant(finalText, thinkingBuffer.toString())
-                            }
-                            is AgentStep.Error -> {
-                                _generationError.tryEmit("Agent error: ${step.message}")
-                                if (display.isEmpty() && streamedContent.isEmpty()) updateAssistant("Agent error: ${step.message}")
-                                else { display.appendLine("\n\nAgent error: ${step.message}"); updateAssistant(display.toString()) }
-                            }
-                        }
-                    }
-
-                    // ---- Learn pass: counter-triggered review ----
-                    val itersSinceSkill = agentPrefs.getItersSinceSkill() + toolIterationsThisRun
-                    val turnsSinceMemory = agentPrefs.getTurnsSinceMemory() + 1
-                    val shouldReviewSkills = itersSinceSkill >= com.aipaca.app.agent.memory.LearnPass.SKILL_REVIEW_THRESHOLD
-                    val shouldReviewMemory = turnsSinceMemory >= com.aipaca.app.agent.memory.LearnPass.MEMORY_REVIEW_THRESHOLD
-
-                    if (shouldReviewSkills || shouldReviewMemory) {
-                        Log.i("ChatViewModel", "Learn pass triggered: skills=$shouldReviewSkills (iters=$itersSinceSkill), memory=$shouldReviewMemory (turns=$turnsSinceMemory)")
-                        val digestMessages = _messages.value.takeLast(8).map { msg ->
-                            when (msg.role) {
-                                com.aipaca.app.model.Role.USER -> com.aipaca.app.agent.AgentMessage.User(msg.content)
-                                com.aipaca.app.model.Role.ASSISTANT -> com.aipaca.app.agent.AgentMessage.Assistant(msg.content)
-                                com.aipaca.app.model.Role.SYSTEM -> com.aipaca.app.agent.AgentMessage.System(msg.content)
-                            }
-                        }
-                        val reviewType = when {
-                            shouldReviewSkills && shouldReviewMemory -> com.aipaca.app.agent.memory.ReviewType.BOTH
-                            shouldReviewSkills -> com.aipaca.app.agent.memory.ReviewType.SKILL
-                            else -> com.aipaca.app.agent.memory.ReviewType.MEMORY
-                        }
-                        // Run sequentially after user gets their answer (on background dispatcher)
-                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
-                            com.aipaca.app.agent.memory.LearnPass.run(
-                                conversationDigest = digestMessages,
-                                reviewType = reviewType,
-                                memoryStore = memoryStore,
-                                skillStore = skillStore,
-                                memorySnapshot = memorySnap,
-                                userSnapshot = userSnap,
-                                engine = EngineState.engine,
-                                generateMutex = EngineState.generateMutex
-                            )
-                            agentPrefs.setItersSinceSkill(0)
-                            agentPrefs.setTurnsSinceMemory(0)
-                        }
-                    } else {
-                        agentPrefs.setItersSinceSkill(itersSinceSkill)
-                        agentPrefs.setTurnsSinceMemory(turnsSinceMemory)
-                    }
-                } catch (e: Exception) {
-                    Log.e("ChatViewModel", "Agent path exception", e)
-                    _generationError.tryEmit("Agent error: ${e.message ?: "unknown error"}")
-                } finally {
-                    registry?.closeAll()
-                    _isGenerating.value = false
-                    persistCurrentConversation()
-                    // Index messages into FTS5 for cross-session recall
-                    indexCurrentConversationToFts()
-                }
-            } else {
-                // ---- Normal chat path ----
-                var tokenCount = 0
-                try {
-                    val turns = buildTurns(_messages.value.dropLast(1))
-                    val thinkEnabled = _thinkingEnabled.value
-                    val params = GenerateParams(thinkingEnabled = thinkEnabled)
-
-                    // Choose generation path: Ollama remote, vision, or local text
-                    val flow = if (EngineState.useOllama.value && imageUri == null) {
-                        EngineState.ollamaEngine.resetThinkingState()
-                        EngineState.ollamaEngine.generateChat(turns, params)
-                    } else if (imageUri != null) {
-                        if (!EngineState.engine.isMmprojLoaded()) {
-                            _generationError.tryEmit("Load a vision projector first — go to Models tab")
-                            return@launch
-                        }
-                        val rawBytes = getApplication<Application>().contentResolver
-                            .openInputStream(imageUri)?.use { it.readBytes() }
-                        if (rawBytes == null || rawBytes.isEmpty()) {
-                            _generationError.tryEmit("Failed to read image")
-                            return@launch
-                        }
-                        // Downscale large images to reduce vision token count
-                        val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
-                        EngineState.engine.generateChatWithImage(turns, imageBytes, params)
-                    } else {
-                        EngineState.engine.generateChat(turns, params)
-                    }
-
-                    flow.collect { chunk ->
-                            tokenCount++
-                            val current = _messages.value
-                            if (current.isNotEmpty()) {
-                                val last = current.last()
-                                val newContent = last.content + chunk.content
-                                val newThinking = if (thinkEnabled)
-                                    last.thinkingContent + chunk.thinking
-                                else
-                                    last.thinkingContent
-                                _messages.value = current.dropLast(1) +
-                                    last.copy(content = newContent, thinkingContent = newThinking)
-                            }
-                        }
-                    if (tokenCount == 0) {
-                        _generationError.tryEmit("Generation failed — prompt may exceed context window")
-                    }
-                } catch (e: Exception) {
-                    _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
-                } finally {
-                    _isGenerating.value = false
-                    persistCurrentConversation()
-                }
-            }
-        }
-    }
-
-    fun stopGeneration() {
-        EngineState.engine.stopGeneration()
-        EngineState.ollamaEngine.stopGeneration()
-        generationJob?.cancel()
-        _isGenerating.value = false
-    }
-
-    fun updateSystemPrompt(text: String) {
-        _systemPrompt.value = text
-        if (activeConversationId == null) {
-            activeConversationId = UUID.randomUUID().toString()
-            _activeConversationId.value = activeConversationId
-        }
-        persistCurrentConversation()
-    }
-
-    fun clearChat() {
-        stopGeneration()
-        _messages.value = emptyList()
-        _systemPrompt.value = ""
-        activeConversationId = null
-        _activeConversationId.value = null
-    }
-
-    fun selectConversation(conversationId: String) {
-        stopGeneration()
-        val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
-        activeConversationId = conversation.id
-        _activeConversationId.value = conversation.id
-        _messages.value = conversation.messages
-        _systemPrompt.value = conversation.systemPrompt
-    }
-
-    fun deleteConversation(conversationId: String) {
-        if (activeConversationId == conversationId) {
-            stopGeneration()
-        }
-        _conversations.value = conversationStore.delete(conversationId)
-        if (activeConversationId == conversationId) {
-            activeConversationId = null
-            _activeConversationId.value = null
-            _messages.value = emptyList()
-        }
-    }
-
-    private fun downscaleImageIfNeeded(rawBytes: ByteArray, maxLongEdge: Int): ByteArray {
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
-        val w = opts.outWidth
-        val h = opts.outHeight
-        if (w <= 0 || h <= 0) return rawBytes // can't decode dimensions, pass through
-        val longEdge = maxOf(w, h)
-        if (longEdge <= maxLongEdge) return rawBytes // already small enough
-
-        val scale = maxLongEdge.toFloat() / longEdge
-        val newW = (w * scale).toInt().coerceAtLeast(1)
-        val newH = (h * scale).toInt().coerceAtLeast(1)
-
-        val full = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return rawBytes
-        val scaled = Bitmap.createScaledBitmap(full, newW, newH, true)
-        if (scaled !== full) full.recycle()
-
-        val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
-        scaled.recycle()
-        return out.toByteArray()
-    }
-
-    private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
-        val turns = messages.mapNotNull { msg ->
-            if (msg.content.isBlank()) return@mapNotNull null
-            val role = when (msg.role) {
-                Role.USER      -> "user"
-                Role.ASSISTANT -> "assistant"
-                Role.SYSTEM    -> "system"
-            }
-            ChatTurn(role = role, content = msg.content)
-        }
-        val prompt = _systemPrompt.value
-        return if (prompt.isNotBlank()) {
-            listOf(ChatTurn(role = "system", content = prompt)) + turns
-        } else {
-            turns
-        }
-    }
-
-    private fun persistCurrentConversation() {
-        val conversationId = activeConversationId ?: return
-        val currentMessages = _messages.value
-        if (currentMessages.isEmpty() && _systemPrompt.value.isBlank()) return
-
-        val title = currentMessages
-            .firstOrNull { it.role == Role.USER }
-            ?.content
-            ?.replace(Regex("\\s+"), " ")
-            ?.take(42)
-            ?.ifBlank { null }
-            ?: "Untitled chat"
-
-        _conversations.value = conversationStore.upsert(
-            StoredConversation(
-                id           = conversationId,
-                title        = title,
-                messages     = currentMessages,
-                updatedAt    = System.currentTimeMillis(),
-                systemPrompt = _systemPrompt.value
-            )
-        )
-    }
-
-    /** Index current conversation messages into Room/FTS5 for cross-session recall. */
-    private fun indexCurrentConversationToFts() {
-        val conversationId = activeConversationId ?: return
-        val currentMessages = _messages.value
-        if (currentMessages.isEmpty()) return
-
-        val title = currentMessages
-            .firstOrNull { it.role == Role.USER }
-            ?.content?.replace(Regex("\\s+"), " ")?.take(42) ?: "Untitled"
-
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val entities = currentMessages
-                    .filter { it.content.isNotBlank() }
-                    .map { msg ->
-                        com.aipaca.app.data.MessageEntity(
-                            id = msg.id,
-                            sessionId = conversationId,
-                            role = msg.role.name.lowercase(),
-                            content = msg.content,
-                            timestamp = msg.timestamp,
-                            sessionTitle = title
-                        )
-                    }
-                messageDao.insertAll(entities)
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "FTS indexing failed", e)
-            }
-        }
-    }
-
-    /** One-time migration: backfill existing conversations into Room/FTS5. */
-    fun migrateExistingConversationsToFts() {
-        if (agentPrefs.hasMigratedToFts()) return
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val conversations = conversationStore.loadConversations()
-                for (conv in conversations) {
-                    val entities = conv.messages
-                        .filter { it.content.isNotBlank() }
-                        .map { msg ->
-                            com.aipaca.app.data.MessageEntity(
-                                id = msg.id,
-                                sessionId = conv.id,
-                                role = msg.role.name.lowercase(),
-                                content = msg.content,
-                                timestamp = msg.timestamp,
-                                sessionTitle = conv.title
-                            )
-                        }
-                    if (entities.isNotEmpty()) messageDao.insertAll(entities)
-                }
-                agentPrefs.setMigratedToFts(true)
-                Log.i("ChatViewModel", "FTS migration complete: ${conversations.size} conversations indexed")
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "FTS migration failed", e)
-            }
-        }
-    }
-}
 
 // ---- Screen -----------------------------------------------------------------
 
@@ -794,8 +145,7 @@ fun ChatScreen(
     val transcriptionError  by chatViewModel.transcriptionError.collectAsState()
     val whisperLoaded       = EngineState.whisperEngine.isLoaded
 
-    val agentMode           by chatViewModel.agentMode.collectAsState()
-    val isAgentConfigured   by chatViewModel.isAgentConfigured.collectAsState()
+    val webSearchConfigured by chatViewModel.webSearchConfigured.collectAsState()
     val ollamaActive        by EngineState.useOllama.collectAsState()
     val ollamaModelName     by EngineState.ollamaModelName.collectAsState()
 
@@ -807,7 +157,7 @@ fun ChatScreen(
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
-    var showAgentKeyDialog     by remember { mutableStateOf(false) }
+    var showWebSearchDialog    by remember { mutableStateOf(false) }
     var showOllamaDialog       by remember { mutableStateOf(false) }
     var pendingModelPath       by remember { mutableStateOf<String?>(null) }
 
@@ -960,10 +310,8 @@ fun ChatScreen(
                     onThinkingToggle = { chatViewModel.toggleThinking() },
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
-                    agentConfigured  = isAgentConfigured,
-                    agentMode        = agentMode,
-                    onAgentToggle    = { chatViewModel.toggleAgentMode() },
-                    onAgentSetup     = { showAgentKeyDialog = true },
+                    webSearchConfigured = webSearchConfigured,
+                    onWebSearchSetup    = { showWebSearchDialog = true },
                     ollamaActive     = ollamaActive,
                     ollamaModelName  = ollamaModelName,
                     onOllamaClick    = { showOllamaDialog = true },
@@ -1148,26 +496,26 @@ fun ChatScreen(
         )
     }
 
-    if (showAgentKeyDialog) {
-        AgentApiKeyDialog(
+    if (showWebSearchDialog) {
+        WebSearchKeyDialog(
             hasExistingKey = !chatViewModel.agentPrefs.getTavilyApiKey().isNullOrBlank(),
             onSave = { key ->
                 chatViewModel.agentPrefs.saveTavilyApiKey(key)
-                chatViewModel.agentPrefs.setAgentEnabled(true)
-                chatViewModel.enableAgentMode()
-                showAgentKeyDialog = false
+                chatViewModel.agentPrefs.setWebSearchEnabled(true)
+                chatViewModel.refreshWebSearchConfigured()
+                showWebSearchDialog = false
             },
             onContinue = {
-                chatViewModel.enableAgentMode()
-                showAgentKeyDialog = false
+                chatViewModel.refreshWebSearchConfigured()
+                showWebSearchDialog = false
             },
             onClear = {
                 chatViewModel.agentPrefs.clearTavilyApiKey()
-                chatViewModel.agentPrefs.setAgentEnabled(false)
-                chatViewModel.refreshAgentConfigured()
+                chatViewModel.agentPrefs.setWebSearchEnabled(false)
+                chatViewModel.refreshWebSearchConfigured()
                 // Stay on dialog so user can enter a new key
             },
-            onDismiss = { showAgentKeyDialog = false }
+            onDismiss = { showWebSearchDialog = false }
         )
     }
 
@@ -1428,10 +776,8 @@ private fun ChatInputBar(
     onAttachImage: () -> Unit = {},
     onAttachDocument: () -> Unit = {},
     onClearAttachment: () -> Unit = {},
-    agentConfigured: Boolean = false,
-    agentMode: Boolean = false,
-    onAgentToggle: () -> Unit = {},
-    onAgentSetup: () -> Unit = {},
+    webSearchConfigured: Boolean = false,
+    onWebSearchSetup: () -> Unit = {},
     ollamaActive: Boolean = false,
     ollamaModelName: String = "",
     onOllamaClick: () -> Unit = {},
@@ -1526,8 +872,8 @@ private fun ChatInputBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Modes overflow menu (Sys, Think, Agent, Ollama)
-                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || agentMode || ollamaActive
+                    // Modes overflow menu (Sys, Think, Web search, Ollama)
+                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || webSearchConfigured || ollamaActive
                     var showModeMenu by remember { mutableStateOf(false) }
                     Box {
                         Row(
@@ -1570,12 +916,17 @@ private fun ChatInputBar(
                                     onClick     = { onThinkingToggle() }
                                 )
                             }
+                            // No agent toggle: how many tools a turn carries and how many
+                            // rounds it may take is decided from the model's measured
+                            // capabilities (see agent/AgentTier.kt), not by the user.
+                            // What is left here is the one thing that genuinely needs
+                            // a decision — whether queries may leave the device.
                             DropdownMenuItem(
-                                text        = { Text("Agent", style = AlpacaType.BodyMd,
-                                    color = if (agentMode) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                text        = { Text("Web search", style = AlpacaType.BodyMd,
+                                    color = if (webSearchConfigured) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
                                 leadingIcon = { Icon(Icons.Outlined.TravelExplore, null, Modifier.size(18.dp),
-                                    tint = if (agentMode) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
-                                onClick     = { if (agentConfigured) onAgentToggle() else { showModeMenu = false; onAgentSetup() } }
+                                    tint = if (webSearchConfigured) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onWebSearchSetup() }
                             )
                             DropdownMenuItem(
                                 text        = { Text(
@@ -1813,7 +1164,7 @@ private fun SystemPromptDialog(
 }
 
 @Composable
-private fun AgentApiKeyDialog(
+private fun WebSearchKeyDialog(
     hasExistingKey: Boolean,
     onSave: (String) -> Unit,
     onContinue: () -> Unit,
@@ -1830,7 +1181,7 @@ private fun AgentApiKeyDialog(
             shape               = RoundedCornerShape(12.dp),
             title = {
                 Column {
-                    Text("Agent mode", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Text("Web search", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
                     Spacer(Modifier.height(4.dp))
                     MonoLabel("TAVILY API KEY")
                 }
@@ -1844,7 +1195,7 @@ private fun AgentApiKeyDialog(
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Enable agent mode with the saved key, or delete it to enter a new one.",
+                        "Keep the saved key to allow web searches, or delete it to enter a new one.",
                         style = AlpacaType.BodySm,
                         color = AlpacaColors.Text.Subtle
                     )
@@ -1872,7 +1223,7 @@ private fun AgentApiKeyDialog(
             shape               = RoundedCornerShape(12.dp),
             title = {
                 Column {
-                    Text("Agent mode", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Text("Web search", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
                     Spacer(Modifier.height(4.dp))
                     MonoLabel("TAVILY API KEY FOR WEB SEARCH")
                 }

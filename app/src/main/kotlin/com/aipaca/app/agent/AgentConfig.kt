@@ -4,39 +4,53 @@ import com.aipaca.app.agent.mcp.ToolSpec
 import com.aipaca.app.engine.GenerateParams
 
 /**
- * Agent-side configuration: system prompt / persona and the tool-manifest rendering
- * used to make the model aware of available tools without touching the public
- * OpenAI wire format (`server/models/OpenAIModels.kt` has no tools/tool_calls fields
- * by design — see 00_repo_analysis.md §7.2).
+ * Agent-side configuration: the prompt-resident memory layers plus the tool-manifest
+ * rendering used to make the model aware of available tools without touching the
+ * public OpenAI wire format (`server/models/OpenAIModels.kt` has no tools/tool_calls
+ * fields by design — see 00_repo_analysis.md §7.2).
  *
- * Mirrors OpenClaw's AGENTS.md/SOUL.md/TOOLS.md split at a much smaller scale
- * (spec_issue_43_agent_mode.md §3): [persona] ~= SOUL.md, [systemPrompt] ~= AGENTS.md,
- * and the tool manifest rendered into the prompt ~= TOOLS.md.
+ * The four layers, in prompt order (issue #52):
+ *
+ * | Layer          | Field             | What it holds                                  |
+ * |----------------|-------------------|------------------------------------------------|
+ * | soul.md        | [soulSnapshot]    | who the agent is, what the user expects of it   |
+ * | user.md        | [userSnapshot]    | facts and preferences about the user            |
+ * | memory.md      | [sessionIndex]    | one line per past conversation                  |
+ * | skills/        | [skillIndex]      | one line per learned procedure                  |
+ *
+ * The last two are indexes only: full bodies load on demand via `session_view` and
+ * `skill_view`. [memorySnapshot] carries environment facts alongside the user layer.
  */
 data class AgentConfig(
+    /** Fallback identity, used only until soul.md has content. */
     val persona: String = "You are AIpaca's on-device agent: helpful, concise, and honest about uncertainty.",
-    val systemPrompt: String = "You can call tools to look things up on the web when your own knowledge " +
-        "is insufficient or the user asks about current events. Only call a tool when it is actually needed. " +
-        "Never simulate or pretend to use tools — always use the actual tool_call format.\n\n" +
+    val systemPrompt: String = "Only call a tool when it is actually needed, and never simulate or " +
+        "pretend to use one — always use the real tool-call format.\n\n" +
         "You have a persistent memory tool. Use it to remember user preferences, corrections, " +
-        "and environment facts. Store in 'user' file for personal preferences, 'memory' file for technical facts. " +
-        "Keep entries concise. Do not store transient errors or one-off task details.\n\n" +
-        "When you solve a non-trivial multi-step problem, consider saving the procedure as a skill. " +
-        "Before starting a task, check if a relevant skill exists in your skill index. " +
-        "You can search past conversations using session_search when the user references something discussed before.",
+        "and environment facts. Store personal preferences in the 'user' file and technical facts " +
+        "in the 'memory' file. Keep entries to one short sentence. Do not store transient errors " +
+        "or one-off task details.",
+    val soulSnapshot: String = "",     // frozen at session start
     val memorySnapshot: String = "",   // frozen at session start — next session sees writes
     val userSnapshot: String = "",     // frozen at session start
+    val sessionIndex: String = "",     // compact index of past conversations
     val skillIndex: String = "",       // compact name+description index of learned skills
-    val maxToolRounds: Int = 4,
+    val maxToolRounds: Int = TierPolicy.ASSISTED_MAX_ROUNDS,
+    /**
+     * Malformed tool calls tolerated before the loop drops its tools and answers
+     * plainly. Small models occasionally emit tool syntax as prose; showing the
+     * user an error in that case is strictly worse than answering without tools.
+     */
+    val malformedCallsBeforeDegrade: Int = TierPolicy.MALFORMED_CALLS_BEFORE_DEGRADE,
     val generateParams: GenerateParams = GenerateParams(maxTokens = 768)
 )
 
 /**
- * Renders the combined system prompt handed to [com.aipaca.app.engine.InferenceEngine.generateChat]
- * for an agent turn: persona + task instructions + a compact tool manifest.
+ * Renders the combined system prompt handed to the engine for an agent turn:
+ * identity + task instructions + memory layers + a compact tool manifest.
  *
- * Kept intentionally terse — research/20_kurzbericht_edge_kontext_agentik.md flags tool-schema
- * size as a binary enablement factor under tight on-device context budgets.
+ * Kept intentionally terse — research/20_kurzbericht_edge_kontext.md flags tool-schema
+ * and prompt size as a binary enablement factor under tight on-device context budgets.
  */
 fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
     // NOTE: Do NOT include tool-calling format instructions here.
@@ -44,10 +58,15 @@ fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
     // renders the model's native tool-call syntax. Duplicating instructions here confuses
     // the model and causes it to hallucinate fake tool calls as plain text.
     return buildString {
-        append(persona)
+        if (soulSnapshot.isNotBlank()) {
+            append("## Who You Are\n")
+            append(soulSnapshot)
+        } else {
+            append(persona)
+        }
         append("\n\n")
         append(systemPrompt)
-        // Memory/user snapshots are frozen at session start — writes persist to disk
+        // Memory snapshots are frozen at session start — writes persist to disk
         // but only appear in the next session (preserves KV cache across turns).
         if (userSnapshot.isNotBlank()) {
             append("\n\n## About the User\n")
@@ -56,6 +75,11 @@ fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
         if (memorySnapshot.isNotBlank()) {
             append("\n\n## Remembered Context\n")
             append(memorySnapshot)
+        }
+        if (sessionIndex.isNotBlank()) {
+            append("\n\n## Past Conversations\n")
+            append(sessionIndex)
+            append("\nUse session_view(session_id) with an id in square brackets to read one in full.")
         }
         if (skillIndex.isNotBlank()) {
             append("\n\n## Your Learned Skills\n")

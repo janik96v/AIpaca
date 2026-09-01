@@ -1696,6 +1696,75 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
 }
 
 // ---------------------------------------------------------------------------
+// nativeProbeToolSupport
+//   Answers whether the loaded GGUF actually has a tool-calling chat template.
+//
+//   Applies the model's Jinja template once with a throwaway tool definition and
+//   checks whether the tool's name survives into the rendered prompt. A model
+//   without tool support silently drops the tool schemas, answers in prose, and
+//   leaves the PEG parser nothing to parse. Detecting that up front is what lets
+//   the Kotlin side pick an execution tier instead of handing every model a tool
+//   manifest it cannot use (see agent/AgentTier.kt).
+//
+//   Cheap: template application only, no tokenization and no decode.
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeToolSupport(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    using json = nlohmann::ordered_json;
+
+    if (ctxPtr == 0L) {
+        LOGE("nativeProbeToolSupport: null context pointer");
+        return JNI_FALSE;
+    }
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+
+    // A name no chat template would emit on its own, so finding it in the rendered
+    // prompt proves the template really rendered the tool definition.
+    static const char* PROBE_TOOL_NAME = "aipaca_probe_tool";
+    static const char* PROBE_MESSAGES  = R"([{"role":"user","content":"hi"}])";
+    static const char* PROBE_TOOLS =
+        R"([{"type":"function","function":{"name":"aipaca_probe_tool",)"
+        R"("description":"probe","parameters":{"type":"object","properties":{}}}}])";
+
+    try {
+        std::vector<common_chat_msg>  messages = common_chat_msgs_parse_oaicompat(json::parse(PROBE_MESSAGES));
+        std::vector<common_chat_tool> tools    = common_chat_tools_parse_oaicompat(json::parse(PROBE_TOOLS));
+
+        auto tmpls = common_chat_templates_init(lc->model, "");
+
+        common_chat_templates_inputs inputs;
+        inputs.add_generation_prompt = true;
+        inputs.use_jinja             = true;
+        inputs.enable_thinking       = false;
+        inputs.reasoning_format      = COMMON_REASONING_FORMAT_NONE;
+        inputs.messages              = messages;
+        inputs.tools                 = tools;
+        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        inputs.parallel_tool_calls   = false;
+
+        common_chat_params cp = common_chat_templates_apply(tmpls.get(), inputs);
+
+        // The signal is whether the rendered prompt actually mentions the probe tool.
+        // A template that ignores `inputs.tools` produces a plain chat prompt, and the
+        // tool name cannot appear in it. Checking the rendered text rather than the
+        // chat-format enum keeps this independent of llama.cpp's enum naming, which
+        // changes across upstream revisions.
+        const bool supported = (cp.prompt.find(PROBE_TOOL_NAME) != std::string::npos);
+        LOGI("nativeProbeToolSupport: format=%d prompt_len=%zu tool_calling=%s",
+             (int)cp.format, cp.prompt.size(), supported ? "yes" : "no");
+        return supported ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception& e) {
+        LOGE("nativeProbeToolSupport: template probe failed: %s", e.what());
+        return JNI_FALSE;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // nativeGenerateAgent
 //   Native tool-calling generation: applies Jinja tool templates, generates
 //   with streaming, then parses tool calls via llama.cpp's PEG parser.

@@ -6,6 +6,7 @@ import android.util.Log
 import com.aipaca.app.data.MmprojModelPrefs
 import com.aipaca.app.data.ModelDownloadManager
 import com.aipaca.app.data.WhisperModelPrefs
+import com.aipaca.app.work.MemoryMaintenance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -27,6 +28,11 @@ class AIpacaApp : Application() {
 
         // Persists downloaded-model metadata and streams new downloads into internal storage.
         ModelDownloadManager.init(this)
+
+        // Idle-time memory consolidation (issue #52, loop L3). KEEP policy, so this is
+        // a no-op once scheduled; the worker itself decides whether there is anything
+        // worth doing.
+        MemoryMaintenance.schedulePeriodic(this)
 
         // Restore whisper model from last session (non-blocking)
         val savedWhisperPath = WhisperModelPrefs.getPath(this)

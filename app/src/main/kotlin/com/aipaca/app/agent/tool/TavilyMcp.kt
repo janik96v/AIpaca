@@ -20,10 +20,10 @@ object TavilyMcp {
 
     /**
      * Builds a ready-to-connect [McpClient] from stored [AgentPrefs], or null if the
-     * agent isn't configured yet (missing key / consent not granted).
+     * web search isn't configured yet (missing key / consent not granted).
      */
     fun buildClient(prefs: AgentPrefs): McpClient? {
-        if (!prefs.isConfigured()) return null
+        if (!prefs.isWebSearchConfigured()) return null
         val apiKey = prefs.getTavilyApiKey() ?: return null
         val baseUrl = prefs.getMcpServerUrl().ifBlank { DEFAULT_TAVILY_MCP_BASE_URL }
         return HttpMcpClient(serverUrl = endpointUrl(baseUrl, apiKey))

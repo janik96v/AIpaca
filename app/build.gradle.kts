@@ -171,6 +171,9 @@ dependencies {
     // PDF text extraction (API < 35 fallback)
     implementation(libs.pdfbox.android)
 
+    // WorkManager (idle-time memory consolidation loop)
+    implementation(libs.androidx.work.runtime.ktx)
+
     // Room (FTS5 cross-session recall)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

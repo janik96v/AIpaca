@@ -126,6 +126,9 @@ class LlamaCppEngine : InferenceEngine {
 
     // ---- Agent / tool-calling JNI -------------------------------------------
 
+    /** True when the loaded GGUF's chat template actually renders tool calls. */
+    private external fun nativeProbeToolSupport(ctxPtr: Long): Boolean
+
     private external fun nativeGenerateAgent(
         ctxPtr: Long,
         messagesJson: String,
@@ -142,6 +145,9 @@ class LlamaCppEngine : InferenceEngine {
 
     /** Holds the native LlamaContext* cast to Long; 0 means no model loaded. */
     private val contextPtr      = AtomicLong(0L)
+
+    /** Probe result for the currently loaded model; cleared on load/unload. */
+    private val toolSupportCache = java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
     private val _isLoaded       = AtomicBoolean(false)
     private val _modelPath      = AtomicReference<String?>(null)
     private val _activeGpuLayers = AtomicInteger(-1)
@@ -210,6 +216,7 @@ class LlamaCppEngine : InferenceEngine {
             }
 
             contextPtr.set(activePtr)
+            toolSupportCache.set(null)   // re-probe for the newly loaded model
             _isLoaded.set(true)
             _modelPath.set(modelPath)
             Log.i(TAG, "Model loaded, ptr=$activePtr  activeGpuLayers=${_activeGpuLayers.get()}")
@@ -344,6 +351,7 @@ class LlamaCppEngine : InferenceEngine {
     /** Free all native resources. Resets the context pointer atomically. */
     override fun unload() {
         val ptr = contextPtr.getAndSet(0L)
+        toolSupportCache.set(null)
         if (ptr != 0L) {
             Log.i(TAG, "Unloading model, ptr=$ptr")
             _isLoaded.set(false)
@@ -391,6 +399,34 @@ class LlamaCppEngine : InferenceEngine {
     fun isMmprojLoaded(): Boolean {
         val ptr = contextPtr.get()
         return ptr != 0L && nativeIsMmprojLoaded(ptr)
+    }
+
+    /**
+     * Whether the loaded model can do native tool calling — the input that decides
+     * which execution tier a turn gets (see `agent/AgentTier.kt`).
+     *
+     * Probes the Jinja template once and caches the answer for the loaded model;
+     * a model whose template ignores tools silently produces prose instead of tool
+     * calls, and without this check every such model would be handed a tool manifest
+     * it cannot use.
+     *
+     * On any native failure this reports `true`, which is the pre-probe behaviour:
+     * the loop then attempts tools and falls back to a plain answer after a couple
+     * of malformed calls, rather than losing tool support outright.
+     */
+    fun supportsToolCalling(): Boolean {
+        val ptr = contextPtr.get()
+        if (ptr == 0L) return false
+        toolSupportCache.get()?.let { return it }
+        val supported = try {
+            nativeProbeToolSupport(ptr)
+        } catch (t: Throwable) {
+            Log.w(TAG, "tool-support probe unavailable, assuming supported", t)
+            true
+        }
+        toolSupportCache.set(supported)
+        Log.i(TAG, "tool calling supported: $supported")
+        return supported
     }
 
     fun generateChatWithImage(

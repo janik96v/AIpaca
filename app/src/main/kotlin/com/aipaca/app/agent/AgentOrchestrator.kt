@@ -81,6 +81,11 @@ class AgentOrchestrator(
         val manifest = tools.manifest()
         val systemPrompt = config.renderSystemPrompt(manifest)
 
+        // Tools are dropped for the rest of the turn once the model has produced
+        // [AgentConfig.malformedCallsBeforeDegrade] fake tool calls — see below.
+        var activeManifest = manifest
+        var malformedCalls = 0
+
         // Build the message list with proper roles
         val messages = mutableListOf<AgentMessage>()
         messages += AgentMessage.System(systemPrompt)
@@ -101,7 +106,7 @@ class AgentOrchestrator(
             // Generate with streaming so the UI gets real-time token feedback
             val result: AgentResult = try {
                 withEngineLock {
-                    collectAgentStreaming(messages, manifest) { chunk ->
+                    collectAgentStreaming(messages, activeManifest) { chunk ->
                         if (chunk.content.isNotEmpty() || chunk.thinking.isNotEmpty()) {
                             emit(AgentStep.Thinking(
                                 partialText = chunk.content,
@@ -120,13 +125,28 @@ class AgentOrchestrator(
             if (!result.hasToolCalls) {
                 // Detect when the model simulates a tool call in plain text instead of
                 // emitting proper <|tool_call> tokens (common with small models).
-                if (round < config.maxToolRounds && looksLikeFakeToolCall(result.content)) {
-                    Log.w(TAG, "Round $round: fake tool call detected, retrying")
+                if (round < config.maxToolRounds && activeManifest.isNotEmpty() &&
+                    looksLikeFakeToolCall(result.content)
+                ) {
+                    malformedCalls++
                     messages += AgentMessage.Assistant(content = result.content)
-                    messages += AgentMessage.User(
-                        content = "You must actually call the tool, not simulate it. " +
-                            "Use the proper tool_call format to search."
-                    )
+                    if (malformedCalls >= config.malformedCallsBeforeDegrade) {
+                        // The model keeps writing tool syntax as prose. Small models do
+                        // this and never recover from another nudge, so drop the tools
+                        // and let it answer plainly — a plain answer beats an error.
+                        Log.w(TAG, "Round $round: degrading to a tool-free answer after $malformedCalls fake tool calls")
+                        activeManifest = emptyList()
+                        messages += AgentMessage.User(
+                            content = "Answer the question directly from what you already know. " +
+                                "Do not mention tools."
+                        )
+                    } else {
+                        Log.w(TAG, "Round $round: fake tool call detected, retrying")
+                        messages += AgentMessage.User(
+                            content = "You must actually call the tool, not simulate it. " +
+                                "Use the proper tool_call format to search."
+                        )
+                    }
                     continue
                 }
                 Log.d(TAG, "Round $round final answer, content length=${result.content.length}, content='${result.content.take(200)}'")
@@ -178,7 +198,7 @@ class AgentOrchestrator(
         messages += AgentMessage.User("Give your best final answer now, without calling any more tools.")
         val finalResult = try {
             generateMutex.withLock {
-                collectAgentStreaming(messages, manifest) { chunk ->
+                collectAgentStreaming(messages, activeManifest) { chunk ->
                     if (chunk.content.isNotEmpty() || chunk.thinking.isNotEmpty()) {
                         emit(AgentStep.Thinking(
                             partialText = chunk.content,

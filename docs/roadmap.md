@@ -21,7 +21,10 @@
 | Native tool-calling | llama.cpp Jinja templates + PEG parser |
 | MCP client | Streamable HTTP/SSE, JSON-RPC 2.0 |
 | Tavily web search | First MCP tool integration |
-| Agent UI toggle | Enable/disable agent mode in chat |
+| Tiered execution | Tool count and round budget derived from the model's probed capabilities — no agent toggle |
+| Agent memory | soul.md / user.md / memory.md with a frozen-snapshot prompt layer |
+| Self-learning loop | Post-turn extraction, per-session summaries, idle-time consolidation (issue #52) |
+| Memory screen | Inspect, edit, approve and undo everything the loops write |
 
 ---
 
@@ -86,16 +89,13 @@
 | Feature | Description |
 |---|---|
 | Programmatic tool calling | In-process JavaScript sandbox (QuickJS) for batch tool operations. **[Implementation plan](internal/implementation_plans/ptc_programmatic_tool_calling.md)** · [lab research](internal/lab/scripting_engines.md) |
-| File-based skill system | Skills as markdown files with progressive disclosure (index in prompt, body on demand). Inspired by [Hermes patterns](internal/reference/hermes_erklaert.md). |
-| FTS5 cross-session recall | SQLite FTS5 search across conversation history for context retrieval |
-| File-based memory | Persistent agent memory with frozen-snapshot pattern (cache-friendly) |
 
 ### Long-Term
 
 | Feature | Description |
 |---|---|
 | iOS port | SwiftUI frontend sharing the same llama.cpp/whisper.cpp core |
-| Background learning loop | Sequential post-turn review to extract and persist skills |
+| Encrypted memory files | Move `agent_memory/` behind `EncryptedFile`, matching conversation storage |
 | Local embedding provider | On-device embedding model for semantic memory search |
 | Additional MCP tools | File system, calculator, calendar, and other local tool integrations |
 
@@ -110,3 +110,4 @@ These constraints guide all roadmap decisions:
 3. **Native tool calling** — llama.cpp Jinja templates + PEG parser, not prompt-based regex parsing.
 4. **Server API unchanged** — The public `/v1/chat/completions` endpoint has no `tools` field. Tool calling is agent-internal only.
 5. **Additive changes** — New features are gated behind toggles until verified. Existing paths (chat, server) are not modified.
+6. **Capability over configuration** — What a turn is allowed to do follows from what the loaded model can actually do, probed at load time. Users choose privacy boundaries (may queries leave the device), not execution modes.

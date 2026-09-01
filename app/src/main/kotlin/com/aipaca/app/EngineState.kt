@@ -63,6 +63,13 @@ object EngineState {
      */
     val generateMutex: Mutex = Mutex()
 
+    /**
+     * Single-flight guard for the memory loops (extraction, session summary,
+     * consolidation). They all drive the same single engine context, and two of them
+     * running at once would queue behind [generateMutex] and delay the user's own turn.
+     */
+    val memoryPassMutex: Mutex = Mutex()
+
     // ---- Coroutine scope ---------------------------------------------------
 
     /**
@@ -142,6 +149,57 @@ object EngineState {
     private val _useOllama = MutableStateFlow(false)
     val useOllama: StateFlow<Boolean> = _useOllama.asStateFlow()
 
+    // ---- Agent capability --------------------------------------------------
+
+    /**
+     * Whether the active backend can do native tool calling.
+     *
+     * Probed from the GGUF's Jinja chat template on load (see
+     * [LlamaCppEngine.supportsToolCalling]); assumed true for the Ollama backend,
+     * which handles tool schemas server-side. This is the main input to
+     * [com.aipaca.app.agent.TierPolicy] — a model without tool support gets plain
+     * chat rather than a tool manifest it will only mangle.
+     */
+    private val _toolCallingSupported = MutableStateFlow(false)
+    val toolCallingSupported: StateFlow<Boolean> = _toolCallingSupported.asStateFlow()
+
+    // ---- Memory stores (process-wide, shared by chat, UI and the maintenance worker) ----
+
+    val memoryStore: com.aipaca.app.agent.memory.MemoryStore by lazy {
+        com.aipaca.app.agent.memory.MemoryStore(appContext)
+    }
+    val sessionIndexStore: com.aipaca.app.agent.memory.SessionIndexStore by lazy {
+        com.aipaca.app.agent.memory.SessionIndexStore(appContext)
+    }
+    val skillStore: com.aipaca.app.agent.memory.SkillStore by lazy {
+        com.aipaca.app.agent.memory.SkillStore(appContext)
+    }
+
+    /**
+     * Generation surface for the memory passes, bound to whichever backend is active.
+     *
+     * The local engine serializes through [generateMutex] because llama.cpp has one
+     * context; Ollama is stateless HTTP and needs no lock.
+     */
+    fun memoryEngine(): com.aipaca.app.agent.memory.MemoryEngine =
+        if (_useOllama.value) {
+            com.aipaca.app.agent.memory.MemoryEngine(
+                generate = { turns, params ->
+                    ollamaEngine.resetThinkingState()
+                    ollamaEngine.generateChat(turns, params)
+                },
+                lock = null
+            )
+        } else {
+            com.aipaca.app.agent.memory.MemoryEngine(
+                generate = { turns, params -> engine.generateChat(turns, params) },
+                lock = generateMutex
+            )
+        }
+
+    /** True when some backend is ready to run a memory pass. */
+    fun canRunMemoryPass(): Boolean = _useOllama.value || engine.isLoaded()
+
     private val _ollamaModelName = MutableStateFlow("")
     val ollamaModelName: StateFlow<String> = _ollamaModelName.asStateFlow()
 
@@ -154,6 +212,7 @@ object EngineState {
         ollamaEngine.modelName = model
         _ollamaModelName.value = model
         _useOllama.value = true
+        _toolCallingSupported.value = true
         // Synthetic "loaded" state so chat/agent paths proceed
         _isLoaded.value = true
         _modelInfo.value = ModelInfo(
@@ -173,6 +232,7 @@ object EngineState {
         _ollamaModelName.value = ""
         OllamaPrefs.setEnabled(appContext, false)
         // Restore real model state
+        _toolCallingSupported.value = engine.isLoaded() && engine.supportsToolCalling()
         _isLoaded.value = engine.isLoaded()
         if (engine.isLoaded()) {
             _modelInfo.value = engine.getModelInfo()
@@ -226,6 +286,7 @@ object EngineState {
                     _modelPath.value = path
                     _gpuLayers.value = engine.getActiveGpuLayers()
                     _modelInfo.value = engine.getModelInfo()
+                    _toolCallingSupported.value = engine.supportsToolCalling()
                     val gpuInfo = if (_gpuLayers.value > 0) "GPU (${_gpuLayers.value} layers)" else "CPU only"
                     val quantInfo = _modelInfo.value.quant
                     val gpuCompat = if (_gpuLayers.value > 0 && !_modelInfo.value.gpuCompatible)
@@ -235,6 +296,7 @@ object EngineState {
                 onFailure = { e ->
                     _gpuLayers.value = -1
                     _modelInfo.value = ModelInfo()
+                    _toolCallingSupported.value = false
                     _errorMessage.value = e.message ?: "Unknown load error"
                     Log.e(TAG, "loadModel failed", e)
                 }
@@ -256,6 +318,7 @@ object EngineState {
         _isGenerating.value   = false
         _gpuLayers.value      = -1
         _modelInfo.value      = ModelInfo()
+        _toolCallingSupported.value = false
         _lastBenchmark.value  = BenchResult()
         _isBenchmarking.value = false
         // Clear mmproj state — it depends on the model

@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,12 +39,14 @@ import com.aipaca.app.ui.theme.AlpacaType
 
 enum class AlpacaTab(val label: String, val icon: ImageVector, val route: String) {
     Chat   ("Chat",   Icons.Outlined.ChatBubbleOutline, "chat"),
+    Memory ("Memory", Icons.Outlined.Psychology,        "memory"),
     Models ("Models", Icons.Outlined.Inventory2,        "models"),
     Server ("Server", Icons.Outlined.Dns,               "server");
 
     companion object {
         fun fromRoute(route: String?): AlpacaTab = when (route) {
             Chat.route   -> Chat
+            Memory.route -> Memory
             Models.route -> Models
             Server.route -> Server
             else         -> Chat

@@ -142,4 +142,15 @@ interface MessageDao {
      */
     @Query("SELECT COUNT(*) FROM messages")
     suspend fun count(): Int
+
+    /**
+     * Distinct session ids present in the index. Used by the consolidation pass to
+     * drop index entries whose conversation was deleted.
+     */
+    @Query("SELECT DISTINCT session_id FROM messages")
+    suspend fun sessionIds(): List<String>
+
+    /** Removes every message of a conversation the user deleted. */
+    @Query("DELETE FROM messages WHERE session_id = :sessionId")
+    suspend fun deleteSession(sessionId: String)
 }
