@@ -27,7 +27,7 @@ This document explains how to get a working development environment, the convent
 ```bash
 git clone https://github.com/<your-fork>/AIpaca.git
 cd AIpaca
-git submodule update --init --recursive   # pulls llama.cpp
+git submodule update --init --recursive   # pulls llama.cpp + whisper.cpp
 ```
 
 Open the project in Android Studio, let Gradle sync, then `Run` on a connected Android device.
@@ -102,10 +102,9 @@ Conventional commits enable automated changelog generation later and make `git l
 
 If you're looking for something to work on, these are particularly impactful:
 
-- **GPU acceleration** (OpenCL / Vulkan backends for llama.cpp on mobile)
-- **Model browser** integrated with HuggingFace
-- **Multimodal support** (LLaVA, vision models)
-- **Chat history persistence** with Room DB
+- **KV-cache prefix reuse** across agent turns (reduce prefill time)
+- **In-app model browser** integrated with HuggingFace
+- **Multi-request queuing** for the API server
 - **iOS port** (shared C++ core, SwiftUI shell)
 - **Documentation, screenshots, and example clients**
 

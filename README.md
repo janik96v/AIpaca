@@ -6,15 +6,15 @@
 
 **On-device AI for Android — LLM, vision, speech, and agent capabilities, all running locally on your phone.**
 
-AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It provides a built-in chat UI, speech-to-text, multimodal vision, an on-device agent with tool calling, and an OpenAI-compatible REST API server — all without any cloud dependency.
+AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It provides a built-in chat UI, speech-to-text, multimodal vision, an on-device agent with tool calling and persistent memory, and an OpenAI-compatible REST API server — all without any cloud dependency.
 
 ---
 
 ## Screenshots
 
-| Chat | Chat History | Models | Server |
-|:---:|:---:|:---:|:---:|
-| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
+| Chat | Chat History | Memory | Models | Server |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Memory tab](docs/screenshots/memory_tab.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
 
 ---
 
@@ -42,11 +42,20 @@ AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. 
 ### Agent Mode
 - Native on-device agent loop: think → tool call → observe → repeat
 - Structured tool calling via llama.cpp Jinja templates + PEG parser
+- Capability-based execution tiers (Plain / Assisted / Deep) — no agent toggle
 - MCP (Model Context Protocol) client over Streamable HTTP
-- Tavily web search integration as first tool
-- Tool registry aggregating tools from multiple MCP servers
+- Tavily web search integration
+- Persistent agent memory (soul, user, environment) with self-learning loop
+- Skill system with progressive disclosure and background extraction
+- Cross-session recall via FTS5 full-text search
 - Streaming agent steps in the UI (thinking, tool calls, observations)
 - Graceful handling of hallucinated/failed tool calls
+
+### Remote LLM (Ollama)
+- Route generation through a local-network Ollama server for testing with larger models
+- OpenAI-compatible streaming via Ktor HTTP client
+- Full agent tool-calling pipeline over Ollama's native format
+- Connection dialog with connectivity test in the Modes menu
 
 ### OpenAI-Compatible REST API
 - HTTPS server on port 8443 with self-signed TLS certificates
@@ -145,7 +154,10 @@ UI (Jetpack Compose + Material 3)
 EngineState (process-scoped singleton)
     |-- LlamaCppEngine --> llama_jni.cpp --> llama.cpp (GPU/CPU)
     |-- WhisperEngine ---> whisper_jni.cpp --> whisper.cpp (GPU/CPU)
+    |-- OllamaEngine ----> Ktor HTTP Client --> Ollama server (local network)
     +-- AgentOrchestrator --> MCP tools (Streamable HTTP)
+         |-- MemoryStore / SkillStore (filesystem)
+         +-- LearnPass (background extraction)
 
 --- parallel ---
 
@@ -190,15 +202,17 @@ For full request/response examples, authentication details, and client code (Pyt
 - [x] Android foreground service for background operation
 - [x] Agent mode with think→tool→observe loop
 - [x] Native tool-calling (Jinja template + PEG parser)
+- [x] Capability-based execution tiers (Plain / Assisted / Deep)
 - [x] MCP client (Streamable HTTP/SSE)
 - [x] Tavily web search tool integration
+- [x] Ollama remote backend (local-network LLM routing)
+- [x] Agent memory (soul, user, environment) with self-learning loop
+- [x] Skill system with progressive disclosure
+- [x] FTS5-based cross-session recall (session_search + session_view)
+- [x] Memory screen (view, edit, approve, undo)
+- [x] Idle-time memory consolidation (WorkManager)
 - [x] Reasoning/thinking token support
 - [x] PDF text extraction
-
-### In Progress
-
-- [ ] Agent tool-calling refinements and streaming improvements (PR1 Increment 3-5)
-- [ ] Agent-specific UI enhancements
 
 ### Planned
 
@@ -207,8 +221,6 @@ For full request/response examples, authentication details, and client code (Pyt
 - [ ] In-app HuggingFace model browser
 - [ ] Multi-request queuing for API server
 - [ ] Programmatic tool calling (in-process JS sandbox)
-- [ ] File-based skill system with progressive disclosure
-- [ ] FTS5-based cross-session recall
 - [ ] iOS port (shared llama.cpp core + SwiftUI)
 
 For detailed roadmap with technical specs, see [docs/roadmap.md](docs/roadmap.md).

@@ -102,6 +102,9 @@ class LlamaCppEngine : InferenceEngine {
     /** Returns JSON model info: {"quant":"Q4_K_M","ftype":15,"gpuCompatible":false} */
     private external fun nativeGetModelInfo(ctxPtr: Long): String
 
+    /** Lightweight GGUF header probe — no model loading. */
+    private external fun nativeProbeGgufMeta(modelPath: String): String
+
     /** Returns the model's chat template string, or null if unavailable. */
     private external fun nativeGetChatTemplate(ctxPtr: Long): String?
 
@@ -654,6 +657,10 @@ class LlamaCppEngine : InferenceEngine {
             val thinkingStartTag = Regex("\"thinkingStartTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
             val thinkingEndTag = Regex("\"thinkingEndTag\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
             val supportsMultimodal = json.contains("\"supportsMultimodal\":true")
+            val architecture = Regex("\"architecture\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            val isRecurrentKV = json.contains("\"isRecurrentKV\":true")
+            val nCtxTrain = Regex("\"nCtxTrain\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val nParams = Regex("\"nParams\":(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
 
             ModelInfo(
                 quant = quant,
@@ -666,11 +673,51 @@ class LlamaCppEngine : InferenceEngine {
                 thinkingStartTag = thinkingStartTag,
                 thinkingEndTag = thinkingEndTag,
                 modelName = modelName,
-                supportsMultimodal = supportsMultimodal
+                supportsMultimodal = supportsMultimodal,
+                architecture = architecture,
+                isRecurrentKV = isRecurrentKV,
+                nCtxTrain = nCtxTrain,
+                nParams = nParams
             )
         } catch (e: Exception) {
             Log.w(TAG, "getModelInfo failed", e)
             ModelInfo()
         }
     }
+
+    /**
+     * Probe GGUF metadata from file header without loading the model.
+     * Returns architecture, nCtxTrain, nParams, quant, layer/embedding dims
+     * for RAM-aware context sizing before the model is loaded.
+     */
+    fun probeGgufMeta(modelPath: String): GgufProbeResult {
+        return try {
+            val json = nativeProbeGgufMeta(modelPath)
+            val arch = Regex("\"architecture\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            val isRecurrentKV = json.contains("\"isRecurrentKV\":true")
+            val nCtxTrain = Regex("\"nCtxTrain\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val nParams = Regex("\"nParams\":(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+            val nEmbd = Regex("\"nEmbd\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val nLayer = Regex("\"nLayer\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val nHeadKv = Regex("\"nHeadKv\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val dHead = Regex("\"dHead\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val quant = Regex("\"quant\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: "unknown"
+            GgufProbeResult(arch, isRecurrentKV, nCtxTrain, nParams, nEmbd, nLayer, nHeadKv, dHead, quant)
+        } catch (e: Exception) {
+            Log.w(TAG, "probeGgufMeta failed for $modelPath", e)
+            GgufProbeResult()
+        }
+    }
 }
+
+data class GgufProbeResult(
+    val architecture: String = "",
+    val isRecurrentKV: Boolean = false,
+    val nCtxTrain: Int = 0,
+    val nParams: Long = 0L,
+    val nEmbd: Int = 0,
+    val nLayer: Int = 0,
+    val nHeadKv: Int = 0,
+    val dHead: Int = 0,
+    val quant: String = "unknown"
+)

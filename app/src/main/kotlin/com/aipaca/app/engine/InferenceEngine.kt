@@ -37,7 +37,11 @@ data class ModelInfo(
     val thinkingStartTag: String = "",
     val thinkingEndTag: String = "",
     val modelName: String = "",
-    val supportsMultimodal: Boolean = false
+    val supportsMultimodal: Boolean = false,
+    val architecture: String = "",
+    val isRecurrentKV: Boolean = false,
+    val nCtxTrain: Int = 0,
+    val nParams: Long = 0L
 )
 
 data class BenchResult(

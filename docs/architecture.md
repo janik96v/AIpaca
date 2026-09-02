@@ -46,24 +46,37 @@ app/src/main/
 |   |   |-- AgentOrchestrator.kt        # Think->tool->observe loop
 |   |   |-- AgentConfig.kt              # System prompt + persona
 |   |   |-- AgentMessage.kt             # Tool-calling message roles
+|   |   |-- AgentSession.kt             # Per-session agent state
+|   |   |-- AgentTier.kt                # Capability-based execution tiers (Plain/Assisted/Deep)
 |   |   |-- ToolManifestJson.kt         # Tool schema serialization
 |   |   |-- mcp/                        # Model Context Protocol client
 |   |   |   |-- HttpMcpClient.kt        # Streamable HTTP/SSE transport
+|   |   |   |-- McpClient.kt            # MCP client interface
 |   |   |   +-- McpModels.kt            # JSON-RPC 2.0 + MCP types
 |   |   |-- tool/
 |   |   |   |-- ToolRegistry.kt         # Aggregates MCP + local tools
 |   |   |   +-- TavilyMcp.kt            # Tavily web search integration
-|   |   +-- memory/                     # Agent memory + skills system
-|   |       |-- MemoryStore.kt          # Filesystem-backed memory files (agent_memory.md, agent_user.md)
+|   |   +-- memory/                     # Agent memory + skills + learning
+|   |       |-- MemoryStore.kt          # Filesystem-backed memory files (agent_soul.md, agent_user.md, agent_memory.md)
 |   |       |-- MemoryTool.kt           # "memory" tool: add/replace/remove memory entries
+|   |       |-- MemoryEngine.kt         # Generation wrapper for memory-specific LLM calls
+|   |       |-- MemoryEntry.kt          # Memory entry data class
+|   |       |-- MemoryExtraction.kt     # Per-turn memory extraction logic
+|   |       |-- MemoryConsolidation.kt  # Merge/dedup/contradiction resolution
+|   |       |-- ConsolidationPass.kt    # Orchestrates a full consolidation run
+|   |       |-- LearnPass.kt            # Counter-triggered post-turn review
 |   |       |-- SkillStore.kt           # Filesystem-backed skill files (agent_skills/<name>.md)
 |   |       |-- SkillTools.kt           # "skill_view" + "skill_manage" tools
+|   |       |-- SkillReviewPass.kt      # Counter-triggered skill extraction
 |   |       |-- Skill.kt                # Skill data class
 |   |       |-- SessionSearchTool.kt    # "session_search" tool: FTS5 cross-session recall
-|   |       |-- LearnPass.kt            # Counter-triggered post-turn memory/skill extraction
-|   |       +-- AntiPoisoning.kt        # Guards against persisting transient errors
+|   |       |-- SessionViewTool.kt      # "session_view" tool: load full past conversation
+|   |       |-- SessionIndexStore.kt    # Session summary index (one-liners per conversation)
+|   |       |-- SessionSummarizer.kt    # Post-conversation summary generation
+|   |       |-- AntiPoisoning.kt        # Guards against persisting transient errors
 |   |-- engine/                         # Inference engines
 |   |   |-- InferenceEngine.kt          # Interface + data classes
+|   |   |-- AgentModels.kt              # Agent-specific data models
 |   |   |-- LlamaCppEngine.kt           # LLM JNI wrapper + vision
 |   |   |-- WhisperEngine.kt            # STT engine
 |   |   |-- OllamaEngine.kt             # Remote LLM via Ollama HTTP API
@@ -80,15 +93,29 @@ app/src/main/
 |   |       |-- Ed25519Verifier.kt       # Request signature verification
 |   |       +-- AuthPlugin.kt           # Ktor auth plugin
 |   |-- ui/                             # Jetpack Compose UI
+|   |   |-- MainActivity.kt             # Navigation host + bottom nav
 |   |   |-- chat/ChatScreen.kt          # Chat + streaming + agent steps
+|   |   |-- chat/ChatViewModel.kt       # Chat state management
+|   |   |-- chat/ThinkTagParser.kt      # Thinking token extraction
+|   |   |-- memory/MemoryScreen.kt      # Memory viewer/editor (4 tabs: Soul, User, Memory, Sessions)
+|   |   |-- memory/MemoryViewModel.kt   # Memory state management
 |   |   |-- server/ServerScreen.kt      # Server dashboard + pairing
 |   |   |-- models/ModelScreen.kt       # Model library + quant guide
+|   |   |-- models/GgufFilePickerSheet.kt # Model file picker
+|   |   |-- components/                 # Shared UI components
 |   |   +-- theme/                      # Material 3 dark theme
+|   |-- work/                           # Background workers
+|   |   |-- MemoryMaintenance.kt        # WorkManager scheduler (24h periodic + on-demand)
+|   |   +-- MemoryMaintenanceWorker.kt  # Idle-time consolidation (charging + idle)
 |   +-- data/                           # Encrypted persistence
 |       |-- ChatConversationStore.kt    # Conversation history (AES256-GCM)
 |       |-- AgentPrefs.kt               # Agent config (API keys, MCP URL)
 |       |-- MmprojModelPrefs.kt         # Multimodal projector path
+|       |-- WhisperModelPrefs.kt        # Last used STT model path
 |       |-- OllamaPrefs.kt              # Ollama server URL, model name, enabled state
+|       |-- DownloadedModelStore.kt     # Downloaded model tracking
+|       |-- HuggingFaceApi.kt           # HuggingFace API client
+|       |-- ModelDownloadManager.kt     # Model download orchestration
 |       +-- MessageDatabase.kt          # Room DB + FTS5 index for session_search
 +-- cpp/
     |-- CMakeLists.txt                  # Native build config (OpenCL, mtmd)
@@ -116,6 +143,7 @@ app/src/main/
 | MCP Client | Ktor HTTP Client (Streamable HTTP/SSE) |
 | Agent Memory | Filesystem plain-text files (app-internal storage) |
 | Session Search | Room + SQLite FTS5 (BM25 ranking) |
+| Background Work | AndroidX WorkManager (periodic + one-shot consolidation) |
 | Security | Ed25519, TLS (PKCS12), AES256-GCM |
 | Serialization | kotlinx.serialization, nlohmann/json (C++) |
 | Build | Gradle (Kotlin DSL), CMake, NDK r27.2 |
@@ -179,7 +207,14 @@ The native layer is built via CMake through the Android Gradle Plugin:
 | `nativeGenerate` | Simple prompt -> completion (streaming) |
 | `nativeGenerateChat` | Multi-turn chat with roles |
 | `nativeGenerateAgent` | Chat + tools, parses tool calls natively |
+| `nativeGenerateChatWithImage` | Vision inference (text + image via mtmd) |
 | `nativeBench` | Prefill/generation throughput benchmark |
 | `nativeStopGeneration` | Request cancellation (atomic flag) |
 | `nativeUnloadModel` | Free resources |
 | `nativeGetSystemInfo` | GPU/backend diagnostics |
+| `nativeGetModelInfo` | GGUF metadata (name, size, quant type) |
+| `nativeGetChatTemplate` | Extract Jinja chat template from model |
+| `nativeProbeToolSupport` | Check if chat template supports tool calling |
+| `nativeLoadMmproj` | Load multimodal projector GGUF |
+| `nativeUnloadMmproj` | Free mmproj resources |
+| `nativeIsMmprojLoaded` | Query mmproj state |

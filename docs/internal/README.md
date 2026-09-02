@@ -4,6 +4,7 @@ This folder contains internal team documentation — not intended for end users 
 
 ## Contents
 
+- **`implementation_plans/`** — Implementation plans for major features (agent memory/skills, self-learning memory loop, programmatic tool calling)
 - **`lab/`** — Research journal entries split by topic (GPU experiments, agent/tool-calling, scripting engines, model evaluation)
 - **`research/`** — Technical research notes and implementation specs (mostly German). Includes MCP client evaluation, edge context analysis, KV-cache specs, and agent mode specs.
 - **`reference/`** — Analysis of external projects for future inspiration (Hermes agent patterns, programmatic tool calling)

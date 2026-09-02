@@ -126,8 +126,22 @@ User Goal
 - **Native tool calling** — uses llama.cpp's Jinja template system + PEG parser (`common_chat_parse`) for structured tool call extraction, not regex (on-device path)
 - **OpenAI tool calling** — uses Ollama's native streamed tool call delta format when `OllamaEngine` is active
 - **Proper message roles** — Assistant messages carry `tool_calls`, Tool messages carry results with `tool_call_id` — matching the OpenAI tool-calling protocol
-- **Max 4 tool rounds** per query (configurable via `AgentConfig.maxToolRounds`)
+- **Capability-based tiers** — tool budget and round limit are derived from model capabilities, not user toggles (see Tiered Execution below)
 - **Thread safety** — on-device engine calls serialized via `EngineState.generateMutex`; Ollama calls are stateless HTTP and do not acquire the mutex
+
+### Tiered Execution
+
+There is no agent mode toggle. What a turn is allowed to do follows from what the loaded model can actually do, probed at load time. The `AgentTier` policy selects one of three tiers:
+
+| Tier | Max Tools | Max Rounds | When |
+|---|---|---|---|
+| `PLAIN` | 0 | 1 | No tool-calling support, image attached, or context < 4096 |
+| `ASSISTED` | 3 | 2 | Context size 4096–8191 |
+| `DEEP` | 6 | 6 | Context >= 8192, or remote backend (Ollama) |
+
+Tools are selected in priority order: `memory`, `session_search`, `web_search` (if configured), `session_view`, `skill_view`, `skill_manage`. Lower tiers get only the highest-priority tools that fit their budget.
+
+The only user-facing choice is whether web search may send queries off-device (requires a Tavily API key).
 
 ### Tool Calling
 
@@ -158,13 +172,14 @@ AIpaca includes a hand-rolled MCP client (`HttpMcpClient`) supporting:
 The agent has persistent memory across sessions, implemented as a set of plain-text files in app-internal storage (`filesDir/agent_memory/`).
 
 **Memory files:**
-- `agent_memory.md` — environment facts, project conventions, corrections (max ~2200 chars / ~800 tokens)
+- `agent_soul.md` — persona, core identity, guiding principles (max ~1375 chars / ~500 tokens)
 - `agent_user.md` — user preferences, communication style, name (max ~1375 chars / ~500 tokens)
+- `agent_memory.md` — environment facts, project conventions, corrections, session index (max ~2200 chars / ~800 tokens)
 
 **How it works:**
 - Entries are separated by the `§` character (Hermes Agent convention)
 - When a file exceeds its character limit after an addition, oldest entries are trimmed (FIFO)
-- Both files are injected into the agent's system prompt at the start of each turn so the model has cross-session context
+- All three files are injected into the agent's system prompt at the start of each turn so the model has cross-session context
 - An `AntiPoisoning` guard rejects writes that contain transient errors or negative claims, preventing the model from permanently recording dead-end states
 
 ### Skills
@@ -190,6 +205,14 @@ The `session_search` tool lets the agent search past conversations using SQLite 
 
 Up to 5 sessions are returned per query, capped at 6000 characters total.
 
+### Session View
+
+The `session_view` tool lets the agent load a full past conversation by session ID (obtained from `session_search` results or the session index in `agent_memory.md`). It renders the conversation as head/tail messages: up to 8 messages from the start and 8 from the end, each capped at 400 characters, with a total output limit of 6000 characters. Each view bumps the session's access counter.
+
+### Session Index
+
+The `SessionIndexStore` maintains a one-line summary per finished conversation in `agent_memory.md`. After each conversation ends, `SessionSummarizer` generates a short summary and appends it to the index. The index is pruned against live session IDs in the Room database during consolidation.
+
 ### LearnPass
 
 After each agent turn (once the user has their answer), a counter-triggered background pass examines a digest of the recent conversation and decides whether to extract skills or memory entries.
@@ -205,15 +228,40 @@ After each agent turn (once the user has their answer), a counter-triggered back
 - Capped at 4 tool rounds and 512 output tokens — review is deliberately cheap
 - The current memory snapshot is injected into the review prompt so the model avoids writing duplicates
 
+### Memory Maintenance (Consolidation)
+
+An idle-time background worker (`MemoryMaintenanceWorker`) runs periodically to consolidate memory:
+
+**Scheduling:** 24-hour periodic via AndroidX WorkManager, with constraints: device must be charging, idle, and battery not low. Can also be triggered on demand from the Memory screen.
+
+**What it does:**
+- Merges duplicate memory entries
+- Resolves contradictions between entries
+- Prunes the session index against live session IDs in the Room database
+- Requires at least 5 new entries since the last run (unless triggered manually)
+- Gates on: memory loop enabled, backend ready, engine not busy, device not thermally throttled
+
+### Memory Screen
+
+A dedicated bottom-navigation tab (`Memory`) provides full visibility and control over the memory system:
+
+- **Four sub-tabs:** Soul, User, Memory, Sessions — one per memory file plus the session index
+- **Editor:** view and edit memory file contents with save/revert
+- **Approval flow:** review and approve or reject pending proposals from the learn pass
+- **Undo:** restore the previous version of any memory file (one-level backup)
+- **Manual triggers:** "Update memory now" button to run extraction on demand, consolidation trigger
+- **Status display:** learning on/off toggle, current execution tier chip, consolidation status
+
 ### Current Tools
 
 | Tool | Source | Description |
 |---|---|---|
-| `tavily_search` | MCP server | Search the web for current information |
+| `tavily_search` | MCP server | Search the web for current information (via Tavily) |
 | `memory` | Local | Add, replace, or remove entries in persistent memory files |
 | `skill_view` | Local | Load the full procedure of a named skill |
 | `skill_manage` | Local | Create, patch, or delete a skill |
 | `session_search` | Local | FTS5 full-text search over past conversation sessions |
+| `session_view` | Local | Load a full past conversation by session ID |
 
 The `ToolRegistry` aggregates tools from all MCP server connections and registered local tools into a single flat manifest.
 
@@ -305,10 +353,20 @@ Built with Jetpack Compose and Material 3 (dark theme).
 - Input field with send button
 - Microphone button for speech-to-text
 - Image/PDF attachment picker
-- Modes overflow menu: System prompt, Thinking, Agent, and Ollama toggles
+- Modes overflow menu: System prompt, Thinking, and Ollama toggles
 - Ollama connection dialog (server URL + model name, test connectivity)
 - Collapsible thinking blocks for reasoning models
 - Drawer menu with conversation history and settings
+- Execution tier chip showing current capability level
+
+### Memory Tab
+- Four sub-tabs: Soul, User, Memory, Sessions
+- Inline editor for each memory file with save/revert
+- Pending proposal review (approve/reject learn pass output)
+- Undo last change (one-level backup restore)
+- Manual extraction and consolidation triggers
+- Learning on/off toggle
+- Current tier and consolidation status display
 
 ### Models Tab
 - Curated list of tested models with links to Hugging Face
@@ -336,14 +394,16 @@ Built with Jetpack Compose and Material 3 (dark theme).
 | Component | Storage | Purpose |
 |---|---|---|
 | `ChatConversationStore` | EncryptedSharedPreferences | Conversation history (multiple saved chats) |
-| `AgentPrefs` | EncryptedSharedPreferences | Tavily API key, MCP server URL, agent toggle |
+| `AgentPrefs` | EncryptedSharedPreferences | Tavily API key, MCP server URL |
 | `WhisperModelPrefs` | SharedPreferences | Last used STT model path |
 | `MmprojModelPrefs` | SharedPreferences | Last used multimodal projector path |
 | `OllamaPrefs` | SharedPreferences | Ollama server URL, model name, enabled state |
 | `AuthorizedKeysStore` | EncryptedSharedPreferences | Paired client public keys |
-| `MemoryStore` | Plain files (filesDir/agent_memory/) | Agent cross-session memory entries |
+| `MemoryStore` | Plain files (filesDir/agent_memory/) | Agent cross-session memory (soul, user, memory) |
 | `SkillStore` | Plain files (filesDir/agent_skills/) | Agent learned skill procedures |
+| `SessionIndexStore` | Plain files (filesDir/agent_memory/) | One-line session summaries |
 | `MessageDatabase` | Room SQLite + FTS5 | Indexed conversation messages for session_search |
+| `DownloadedModelStore` | SharedPreferences | Downloaded model tracking |
 
 Conversations are stored as serialized `StoredConversation` objects with ID, title, messages, and timestamps. Agent memory files use plain text (not encrypted) because they contain only model-extracted summaries, not raw user messages.
 

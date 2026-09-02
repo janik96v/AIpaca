@@ -364,16 +364,19 @@ fun ModelScreen(modifier: Modifier = Modifier) {
     }
 
     pendingModelEntry?.let { entry ->
-        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
-        val recommended = 1024
+        val ctxConfig = EngineState.computeContextConfig(modelPath = entry.filePath)
+        val contextOptions = ctxConfig.options
+        val recommended = ctxConfig.recommended
         AlertDialog(
             onDismissRequest = { pendingModelEntry = null },
             title = { Text("Context Window", style = AlpacaType.TitleMd) },
             text = {
                 Column {
                     Text(
-                        "Choose how many tokens the model can hold in memory at once. " +
-                            "Larger = more document/history, but uses more RAM and is slower to start.",
+                        if (ctxConfig.isRecurrent)
+                            "This model uses a recurrent architecture with constant memory per token. Large context windows are efficient."
+                        else
+                            "Choose how many tokens the model can hold in memory at once. Options are capped to fit in device RAM.",
                         style = AlpacaType.BodySm,
                         color = AlpacaColors.Text.Muted
                     )
@@ -394,7 +397,7 @@ fun ModelScreen(modifier: Modifier = Modifier) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "$size tokens",
+                                text = if (size >= 1024) "${size / 1024}K tokens" else "$size tokens",
                                 style = AlpacaType.BodyMd,
                                 color = AlpacaColors.Text.Primary
                             )

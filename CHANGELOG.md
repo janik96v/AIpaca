@@ -9,15 +9,22 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Self-learning memory loop (#52): `soul.md`, `user.md` and a `memory.md` index of past
-  conversations, kept up to date by three loops — per-turn extraction, a one-line summary
-  per finished conversation, and an idle-time consolidation pass that merges duplicates
-  and resolves contradictions while the device is charging
-- Memory screen: view, edit, approve or reject anything the loops write, undo the last
-  change, and trigger a consolidation run on demand
+- Self-learning memory loop (#52): `agent_soul.md`, `agent_user.md` and an `agent_memory.md`
+  index of past conversations, kept up to date by three loops — per-turn extraction,
+  a one-line summary per finished conversation, and an idle-time consolidation pass
+  that merges duplicates and resolves contradictions while the device is charging
+- Memory screen: dedicated bottom-nav tab to view, edit, approve or reject anything the
+  loops write, undo the last change, and trigger a consolidation run on demand
 - `session_view` tool: loads one past conversation in full, the on-demand half of the
   session index
-- Tool-calling capability probe: the model's chat template is checked at load time
+- Tool-calling capability probe: the model's Jinja chat template is checked at load time;
+  tiered execution budgets (Plain / Assisted / Deep) derived from context size and
+  backend type
+- Ollama remote backend: route generation through a local-network Ollama server
+  (`OllamaEngine`) with OpenAI-compatible streaming, agent tool-calling via streamed
+  deltas, and a connection dialog in the Modes menu
+- Agent memory and skills system: persistent `MemoryStore`, `SkillStore`, `SessionSearchTool`,
+  `SessionViewTool`, and counter-triggered `LearnPass` for background extraction
 
 ### Changed
 - Removed the agent mode toggle. How many tools a turn carries and how many rounds it may
@@ -28,13 +35,6 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Conversations are indexed for search on every path, not only in agent mode
 - Anti-poisoning filter now covers German and no longer rejects ordinary facts that merely
   contain words like "not found"
-
-### Planned
-- In-app HuggingFace model browser
-- Chat history persistence (Room DB)
-- GPU acceleration (Vulkan / OpenCL)
-- Multi-request queuing
-- Multimodal / vision support
 
 ---
 

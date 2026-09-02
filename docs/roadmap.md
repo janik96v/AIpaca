@@ -21,8 +21,9 @@
 | Native tool-calling | llama.cpp Jinja templates + PEG parser |
 | MCP client | Streamable HTTP/SSE, JSON-RPC 2.0 |
 | Tavily web search | First MCP tool integration |
+| Ollama remote backend | Route generation through a local-network Ollama server (OllamaEngine) |
 | Tiered execution | Tool count and round budget derived from the model's probed capabilities — no agent toggle |
-| Agent memory | soul.md / user.md / memory.md with a frozen-snapshot prompt layer |
+| Agent memory | agent_soul.md / agent_user.md / agent_memory.md with a frozen-snapshot prompt layer |
 | Self-learning loop | Post-turn extraction, per-session summaries, idle-time consolidation (issue #52) |
 | Memory screen | Inspect, edit, approve and undo everything the loops write |
 
@@ -37,9 +38,9 @@
 | 0 | Test harness (JUnit + MockEngine MCP tests) | Done |
 | 1 | Kotlin foundation (AgentModels, AgentMessage, ToolManifestJson) | Done |
 | 2 | JNI native tool-calling + engine wiring (`nativeGenerateAgent`) | Done |
-| 3 | AgentOrchestrator (structured tool calls, proper tool roles, streaming) | In Progress |
-| 4 | Context & manifest tuning (context size >= 4096, compact tool schemas) | Planned |
-| 5 | Cleanup (remove old AgentLoop, update UI to use orchestrator) | Planned |
+| 3 | AgentOrchestrator (structured tool calls, proper tool roles, streaming) | Done |
+| 4 | Context & manifest tuning (context size >= 4096, compact tool schemas) | Done |
+| 5 | Cleanup (remove old AgentLoop, update UI to use orchestrator) | Done |
 
 **Acceptance criteria**:
 - Real `tavily_search` round with structured tool_calls (native, no regex), grounded answer — fully on-device
@@ -82,7 +83,6 @@
 |---|---|
 | In-app model browser | Browse and download GGUF models from HuggingFace directly |
 | Multi-request queuing | Queue API requests when engine is busy |
-| Agent UI improvements | Dedicated agent screens, tool result display, session management |
 
 ### Medium-Term
 
@@ -109,5 +109,5 @@ These constraints guide all roadmap decisions:
 2. **No cloud dependency** — All core features work 100% offline. MCP tools are optional network features.
 3. **Native tool calling** — llama.cpp Jinja templates + PEG parser, not prompt-based regex parsing.
 4. **Server API unchanged** — The public `/v1/chat/completions` endpoint has no `tools` field. Tool calling is agent-internal only.
-5. **Additive changes** — New features are gated behind toggles until verified. Existing paths (chat, server) are not modified.
-6. **Capability over configuration** — What a turn is allowed to do follows from what the loaded model can actually do, probed at load time. Users choose privacy boundaries (may queries leave the device), not execution modes.
+5. **Additive changes** — New features are validated before landing. Existing paths (chat, server) are not modified without reason.
+6. **Capability over configuration** — What a turn is allowed to do follows from what the loaded model can actually do, probed at load time (`AgentTier`: Plain/Assisted/Deep). Users choose privacy boundaries (may queries leave the device), not execution modes.

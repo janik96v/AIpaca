@@ -2,7 +2,6 @@ package com.aipaca.app.work
 
 import android.content.Context
 import android.util.Log
-import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -43,7 +42,6 @@ object MemoryMaintenance {
             MemoryMaintenanceWorker::class.java, 24L, TimeUnit.HOURS
         )
             .setConstraints(scheduledConstraints())
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30L, TimeUnit.MINUTES)
             .build()
 
         WorkManager.getInstance(context)

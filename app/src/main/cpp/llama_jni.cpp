@@ -231,6 +231,116 @@ static TensorHistogram build_tensor_histogram(const std::string& model_path) {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight GGUF metadata probe — reads header only, no model loading.
+// Returns JSON: {"architecture":"...","nCtxTrain":N,"nParams":N,
+//                "isRecurrentKV":bool,"quant":"..."}
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jstring  jModelPath)
+{
+    std::string model_path = jstring_to_std(env, jModelPath);
+    gguf_init_params params = { /*.no_alloc =*/ true, /*.ctx =*/ nullptr };
+    gguf_context* ctx = gguf_init_from_file(model_path.c_str(), params);
+    if (ctx == nullptr) {
+        return env->NewStringUTF("{\"architecture\":\"\",\"nCtxTrain\":0,\"nParams\":0,"
+                                 "\"isRecurrentKV\":false,\"quant\":\"unknown\"}");
+    }
+
+    std::string arch;
+    int64_t arch_key = gguf_find_key(ctx, "general.architecture");
+    if (arch_key >= 0) {
+        const char* val = gguf_get_val_str(ctx, arch_key);
+        if (val) arch = val;
+    }
+
+    bool is_recurrent = (arch == "mamba" || arch == "rwkv" || arch == "jamba" ||
+                         arch == "falcon-h1" || arch == "ssm" || arch == "recurrent");
+
+    // n_ctx_train lives under <arch>.context_length
+    uint32_t n_ctx_train = 0;
+    std::string ctx_key = arch + ".context_length";
+    int64_t ctx_id = gguf_find_key(ctx, ctx_key.c_str());
+    if (ctx_id >= 0) {
+        n_ctx_train = gguf_get_val_u32(ctx, ctx_id);
+    }
+
+    // n_embd for KV estimation
+    uint32_t n_embd = 0;
+    std::string embd_key = arch + ".embedding_length";
+    int64_t embd_id = gguf_find_key(ctx, embd_key.c_str());
+    if (embd_id >= 0) {
+        n_embd = gguf_get_val_u32(ctx, embd_id);
+    }
+
+    // n_layer (block_count)
+    uint32_t n_layer = 0;
+    std::string layer_key = arch + ".block_count";
+    int64_t layer_id = gguf_find_key(ctx, layer_key.c_str());
+    if (layer_id >= 0) {
+        n_layer = gguf_get_val_u32(ctx, layer_id);
+    }
+
+    // n_head_kv for accurate KV cache sizing
+    uint32_t n_head_kv = 0;
+    std::string hkv_key = arch + ".attention.head_count_kv";
+    int64_t hkv_id = gguf_find_key(ctx, hkv_key.c_str());
+    if (hkv_id >= 0) {
+        n_head_kv = gguf_get_val_u32(ctx, hkv_id);
+    }
+
+    uint32_t n_head = 0;
+    std::string h_key = arch + ".attention.head_count";
+    int64_t h_id = gguf_find_key(ctx, h_key.c_str());
+    if (h_id >= 0) {
+        n_head = gguf_get_val_u32(ctx, h_id);
+    }
+
+    // file_type → quant name
+    int ftype_val = -1;
+    int64_t ftype_id = gguf_find_key(ctx, "general.file_type");
+    if (ftype_id >= 0) {
+        ftype_val = (int)gguf_get_val_u32(ctx, ftype_id);
+    }
+    const char* quant_name = ftype_to_name(ftype_val);
+
+    // Rough nParams estimate: ~12 * n_layer * n_embd^2 (transformer scaling law)
+    int64_t n_params = 0;
+    if (n_layer > 0 && n_embd > 0) {
+        n_params = (int64_t)12 * n_layer * (int64_t)n_embd * (int64_t)n_embd;
+    }
+
+    // d_head = n_embd / n_head (for GQA: KV cache uses n_head_kv, not n_head)
+    uint32_t d_head = (n_head > 0 && n_embd > 0) ? n_embd / n_head : 0;
+    uint32_t effective_kv_heads = (n_head_kv > 0) ? n_head_kv : n_head;
+
+    gguf_free(ctx);
+
+    LOGI("probeGgufMeta: arch=%s  n_ctx_train=%u  n_embd=%u  n_layer=%u  n_head=%u  "
+         "n_head_kv=%u  d_head=%u  ftype=%d  recurrent=%s  nParams~%lld",
+         arch.c_str(), n_ctx_train, n_embd, n_layer, n_head,
+         effective_kv_heads, d_head, ftype_val,
+         is_recurrent ? "true" : "false", (long long)n_params);
+
+    std::ostringstream json;
+    json << "{"
+         << "\"architecture\":\"" << json_escape(arch) << "\","
+         << "\"nCtxTrain\":" << n_ctx_train << ","
+         << "\"nParams\":" << n_params << ","
+         << "\"nEmbd\":" << n_embd << ","
+         << "\"nLayer\":" << n_layer << ","
+         << "\"nHeadKv\":" << effective_kv_heads << ","
+         << "\"dHead\":" << d_head << ","
+         << "\"isRecurrentKV\":" << (is_recurrent ? "true" : "false") << ","
+         << "\"quant\":\"" << json_escape(quant_name) << "\""
+         << "}";
+    return env->NewStringUTF(json.str().c_str());
+}
+
 static int get_model_ftype(const llama_model* model) {
     char ftype_buf[32] = {};
     int ftype_val = -1;
@@ -1283,7 +1393,22 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
     }
 
 
-    json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << "}";
+    json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << ",";
+
+    // Model architecture — detect recurrent/SSM models (linear KV-cache growth)
+    char arch_buf[64] = {0};
+    bool is_recurrent_kv = false;
+    if (llama_model_meta_val_str(lc->model, "general.architecture", arch_buf, sizeof(arch_buf)) >= 0) {
+        std::string arch(arch_buf);
+        is_recurrent_kv = (arch == "mamba" || arch == "rwkv" || arch == "jamba" ||
+                           arch == "falcon-h1" || arch == "ssm" || arch == "recurrent");
+        LOGI("Model architecture: %s  isRecurrentKV=%s", arch_buf, is_recurrent_kv ? "true" : "false");
+    }
+    json << "\"architecture\":\"" << json_escape(arch_buf) << "\","
+         << "\"isRecurrentKV\":" << (is_recurrent_kv ? "true" : "false") << ","
+         << "\"nCtxTrain\":" << llama_model_n_ctx_train(lc->model) << ","
+         << "\"nParams\":" << llama_model_n_params(lc->model)
+         << "}";
     return env->NewStringUTF(json.str().c_str());
 }
 

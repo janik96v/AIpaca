@@ -8,6 +8,7 @@ import com.aipaca.app.data.WhisperModelPrefs
 import com.aipaca.app.engine.BenchResult
 import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
+import com.aipaca.app.engine.GgufProbeResult
 import com.aipaca.app.engine.LlamaCppEngine
 import com.aipaca.app.engine.ModelInfo
 import com.aipaca.app.engine.OllamaEngine
@@ -112,6 +113,129 @@ object EngineState {
 
     private val _contextSize = MutableStateFlow(10240)
     val contextSize: StateFlow<Int> = _contextSize.asStateFlow()
+
+    /**
+     * Compute context-picker options based on model architecture and device RAM.
+     *
+     * Probes the GGUF header directly when [modelPath] is provided (before model
+     * load), or uses the loaded [ModelInfo] as fallback. This ensures the picker
+     * shows accurate, model-specific options even before loading.
+     */
+    data class ContextSizeConfig(
+        val options: List<Int>,
+        val recommended: Int,
+        val maxSafe: Int,
+        val isRecurrent: Boolean
+    )
+
+    fun computeContextConfig(modelPath: String? = null): ContextSizeConfig {
+        val probe = modelPath?.let { engine.probeGgufMeta(it) }
+
+        val isRecurrent = probe?.isRecurrentKV ?: _modelInfo.value.isRecurrentKV
+        val nCtxTrain = (probe?.nCtxTrain ?: _modelInfo.value.nCtxTrain)
+        val nParams = probe?.nParams ?: _modelInfo.value.nParams
+        val quant = probe?.quant ?: _modelInfo.value.quant
+        val arch = probe?.architecture ?: _modelInfo.value.architecture
+        val nLayer = probe?.nLayer ?: 0
+        val nHeadKv = probe?.nHeadKv ?: 0
+        val dHead = probe?.dHead ?: 0
+
+        if (isRecurrent) {
+            val trainCtx = nCtxTrain.coerceAtLeast(8192)
+            val options = listOf(16384, 32768, 65536, 131072, 262144)
+                .filter { it <= trainCtx * 4 }
+                .ifEmpty { listOf(16384) }
+            return ContextSizeConfig(
+                options = options,
+                recommended = options.firstOrNull { it >= 65536 } ?: options.last(),
+                maxSafe = options.last(),
+                isRecurrent = true
+            )
+        }
+
+        val totalRamMb = getTotalDeviceRamMb()
+        val modelWeightMb = estimateModelWeightRamMb(nParams, quant)
+        val reserveMb = 3072L  // 3 GB for Android OS + app overhead
+        val availableForKvMb = (totalRamMb - modelWeightMb - reserveMb).coerceAtLeast(512)
+
+        val kvBytesPerToken = estimateKvBytesPerToken(nParams, nLayer, nHeadKv, dHead)
+        val maxCtxFromRam = if (kvBytesPerToken > 0)
+            ((availableForKvMb * 1024 * 1024) / kvBytesPerToken).toInt()
+        else
+            65536
+        val trainCtx = nCtxTrain.coerceAtLeast(2048)
+        val maxSafe = maxCtxFromRam.coerceAtMost(trainCtx).coerceAtLeast(2048)
+
+        val allOptions = listOf(4096, 8192, 16384, 32768, 65536, 131072)
+        val options = allOptions.filter { it <= maxSafe }
+            .ifEmpty { listOf(allOptions.first { it >= 2048 }) }
+        val recommended = options.firstOrNull { it >= 10240 } ?: options.last()
+
+        Log.i(TAG, "contextConfig: totalRam=${totalRamMb}MB  modelWeight=${modelWeightMb}MB  " +
+                "kvPerToken=${kvBytesPerToken}B  maxSafe=$maxSafe  recommended=$recommended  " +
+                "nCtxTrain=$trainCtx  arch=$arch  probe=${probe != null}")
+
+        return ContextSizeConfig(
+            options = options,
+            recommended = recommended,
+            maxSafe = maxSafe,
+            isRecurrent = false
+        )
+    }
+
+    private fun getTotalDeviceRamMb(): Long {
+        return try {
+            val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val memInfo = android.app.ActivityManager.MemoryInfo()
+            am.getMemoryInfo(memInfo)
+            memInfo.totalMem / (1024 * 1024)
+        } catch (_: Exception) {
+            12288L // conservative 12 GB fallback
+        }
+    }
+
+    private fun estimateModelWeightRamMb(nParams: Long, quant: String): Long {
+        val bitsPerParam = when {
+            quant.contains("Q2")   -> 2.5
+            quant.contains("Q3")   -> 3.5
+            quant.contains("IQ4")  -> 4.5
+            quant.contains("Q4")   -> 4.5
+            quant.contains("Q5")   -> 5.5
+            quant.contains("Q6")   -> 6.5
+            quant.contains("Q8")   -> 8.0
+            quant.contains("F16")  -> 16.0
+            quant.contains("F32")  -> 32.0
+            else                    -> 5.0
+        }
+        return ((nParams * bitsPerParam) / 8 / 1024 / 1024).toLong()
+    }
+
+    private fun estimateKvBytesPerToken(
+        nParams: Long, nLayer: Int, nHeadKv: Int, dHead: Int
+    ): Long {
+        // GPU path uses f16 KV, CPU path uses q8_0 KV (see nativeLoadModel)
+        val gpuPath = _gpuLayers.value > 0
+        val kvTypeBytes = if (gpuPath) 2L else 1L
+
+        // Use exact GGUF dimensions when available from probe
+        if (nLayer > 0 && nHeadKv > 0 && dHead > 0) {
+            // KV per token = 2 (K+V) × n_layer × n_head_kv × d_head × kvTypeBytes
+            return 2L * nLayer * nHeadKv * dHead * kvTypeBytes
+        }
+
+        // Fallback: estimate from nParams
+        if (nParams <= 0) return 1024L
+        val estLayers: Long
+        val estEmbd: Long
+        when {
+            nParams <  2_000_000_000L -> { estLayers = 16; estEmbd = 2048 }
+            nParams <  5_000_000_000L -> { estLayers = 32; estEmbd = 3072 }
+            nParams < 10_000_000_000L -> { estLayers = 32; estEmbd = 4096 }
+            nParams < 20_000_000_000L -> { estLayers = 40; estEmbd = 5120 }
+            else                      -> { estLayers = 48; estEmbd = 6144 }
+        }
+        return 2 * estLayers * estEmbd * kvTypeBytes
+    }
 
     private val _lastBenchmark = MutableStateFlow(BenchResult())
     val lastBenchmark: StateFlow<BenchResult> = _lastBenchmark.asStateFlow()
