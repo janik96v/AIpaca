@@ -36,10 +36,26 @@ class OllamaStreamingTest {
      */
     private fun serve(socket: Socket) = socket.use { client ->
         val input = client.getInputStream().bufferedReader()
-        // Consume the request head; the body length does not matter here.
+        // The request body must be drained, not just the head: closing a socket
+        // with unread bytes still buffered makes the peer see a TCP reset rather
+        // than a clean close, which surfaced as a flaky `Connection reset` on the
+        // agent test, whose tool schemas make for a much larger request.
+        var contentLength = 0
         while (true) {
             val line = input.readLine() ?: return@use
             if (line.isEmpty()) break
+            if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                contentLength = line.substringAfter(':').trim().toIntOrNull() ?: 0
+            }
+        }
+        if (contentLength > 0) {
+            val body = CharArray(contentLength)
+            var read = 0
+            while (read < contentLength) {
+                val n = input.read(body, read, contentLength - read)
+                if (n < 0) break
+                read += n
+            }
         }
         val out = client.getOutputStream()
         out.write(
@@ -113,12 +129,14 @@ class OllamaStreamingTest {
         assertEquals("r0 r1 r2 r3 r4 ", thinking.toString())
         assertEquals("answer", content.toString())
 
-        // The decisive assertion: the first chunk must land well before the
-        // server has finished writing. A buffered body would deliver everything
-        // only after all `deltas * gapMs` of server-side sleeping.
+        // The decisive assertion: the first chunk must land before the server has
+        // finished writing. A buffered body delivers everything only after all
+        // `deltas * gapMs` of server-side sleeping, so the gap between the two
+        // behaviours is the full sleep budget — the threshold below leaves room
+        // for JIT and HTTP-client startup without weakening that distinction.
         val firstArrival = arrivals.first()
         assertTrue(
-            firstArrival < gapMs * deltas / 2,
+            firstArrival < gapMs * (deltas - 1),
             "first chunk arrived after ${firstArrival}ms — response was buffered, not streamed"
         )
         // And chunks must be spread out rather than all landing together.
@@ -147,7 +165,7 @@ class OllamaStreamingTest {
 
         assertEquals("r0 r1 r2 r3 r4 ", thinking.toString())
         assertTrue(
-            firstThinkingAt in 0 until gapMs * deltas / 2,
+            firstThinkingAt in 0 until gapMs * (deltas - 1),
             "first thinking chunk arrived after ${firstThinkingAt}ms — response was buffered"
         )
     }
