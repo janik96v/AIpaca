@@ -60,7 +60,22 @@ object TierPolicy {
     const val DEEP_MAX_ROUNDS = 6
 
     const val ASSISTED_MAX_TOOLS = 3
-    const val DEEP_MAX_TOOLS = 6
+
+    /**
+     * Raised from 6 for issue #54: the five local tools plus `files` plus web
+     * search no longer fit in six slots, and silently truncating the list dropped
+     * whichever tool sorted last.
+     *
+     * [ASSISTED_MAX_TOOLS] stays at 3 — the 8K-context finding behind it is about
+     * small on-device models and still holds.
+     */
+    const val DEEP_MAX_TOOLS = 8
+
+    /**
+     * Remote models are not bound by the on-device context budget that motivated
+     * the cap in the first place, so they carry the full registered set.
+     */
+    const val REMOTE_MAX_TOOLS = 12
 
     /**
      * After this many malformed tool calls in one turn the orchestrator drops the
@@ -83,10 +98,10 @@ object TierPolicy {
         AgentTier.DEEP -> DEEP_MAX_ROUNDS
     }
 
-    fun maxTools(tier: AgentTier): Int = when (tier) {
+    fun maxTools(tier: AgentTier, isRemoteBackend: Boolean = false): Int = when (tier) {
         AgentTier.PLAIN -> 0
         AgentTier.ASSISTED -> ASSISTED_MAX_TOOLS
-        AgentTier.DEEP -> DEEP_MAX_TOOLS
+        AgentTier.DEEP -> if (isRemoteBackend) REMOTE_MAX_TOOLS else DEEP_MAX_TOOLS
     }
 
     // Tool names, kept here so the budget rule is testable without a ToolRegistry.
@@ -96,21 +111,31 @@ object TierPolicy {
     const val TOOL_SKILL_VIEW = "skill_view"
     const val TOOL_SKILL_MANAGE = "skill_manage"
     const val TOOL_WEB_SEARCH = "web_search"
+    const val TOOL_FILES = "files"
 
     /**
      * The tools a turn may carry, most valuable first, already truncated to
      * [maxTools]. Web search is only offered when it is actually configured —
      * an unusable tool in the manifest costs context and invites failed calls.
+     *
+     * `files` is DEEP-only: it is the tool that lets the agent read its own soul,
+     * user and memory files (issue #54), but its schema is too large to spend one
+     * of ASSISTED's three slots on.
      */
-    fun toolNames(tier: AgentTier, webSearchConfigured: Boolean): List<String> {
+    fun toolNames(
+        tier: AgentTier,
+        webSearchConfigured: Boolean,
+        isRemoteBackend: Boolean = false
+    ): List<String> {
         if (tier == AgentTier.PLAIN) return emptyList()
         val ordered = mutableListOf(TOOL_MEMORY, TOOL_SESSION_SEARCH)
         if (webSearchConfigured) ordered += TOOL_WEB_SEARCH
         if (tier == AgentTier.DEEP) {
+            ordered += TOOL_FILES
             ordered += TOOL_SESSION_VIEW
             ordered += TOOL_SKILL_VIEW
             ordered += TOOL_SKILL_MANAGE
         }
-        return ordered.take(maxTools(tier))
+        return ordered.take(maxTools(tier, isRemoteBackend))
     }
 }

@@ -299,6 +299,11 @@ object EngineState {
         com.aipaca.app.agent.memory.SkillStore(appContext)
     }
 
+    /** Sandbox roots for the agent's `files` tool (issue #54). */
+    val agentWorkspace: com.aipaca.app.agent.tool.AgentWorkspace by lazy {
+        com.aipaca.app.agent.tool.AgentWorkspace(appContext).also { it.ensureRoots() }
+    }
+
     /**
      * Generation surface for the memory passes, bound to whichever backend is active.
      *

@@ -89,6 +89,31 @@ class TierPolicyTest {
     }
 
     @Test
+    fun `deep carries the file tool alongside web search`() {
+        // The budget raise in issue #54: before it, six slots could not hold the
+        // five local tools plus `files` plus web search.
+        val tools = TierPolicy.toolNames(AgentTier.DEEP, webSearchConfigured = true)
+        assertTrue(tools.contains(TierPolicy.TOOL_FILES))
+        assertTrue(tools.contains(TierPolicy.TOOL_WEB_SEARCH))
+        assertTrue(tools.contains(TierPolicy.TOOL_SKILL_MANAGE))
+    }
+
+    @Test
+    fun `assisted does not carry the file tool`() {
+        val tools = TierPolicy.toolNames(AgentTier.ASSISTED, webSearchConfigured = true)
+        assertFalse(tools.contains(TierPolicy.TOOL_FILES))
+        assertEquals(TierPolicy.ASSISTED_MAX_TOOLS, 3)
+    }
+
+    @Test
+    fun `remote backends get a wider budget than on-device deep`() {
+        assertTrue(TierPolicy.maxTools(AgentTier.DEEP, isRemoteBackend = true) >=
+            TierPolicy.maxTools(AgentTier.DEEP, isRemoteBackend = false))
+        val remote = TierPolicy.toolNames(AgentTier.DEEP, webSearchConfigured = true, isRemoteBackend = true)
+        assertTrue(remote.contains(TierPolicy.TOOL_FILES))
+    }
+
+    @Test
     fun `memory always comes first so it survives any truncation`() {
         listOf(AgentTier.ASSISTED, AgentTier.DEEP).forEach { tier ->
             listOf(true, false).forEach { web ->

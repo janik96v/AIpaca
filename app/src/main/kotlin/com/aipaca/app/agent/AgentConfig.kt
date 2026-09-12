@@ -1,6 +1,7 @@
 package com.aipaca.app.agent
 
 import com.aipaca.app.agent.mcp.ToolSpec
+import com.aipaca.app.agent.memory.MemoryStore
 import com.aipaca.app.engine.GenerateParams
 
 /**
@@ -57,23 +58,36 @@ fun AgentConfig.renderSystemPrompt(tools: List<ToolSpec>): String {
     // The Jinja chat template (applied via common_chat_templates_apply in C++) already
     // renders the model's native tool-call syntax. Duplicating instructions here confuses
     // the model and causes it to hallucinate fake tool calls as plain text.
+    val hasFileTool = tools.any { it.name == TierPolicy.TOOL_FILES }
+
     return buildString {
         if (soulSnapshot.isNotBlank()) {
-            append("## Who You Are\n")
+            append("## Who You Are (memory/" + MemoryStore.SOUL_FILE + ")\n")
             append(soulSnapshot)
         } else {
             append(persona)
         }
         append("\n\n")
         append(systemPrompt)
+        // Naming the files matters: asked about "soul.md" with only anonymous
+        // headings in the prompt, the model has no referent for the name and
+        // truthfully answers it has no such file (issue #54).
+        if (hasFileTool) {
+            append("\n\nThe sections below are your own persistent memory files on disk. " +
+                "Read them in full with files(action='read', path='memory/<name>') and list them " +
+                "with files(action='list', path='memory'). You can also read your learned skills " +
+                "under 'skills/' and keep working files under 'workspace/'. " +
+                "You cannot edit " + MemoryStore.SOUL_FILE + " directly — a write to it becomes " +
+                "a proposal the user approves.")
+        }
         // Memory snapshots are frozen at session start — writes persist to disk
         // but only appear in the next session (preserves KV cache across turns).
         if (userSnapshot.isNotBlank()) {
-            append("\n\n## About the User\n")
+            append("\n\n## About the User (memory/" + MemoryStore.USER_FILE + ")\n")
             append(userSnapshot)
         }
         if (memorySnapshot.isNotBlank()) {
-            append("\n\n## Remembered Context\n")
+            append("\n\n## Remembered Context (memory/" + MemoryStore.MEMORY_FILE + ")\n")
             append(memorySnapshot)
         }
         if (sessionIndex.isNotBlank()) {

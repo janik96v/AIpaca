@@ -24,6 +24,8 @@ import com.aipaca.app.agent.memory.SessionViewTool
 import com.aipaca.app.agent.memory.SkillReviewPass
 import com.aipaca.app.agent.memory.SkillTools
 import com.aipaca.app.agent.newAgentOrchestrator
+import com.aipaca.app.agent.tool.AgentWorkspace
+import com.aipaca.app.agent.tool.FileTool
 import com.aipaca.app.agent.tool.TavilyMcp
 import com.aipaca.app.agent.tool.ToolRegistry
 import com.aipaca.app.data.AgentPrefs
@@ -87,6 +89,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val memoryStore get() = EngineState.memoryStore
     private val sessionIndexStore get() = EngineState.sessionIndexStore
     private val skillStore get() = EngineState.skillStore
+    private val agentWorkspace get() = EngineState.agentWorkspace
 
     private val messageDb by lazy { MessageDatabase.getInstance(getApplication()) }
     private val messageDao by lazy { messageDb.messageDao() }
@@ -411,11 +414,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun buildRegistry(tier: AgentTier): ToolRegistry {
         val registry = ToolRegistry()
         val webConfigured = agentPrefs.isWebSearchConfigured()
+        val isRemote = EngineState.useOllama.value
 
-        for (name in TierPolicy.toolNames(tier, webConfigured)) {
+        for (name in TierPolicy.toolNames(tier, webConfigured, isRemote)) {
             when (name) {
                 TierPolicy.TOOL_MEMORY ->
                     registry.registerLocal(MemoryTool.spec()) { args -> MemoryTool.run(args, memoryStore) }
+
+                TierPolicy.TOOL_FILES ->
+                    registry.registerLocal(FileTool.spec()) { args ->
+                        FileTool.run(args, agentWorkspace, memoryStore)
+                    }
 
                 TierPolicy.TOOL_SESSION_SEARCH ->
                     registry.registerLocal(SessionSearchTool.spec()) { args -> SessionSearchTool.run(args, messageDao) }
@@ -451,6 +460,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun describeTool(name: String): String = when (name) {
         TierPolicy.TOOL_SESSION_SEARCH, TierPolicy.TOOL_SESSION_VIEW -> "Looking through past conversations"
         TierPolicy.TOOL_MEMORY -> "Updating memory"
+        TierPolicy.TOOL_FILES -> "Reading its own files"
         TierPolicy.TOOL_SKILL_VIEW, TierPolicy.TOOL_SKILL_MANAGE -> "Consulting skills"
         else -> "Searching: $name"
     }
