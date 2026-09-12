@@ -1,14 +1,9 @@
 package com.aipaca.app.ui.chat
 
 import android.Manifest
-import android.app.Application
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
-import java.io.ByteArrayOutputStream
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -51,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Image
@@ -59,6 +55,7 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -68,7 +65,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -85,10 +81,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -101,14 +97,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.aipaca.app.EngineState
-import com.aipaca.app.data.ChatConversationStore
-import com.aipaca.app.engine.ChatTurn
-import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.model.ChatMessage
 import com.aipaca.app.model.Role
 import com.aipaca.app.model.StoredConversation
@@ -117,384 +108,13 @@ import com.aipaca.app.ui.components.EditorialSectionMark
 import com.aipaca.app.ui.components.MonoLabel
 import com.aipaca.app.ui.components.MonoLabelTone
 import com.aipaca.app.ui.components.ModelPickerButton
-import com.aipaca.app.ui.components.StatusChip
-import com.aipaca.app.ui.components.ChipTone
 import com.aipaca.app.ui.theme.AIpacaTheme
 import com.aipaca.app.ui.theme.AlpacaColors
 import com.aipaca.app.ui.theme.AlpacaType
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
-
-// ---- Think-tag stream parser ------------------------------------------------
-
-data class ThinkParseResult(val content: String, val thinking: String)
-
-class ThinkTagParser {
-    private data class TagPair(val open: String, val close: String)
-    private val tagPairs = listOf(
-        TagPair("<think>", "</think>"),
-        TagPair("<|channel>thought\n", "<channel|>")
-    )
-
-    private var insideThink = false
-    private var activeClose: String? = null
-    private var buffer = ""
-
-    private fun couldBePartialTag(text: String, tag: String): Boolean {
-        for (i in 1 until tag.length) {
-            if (text.endsWith(tag.substring(0, i))) return true
-        }
-        return false
-    }
-
-    private fun couldBeAnyPartialOpen(text: String): Boolean {
-        return tagPairs.any { couldBePartialTag(text, it.open) }
-    }
-
-    fun feed(token: String): ThinkParseResult {
-        buffer += token
-        val contentParts = StringBuilder()
-        val thinkParts   = StringBuilder()
-
-        while (buffer.isNotEmpty()) {
-            if (insideThink) {
-                val closeTag = activeClose ?: break
-                val idx = buffer.indexOf(closeTag)
-                if (idx >= 0) {
-                    thinkParts.append(buffer.substring(0, idx))
-                    buffer = buffer.substring(idx + closeTag.length)
-                    insideThink = false
-                    activeClose = null
-                } else if (couldBePartialTag(buffer, closeTag)) {
-                    break
-                } else {
-                    thinkParts.append(buffer)
-                    buffer = ""
-                }
-            } else {
-                var bestIdx = -1
-                var bestPair: TagPair? = null
-                for (pair in tagPairs) {
-                    val idx = buffer.indexOf(pair.open)
-                    if (idx >= 0 && (bestIdx < 0 || idx < bestIdx)) {
-                        bestIdx = idx
-                        bestPair = pair
-                    }
-                }
-                if (bestPair != null && bestIdx >= 0) {
-                    contentParts.append(buffer.substring(0, bestIdx))
-                    buffer = buffer.substring(bestIdx + bestPair.open.length)
-                    insideThink = true
-                    activeClose = bestPair.close
-                } else if (couldBeAnyPartialOpen(buffer)) {
-                    break
-                } else {
-                    contentParts.append(buffer)
-                    buffer = ""
-                }
-            }
-        }
-        return ThinkParseResult(contentParts.toString(), thinkParts.toString())
-    }
-}
-
-// ---- ViewModel --------------------------------------------------------------
-
-class ChatViewModel(application: Application) : AndroidViewModel(application) {
-
-    private val conversationStore = ChatConversationStore(application)
-    private var activeConversationId: String? = null
-
-    private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
-
-    private val _conversations = MutableStateFlow<List<StoredConversation>>(emptyList())
-    val conversations: StateFlow<List<StoredConversation>> = _conversations.asStateFlow()
-
-    private val _activeConversationId = MutableStateFlow<String?>(null)
-    val currentConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
-
-    private val _systemPrompt = MutableStateFlow("")
-    val systemPrompt: StateFlow<String> = _systemPrompt.asStateFlow()
-
-    private val _isGenerating = MutableStateFlow(false)
-    val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
-
-    private val _generationError = MutableSharedFlow<String>(extraBufferCapacity = 1)
-    val generationError: SharedFlow<String> = _generationError.asSharedFlow()
-
-    private val _thinkingEnabled = MutableStateFlow(true)
-    val thinkingEnabled: StateFlow<Boolean> = _thinkingEnabled.asStateFlow()
-
-    private var generationJob: Job? = null
-
-    // ---- STT state ---------------------------------------------------------
-
-    private val audioRecorder = com.aipaca.app.engine.AudioRecorder()
-
-    private val _isRecording = MutableStateFlow(false)
-    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
-
-    private val _isTranscribing = MutableStateFlow(false)
-    val isTranscribing: StateFlow<Boolean> = _isTranscribing.asStateFlow()
-
-    private val _transcriptionResult = MutableStateFlow<String?>(null)
-    val transcriptionResult: StateFlow<String?> = _transcriptionResult.asStateFlow()
-
-    private val _transcriptionError = MutableStateFlow<String?>(null)
-    val transcriptionError: StateFlow<String?> = _transcriptionError.asStateFlow()
-
-    private var recordingJob: Job? = null
-
-    fun startRecording() {
-        if (_isRecording.value || _isGenerating.value) return
-        _isRecording.value = true
-        _transcriptionError.value = null
-
-        recordingJob = viewModelScope.launch {
-            try {
-                val samples = audioRecorder.record()  // suspends until stopRecording()
-                _isRecording.value = false
-                _isTranscribing.value = true
-                val result = EngineState.whisperEngine.transcribe(samples)
-                result.fold(
-                    onSuccess  = { text -> _transcriptionResult.value = text },
-                    onFailure  = { e   -> _transcriptionError.value = e.message ?: "Transcription failed" }
-                )
-            } catch (e: Exception) {
-                _transcriptionError.value = e.message ?: "Recording failed"
-            } finally {
-                _isRecording.value = false
-                _isTranscribing.value = false
-            }
-        }
-    }
-
-    fun stopRecording() {
-        audioRecorder.stopRecording()
-        // recordingJob continues — it transitions to transcription automatically
-    }
-
-    fun consumeTranscriptionResult() {
-        _transcriptionResult.value = null
-    }
-
-    fun toggleThinking() {
-        _thinkingEnabled.value = !_thinkingEnabled.value
-    }
-
-    init {
-        val storedConversations = conversationStore.loadConversations()
-        _conversations.value = storedConversations
-        storedConversations.firstOrNull()?.let { conversation ->
-            activeConversationId = conversation.id
-            _activeConversationId.value = conversation.id
-            _messages.value = conversation.messages
-            _systemPrompt.value = conversation.systemPrompt
-        }
-    }
-
-    fun sendMessage(
-        userText: String,
-        imageUri: Uri? = null,
-        documentName: String? = null,
-        documentText: String? = null
-    ) {
-        val content = buildString {
-            if (!documentText.isNullOrBlank()) append("[Document: $documentName]\n$documentText\n\n")
-            if (userText.isNotBlank()) append(userText.trim())
-        }.trim()
-        if (content.isBlank() && imageUri == null) return
-
-        if (activeConversationId == null) {
-            activeConversationId = UUID.randomUUID().toString()
-            _activeConversationId.value = activeConversationId
-        }
-
-        val userMsg = ChatMessage(
-            role = Role.USER,
-            content = content,
-            attachedImageUri = imageUri?.toString(),
-            attachedDocumentName = documentName,
-            displayText = if (documentName != null) userText.trim().ifBlank { null } else null
-        )
-        val assistantMsg = ChatMessage(role = Role.ASSISTANT, content = "")
-
-        _messages.value = _messages.value + userMsg + assistantMsg
-        persistCurrentConversation()
-        _isGenerating.value = true
-
-        generationJob = viewModelScope.launch {
-            var tokenCount = 0
-            try {
-                val turns = buildTurns(_messages.value.dropLast(1))
-                val thinkEnabled = _thinkingEnabled.value
-                val params = GenerateParams(thinkingEnabled = thinkEnabled)
-
-                // Choose vision or text-only generation path
-                val flow = if (imageUri != null) {
-                    if (!EngineState.engine.isMmprojLoaded()) {
-                        _generationError.tryEmit("Load a vision projector first — go to Models tab")
-                        return@launch
-                    }
-                    val rawBytes = getApplication<Application>().contentResolver
-                        .openInputStream(imageUri)?.use { it.readBytes() }
-                    if (rawBytes == null || rawBytes.isEmpty()) {
-                        _generationError.tryEmit("Failed to read image")
-                        return@launch
-                    }
-                    // Downscale large images to reduce vision token count
-                    val imageBytes = downscaleImageIfNeeded(rawBytes, maxLongEdge = 768)
-                    EngineState.engine.generateChatWithImage(turns, imageBytes, params)
-                } else {
-                    EngineState.engine.generateChat(turns, params)
-                }
-
-                flow.collect { chunk ->
-                        tokenCount++
-                        val current = _messages.value
-                        if (current.isNotEmpty()) {
-                            val last = current.last()
-                            val newContent = last.content + chunk.content
-                            val newThinking = if (thinkEnabled)
-                                last.thinkingContent + chunk.thinking
-                            else
-                                last.thinkingContent
-                            _messages.value = current.dropLast(1) +
-                                last.copy(content = newContent, thinkingContent = newThinking)
-                        }
-                    }
-                if (tokenCount == 0) {
-                    _generationError.tryEmit("Generation failed — prompt may exceed context window")
-                }
-            } catch (e: Exception) {
-                _generationError.tryEmit("Generation error: ${e.message ?: "unknown error"}")
-            } finally {
-                _isGenerating.value = false
-                persistCurrentConversation()
-            }
-        }
-    }
-
-    fun stopGeneration() {
-        EngineState.engine.stopGeneration()
-        generationJob?.cancel()
-        _isGenerating.value = false
-    }
-
-    fun updateSystemPrompt(text: String) {
-        _systemPrompt.value = text
-        if (activeConversationId == null) {
-            activeConversationId = UUID.randomUUID().toString()
-            _activeConversationId.value = activeConversationId
-        }
-        persistCurrentConversation()
-    }
-
-    fun clearChat() {
-        stopGeneration()
-        _messages.value = emptyList()
-        _systemPrompt.value = ""
-        activeConversationId = null
-        _activeConversationId.value = null
-    }
-
-    fun selectConversation(conversationId: String) {
-        stopGeneration()
-        val conversation = _conversations.value.firstOrNull { it.id == conversationId } ?: return
-        activeConversationId = conversation.id
-        _activeConversationId.value = conversation.id
-        _messages.value = conversation.messages
-        _systemPrompt.value = conversation.systemPrompt
-    }
-
-    fun deleteConversation(conversationId: String) {
-        if (activeConversationId == conversationId) {
-            stopGeneration()
-        }
-        _conversations.value = conversationStore.delete(conversationId)
-        if (activeConversationId == conversationId) {
-            activeConversationId = null
-            _activeConversationId.value = null
-            _messages.value = emptyList()
-        }
-    }
-
-    private fun downscaleImageIfNeeded(rawBytes: ByteArray, maxLongEdge: Int): ByteArray {
-        val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, opts)
-        val w = opts.outWidth
-        val h = opts.outHeight
-        if (w <= 0 || h <= 0) return rawBytes // can't decode dimensions, pass through
-        val longEdge = maxOf(w, h)
-        if (longEdge <= maxLongEdge) return rawBytes // already small enough
-
-        val scale = maxLongEdge.toFloat() / longEdge
-        val newW = (w * scale).toInt().coerceAtLeast(1)
-        val newH = (h * scale).toInt().coerceAtLeast(1)
-
-        val full = BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size) ?: return rawBytes
-        val scaled = Bitmap.createScaledBitmap(full, newW, newH, true)
-        if (scaled !== full) full.recycle()
-
-        val out = ByteArrayOutputStream()
-        scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)
-        scaled.recycle()
-        return out.toByteArray()
-    }
-
-    private fun buildTurns(messages: List<ChatMessage>): List<ChatTurn> {
-        val turns = messages.mapNotNull { msg ->
-            if (msg.content.isBlank()) return@mapNotNull null
-            val role = when (msg.role) {
-                Role.USER      -> "user"
-                Role.ASSISTANT -> "assistant"
-                Role.SYSTEM    -> "system"
-            }
-            ChatTurn(role = role, content = msg.content)
-        }
-        val prompt = _systemPrompt.value
-        return if (prompt.isNotBlank()) {
-            listOf(ChatTurn(role = "system", content = prompt)) + turns
-        } else {
-            turns
-        }
-    }
-
-    private fun persistCurrentConversation() {
-        val conversationId = activeConversationId ?: return
-        val currentMessages = _messages.value
-        if (currentMessages.isEmpty() && _systemPrompt.value.isBlank()) return
-
-        val title = currentMessages
-            .firstOrNull { it.role == Role.USER }
-            ?.content
-            ?.replace(Regex("\\s+"), " ")
-            ?.take(42)
-            ?.ifBlank { null }
-            ?: "Untitled chat"
-
-        _conversations.value = conversationStore.upsert(
-            StoredConversation(
-                id           = conversationId,
-                title        = title,
-                messages     = currentMessages,
-                updatedAt    = System.currentTimeMillis(),
-                systemPrompt = _systemPrompt.value
-            )
-        )
-    }
-}
 
 // ---- Screen -----------------------------------------------------------------
 
@@ -525,6 +145,10 @@ fun ChatScreen(
     val transcriptionError  by chatViewModel.transcriptionError.collectAsState()
     val whisperLoaded       = EngineState.whisperEngine.isLoaded
 
+    val webSearchConfigured by chatViewModel.webSearchConfigured.collectAsState()
+    val ollamaActive        by EngineState.useOllama.collectAsState()
+    val ollamaModelName     by EngineState.ollamaModelName.collectAsState()
+
     val listState     = rememberLazyListState()
     val snackbarState = remember { SnackbarHostState() }
     val drawerState   = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -533,6 +157,8 @@ fun ChatScreen(
     var inputText     by remember { mutableStateOf("") }
     var showSystemPromptDialog by remember { mutableStateOf(false) }
     var editingSystemPrompt    by remember(systemPrompt) { mutableStateOf(systemPrompt) }
+    var showWebSearchDialog    by remember { mutableStateOf(false) }
+    var showOllamaDialog       by remember { mutableStateOf(false) }
     var pendingModelPath       by remember { mutableStateOf<String?>(null) }
 
     var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
@@ -684,6 +310,11 @@ fun ChatScreen(
                     onThinkingToggle = { chatViewModel.toggleThinking() },
                     systemPrompt     = systemPrompt,
                     onSystemPromptClick = { showSystemPromptDialog = true },
+                    webSearchConfigured = webSearchConfigured,
+                    onWebSearchSetup    = { showWebSearchDialog = true },
+                    ollamaActive     = ollamaActive,
+                    ollamaModelName  = ollamaModelName,
+                    onOllamaClick    = { showOllamaDialog = true },
                     supportsAttachments  = isLoaded,
                     supportsMultimodal   = isMmprojLoaded && isLoaded,
                     selectedImageUri     = selectedImageUri,
@@ -797,15 +428,19 @@ fun ChatScreen(
     }
 
     pendingModelPath?.let { path ->
-        val contextOptions = listOf(512, 1024, 2048, 4096, 8192)
-        val recommended = 1024
+        val ctxConfig = EngineState.computeContextConfig(modelPath = path)
+        val contextOptions = ctxConfig.options
+        val recommended = ctxConfig.recommended
         AlertDialog(
             onDismissRequest = { pendingModelPath = null },
             title = { Text("Context Window", style = AlpacaType.TitleMd) },
             text = {
                 Column {
                     Text(
-                        "Choose how many tokens the model can hold in memory at once. Larger = more document/history, but uses more RAM and is slower to start.",
+                        if (ctxConfig.isRecurrent)
+                            "This model uses a recurrent architecture with constant memory per token. Large context windows are efficient."
+                        else
+                            "Choose how many tokens the model can hold in memory at once. Options are capped to fit in device RAM.",
                         style = AlpacaType.BodySm,
                         color = AlpacaColors.Text.Muted
                     )
@@ -825,7 +460,7 @@ fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "$size tokens",
+                                text = if (size >= 1024) "${size / 1024}K tokens" else "$size tokens",
                                 style = AlpacaType.BodyMd,
                                 color = AlpacaColors.Text.Primary
                             )
@@ -862,6 +497,46 @@ fun ChatScreen(
                 chatViewModel.updateSystemPrompt(editingSystemPrompt)
                 showSystemPromptDialog = false
             }
+        )
+    }
+
+    if (showWebSearchDialog) {
+        WebSearchKeyDialog(
+            hasExistingKey = !chatViewModel.agentPrefs.getTavilyApiKey().isNullOrBlank(),
+            onSave = { key ->
+                chatViewModel.agentPrefs.saveTavilyApiKey(key)
+                chatViewModel.agentPrefs.setWebSearchEnabled(true)
+                chatViewModel.refreshWebSearchConfigured()
+                showWebSearchDialog = false
+            },
+            onContinue = {
+                chatViewModel.refreshWebSearchConfigured()
+                showWebSearchDialog = false
+            },
+            onClear = {
+                chatViewModel.agentPrefs.clearTavilyApiKey()
+                chatViewModel.agentPrefs.setWebSearchEnabled(false)
+                chatViewModel.refreshWebSearchConfigured()
+                // Stay on dialog so user can enter a new key
+            },
+            onDismiss = { showWebSearchDialog = false }
+        )
+    }
+
+    if (showOllamaDialog) {
+        OllamaConnectionDialog(
+            isConnected      = ollamaActive,
+            currentUrl       = com.aipaca.app.data.OllamaPrefs.getServerUrl(context),
+            currentModel     = com.aipaca.app.data.OllamaPrefs.getModelName(context),
+            onConnect        = { url, model ->
+                EngineState.enableOllama(url, model)
+                showOllamaDialog = false
+            },
+            onDisconnect     = {
+                EngineState.disableOllama()
+                showOllamaDialog = false
+            },
+            onDismiss        = { showOllamaDialog = false }
         )
     }
 }
@@ -1105,6 +780,11 @@ private fun ChatInputBar(
     onAttachImage: () -> Unit = {},
     onAttachDocument: () -> Unit = {},
     onClearAttachment: () -> Unit = {},
+    webSearchConfigured: Boolean = false,
+    onWebSearchSetup: () -> Unit = {},
+    ollamaActive: Boolean = false,
+    ollamaModelName: String = "",
+    onOllamaClick: () -> Unit = {},
     onSend: () -> Unit,
     onStop: () -> Unit,
     onMicClick: () -> Unit = {},
@@ -1196,20 +876,72 @@ private fun ChatInputBar(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    InputToggleChip(
-                        icon     = Icons.Outlined.SmartToy,
-                        label    = "Sys",
-                        active   = systemPrompt.isNotBlank(),
-                        onClick  = onSystemPromptClick
-                    )
-                    if (supportsThinking) {
-                        Spacer(Modifier.width(8.dp))
-                        InputToggleChip(
-                            icon     = Icons.Outlined.Psychology,
-                            label    = "Think",
-                            active   = thinkingEnabled,
-                            onClick  = onThinkingToggle
-                        )
+                    // Modes overflow menu (Sys, Think, Web search, Ollama)
+                    val anyModeActive = systemPrompt.isNotBlank() || thinkingEnabled || webSearchConfigured || ollamaActive
+                    var showModeMenu by remember { mutableStateOf(false) }
+                    Box {
+                        Row(
+                            verticalAlignment     = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { showModeMenu = true }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Outlined.Menu,
+                                contentDescription = "Modes",
+                                tint               = if (anyModeActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted,
+                                modifier           = Modifier.size(18.dp)
+                            )
+                            Text(
+                                "Modes",
+                                style = AlpacaType.LabelMd,
+                                color = if (anyModeActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted
+                            )
+                        }
+                        DropdownMenu(
+                            expanded         = showModeMenu,
+                            onDismissRequest = { showModeMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text        = { Text("System Prompt", style = AlpacaType.BodyMd,
+                                    color = if (systemPrompt.isNotBlank()) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.SmartToy, null, Modifier.size(18.dp),
+                                    tint = if (systemPrompt.isNotBlank()) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onSystemPromptClick() }
+                            )
+                            if (supportsThinking) {
+                                DropdownMenuItem(
+                                    text        = { Text("Thinking", style = AlpacaType.BodyMd,
+                                        color = if (thinkingEnabled) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                    leadingIcon = { Icon(Icons.Outlined.Psychology, null, Modifier.size(18.dp),
+                                        tint = if (thinkingEnabled) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                    onClick     = { onThinkingToggle() }
+                                )
+                            }
+                            // No agent toggle: how many tools a turn carries and how many
+                            // rounds it may take is decided from the model's measured
+                            // capabilities (see agent/AgentTier.kt), not by the user.
+                            // What is left here is the one thing that genuinely needs
+                            // a decision — whether queries may leave the device.
+                            DropdownMenuItem(
+                                text        = { Text("Web search", style = AlpacaType.BodyMd,
+                                    color = if (webSearchConfigured) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.TravelExplore, null, Modifier.size(18.dp),
+                                    tint = if (webSearchConfigured) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onWebSearchSetup() }
+                            )
+                            DropdownMenuItem(
+                                text        = { Text(
+                                    if (ollamaActive) "Ollama: $ollamaModelName" else "Ollama",
+                                    style = AlpacaType.BodyMd,
+                                    color = if (ollamaActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Primary) },
+                                leadingIcon = { Icon(Icons.Outlined.Cloud, null, Modifier.size(18.dp),
+                                    tint = if (ollamaActive) AlpacaColors.Accent.Primary else AlpacaColors.Text.Muted) },
+                                onClick     = { showModeMenu = false; onOllamaClick() }
+                            )
+                        }
                     }
                     if (supportsAttachments) {
                         Spacer(Modifier.width(4.dp))
@@ -1435,6 +1167,108 @@ private fun SystemPromptDialog(
     )
 }
 
+@Composable
+private fun WebSearchKeyDialog(
+    hasExistingKey: Boolean,
+    onSave: (String) -> Unit,
+    onContinue: () -> Unit,
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (hasExistingKey) {
+        // Key already stored — show masked, offer Continue or Delete
+        AlertDialog(
+            onDismissRequest    = onDismiss,
+            containerColor      = AlpacaColors.Surface.Card,
+            titleContentColor   = AlpacaColors.Text.Primary,
+            textContentColor    = AlpacaColors.Text.Body,
+            shape               = RoundedCornerShape(12.dp),
+            title = {
+                Column {
+                    Text("Web search", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Spacer(Modifier.height(4.dp))
+                    MonoLabel("TAVILY API KEY")
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "API key: ••••••••••••",
+                        style = AlpacaType.BodyMd,
+                        color = AlpacaColors.Text.Body
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Keep the saved key to allow web searches, or delete it to enter a new one.",
+                        style = AlpacaType.BodySm,
+                        color = AlpacaColors.Text.Subtle
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onClear) {
+                    Text("Delete key", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onContinue) {
+                    Text("Continue", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                }
+            }
+        )
+    } else {
+        // No key yet — show input field
+        var key by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest    = onDismiss,
+            containerColor      = AlpacaColors.Surface.Card,
+            titleContentColor   = AlpacaColors.Text.Primary,
+            textContentColor    = AlpacaColors.Text.Body,
+            shape               = RoundedCornerShape(12.dp),
+            title = {
+                Column {
+                    Text("Web search", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                    Spacer(Modifier.height(4.dp))
+                    MonoLabel("TAVILY API KEY FOR WEB SEARCH")
+                }
+            },
+            text = {
+                OutlinedTextField(
+                    value         = key,
+                    onValueChange = { key = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    placeholder   = { Text("tvly-...", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    shape         = RoundedCornerShape(6.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor          = AlpacaColors.Text.Primary,
+                        unfocusedTextColor        = AlpacaColors.Text.Primary,
+                        cursorColor               = AlpacaColors.Accent.Primary,
+                        focusedBorderColor        = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor      = AlpacaColors.Line.Hairline,
+                        focusedPlaceholderColor   = AlpacaColors.Text.Subtle,
+                        unfocusedPlaceholderColor = AlpacaColors.Text.Subtle
+                    )
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", style = AlpacaType.LabelLg, color = AlpacaColors.Text.Muted)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { onSave(key) },
+                    enabled = key.isNotBlank()
+                ) {
+                    Text("Save", style = AlpacaType.LabelLg, color = AlpacaColors.Accent.Primary)
+                }
+            }
+        )
+    }
+}
+
 // ---- Message bubble ---------------------------------------------------------
 
 @Composable
@@ -1598,6 +1432,98 @@ private fun ChatScreenEmptyPreview() {
 }
 
 @Preview(showBackground = true, name = "MessageBubbles")
+// ---- Ollama connection dialog -----------------------------------------------
+
+@Composable
+private fun OllamaConnectionDialog(
+    isConnected: Boolean,
+    currentUrl: String,
+    currentModel: String,
+    onConnect: (url: String, model: String) -> Unit,
+    onDisconnect: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var url by remember { mutableStateOf(currentUrl) }
+    var model by remember { mutableStateOf(currentModel) }
+
+    AlertDialog(
+        onDismissRequest    = onDismiss,
+        containerColor      = AlpacaColors.Surface.Card,
+        titleContentColor   = AlpacaColors.Text.Primary,
+        textContentColor    = AlpacaColors.Text.Body,
+        shape               = RoundedCornerShape(12.dp),
+        title = {
+            Column {
+                Text("Ollama Remote LLM", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
+                Spacer(Modifier.height(4.dp))
+                MonoLabel(if (isConnected) "CONNECTED" else "DISCONNECTED")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Connect to Ollama running on your computer. Both devices must be on the same network.",
+                    style = AlpacaType.BodySm,
+                    color = AlpacaColors.Text.Subtle
+                )
+                OutlinedTextField(
+                    value         = url,
+                    onValueChange = { url = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    label         = { Text("Server URL", style = AlpacaType.LabelMd) },
+                    placeholder   = { Text("http://192.168.1.100:11434", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(6.dp),
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor = AlpacaColors.Line.Hairline,
+                        cursorColor          = AlpacaColors.Accent.Primary
+                    )
+                )
+                OutlinedTextField(
+                    value         = model,
+                    onValueChange = { model = it },
+                    modifier      = Modifier.fillMaxWidth(),
+                    label         = { Text("Model name", style = AlpacaType.LabelMd) },
+                    placeholder   = { Text("qwen3:30b", style = AlpacaType.BodyMd) },
+                    singleLine    = true,
+                    shape         = RoundedCornerShape(6.dp),
+                    textStyle     = AlpacaType.BodyMd.copy(color = AlpacaColors.Text.Primary),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor   = AlpacaColors.Accent.Primary,
+                        unfocusedBorderColor = AlpacaColors.Line.Hairline,
+                        cursorColor          = AlpacaColors.Accent.Primary
+                    )
+                )
+            }
+        },
+        dismissButton = {
+            if (isConnected) {
+                TextButton(onClick = onDisconnect) {
+                    Text("Disconnect", style = AlpacaType.LabelLg, color = AlpacaColors.State.Error)
+                }
+            } else {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", style = AlpacaType.LabelLg, color = AlpacaColors.Text.Muted)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConnect(url.trim(), model.trim()) },
+                enabled = url.isNotBlank() && model.isNotBlank()
+            ) {
+                Text(
+                    if (isConnected) "Update" else "Connect",
+                    style = AlpacaType.LabelLg,
+                    color = AlpacaColors.Accent.Primary
+                )
+            }
+        }
+    )
+}
+
 @Composable
 private fun MessageBubbleUserPreview() {
     AIpacaTheme {

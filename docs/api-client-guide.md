@@ -9,6 +9,8 @@ How to connect to and use the AIpaca AI server from a laptop, another app, or an
 AIpaca runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
 Every client must **pair once** before it can make API calls.
 
+Generation can be served either by the on-device model or, if enabled in the app, routed through a local-network Ollama server — but a local GGUF model must still be loaded in the app either way (see the `503 model_not_loaded` entry in Troubleshooting).
+
 ```
 Client                          AIpaca (your phone)
 ──────                          ──────────────────────
@@ -487,12 +489,16 @@ curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | — | Any string (ignored, one model loaded at a time) |
+| `model` | string | — | Any string (ignored, one model loaded at a time). If Ollama is active, the model actually used is whatever `OllamaPrefs` holds server-side — the client cannot select it via this field |
 | `messages` | array | — | Array of `{role, content}` objects |
 | `stream` | boolean | `false` | `true` for SSE token streaming |
 | `temperature` | float | `0.7` | Sampling temperature (0.0–2.0) |
 | `max_tokens` | int | `512` | Maximum tokens to generate |
 | `top_p` | float | `0.9` | Nucleus sampling threshold |
+| `frequency_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
+| `presence_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
+| `stop` | array of strings | `null` | Accepted for OpenAI compatibility |
+| `include_thinking` | boolean | `false` | AIpaca extension — include `<think>...</think>` reasoning content in the response for models that support it |
 
 **Response (non-streaming):**
 ```json
@@ -602,4 +608,4 @@ Check the IP shown in the Server tab notification matches what you're connecting
 → Expected — AIpaca uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
 
 **`503 model_not_loaded`**
-→ Open AIpaca and load a GGUF model from the Chat or Server tab first.
+→ Open AIpaca and load a GGUF model from the Chat or Server tab first. This check runs before generation starts regardless of backend — even when Ollama is enabled, the server still requires a local GGUF model to be loaded before it will accept `/v1/chat/completions` requests; the actual generation is then routed to Ollama, but the "is anything loaded" gate is unconditional.

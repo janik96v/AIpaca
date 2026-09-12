@@ -112,7 +112,10 @@ def chat(prompt: str, stream: bool = False):
                 if data == b"[DONE]":
                     break
                 chunk = json.loads(data)
-                delta = chunk["choices"][0]["delta"].get("content", "")
+                choices = chunk.get("choices")
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {}).get("content", "")
                 print(delta, end="", flush=True)
         print()
     else:

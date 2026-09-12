@@ -3,6 +3,7 @@
 #include "ggml-backend.h"
 #include "gguf.h"
 #include "chat.h"
+#include "nlohmann/json.hpp"
 #include "mtmd.h"
 #include "mtmd-helper.h"
 #include <android/log.h>
@@ -230,6 +231,116 @@ static TensorHistogram build_tensor_histogram(const std::string& model_path) {
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight GGUF metadata probe — reads header only, no model loading.
+// Returns JSON: {"architecture":"...","nCtxTrain":N,"nParams":N,
+//                "isRecurrentKV":bool,"quant":"..."}
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jstring  jModelPath)
+{
+    std::string model_path = jstring_to_std(env, jModelPath);
+    gguf_init_params params = { /*.no_alloc =*/ true, /*.ctx =*/ nullptr };
+    gguf_context* ctx = gguf_init_from_file(model_path.c_str(), params);
+    if (ctx == nullptr) {
+        return env->NewStringUTF("{\"architecture\":\"\",\"nCtxTrain\":0,\"nParams\":0,"
+                                 "\"isRecurrentKV\":false,\"quant\":\"unknown\"}");
+    }
+
+    std::string arch;
+    int64_t arch_key = gguf_find_key(ctx, "general.architecture");
+    if (arch_key >= 0) {
+        const char* val = gguf_get_val_str(ctx, arch_key);
+        if (val) arch = val;
+    }
+
+    bool is_recurrent = (arch == "mamba" || arch == "rwkv" || arch == "jamba" ||
+                         arch == "falcon-h1" || arch == "ssm" || arch == "recurrent");
+
+    // n_ctx_train lives under <arch>.context_length
+    uint32_t n_ctx_train = 0;
+    std::string ctx_key = arch + ".context_length";
+    int64_t ctx_id = gguf_find_key(ctx, ctx_key.c_str());
+    if (ctx_id >= 0) {
+        n_ctx_train = gguf_get_val_u32(ctx, ctx_id);
+    }
+
+    // n_embd for KV estimation
+    uint32_t n_embd = 0;
+    std::string embd_key = arch + ".embedding_length";
+    int64_t embd_id = gguf_find_key(ctx, embd_key.c_str());
+    if (embd_id >= 0) {
+        n_embd = gguf_get_val_u32(ctx, embd_id);
+    }
+
+    // n_layer (block_count)
+    uint32_t n_layer = 0;
+    std::string layer_key = arch + ".block_count";
+    int64_t layer_id = gguf_find_key(ctx, layer_key.c_str());
+    if (layer_id >= 0) {
+        n_layer = gguf_get_val_u32(ctx, layer_id);
+    }
+
+    // n_head_kv for accurate KV cache sizing
+    uint32_t n_head_kv = 0;
+    std::string hkv_key = arch + ".attention.head_count_kv";
+    int64_t hkv_id = gguf_find_key(ctx, hkv_key.c_str());
+    if (hkv_id >= 0) {
+        n_head_kv = gguf_get_val_u32(ctx, hkv_id);
+    }
+
+    uint32_t n_head = 0;
+    std::string h_key = arch + ".attention.head_count";
+    int64_t h_id = gguf_find_key(ctx, h_key.c_str());
+    if (h_id >= 0) {
+        n_head = gguf_get_val_u32(ctx, h_id);
+    }
+
+    // file_type → quant name
+    int ftype_val = -1;
+    int64_t ftype_id = gguf_find_key(ctx, "general.file_type");
+    if (ftype_id >= 0) {
+        ftype_val = (int)gguf_get_val_u32(ctx, ftype_id);
+    }
+    const char* quant_name = ftype_to_name(ftype_val);
+
+    // Rough nParams estimate: ~12 * n_layer * n_embd^2 (transformer scaling law)
+    int64_t n_params = 0;
+    if (n_layer > 0 && n_embd > 0) {
+        n_params = (int64_t)12 * n_layer * (int64_t)n_embd * (int64_t)n_embd;
+    }
+
+    // d_head = n_embd / n_head (for GQA: KV cache uses n_head_kv, not n_head)
+    uint32_t d_head = (n_head > 0 && n_embd > 0) ? n_embd / n_head : 0;
+    uint32_t effective_kv_heads = (n_head_kv > 0) ? n_head_kv : n_head;
+
+    gguf_free(ctx);
+
+    LOGI("probeGgufMeta: arch=%s  n_ctx_train=%u  n_embd=%u  n_layer=%u  n_head=%u  "
+         "n_head_kv=%u  d_head=%u  ftype=%d  recurrent=%s  nParams~%lld",
+         arch.c_str(), n_ctx_train, n_embd, n_layer, n_head,
+         effective_kv_heads, d_head, ftype_val,
+         is_recurrent ? "true" : "false", (long long)n_params);
+
+    std::ostringstream json;
+    json << "{"
+         << "\"architecture\":\"" << json_escape(arch) << "\","
+         << "\"nCtxTrain\":" << n_ctx_train << ","
+         << "\"nParams\":" << n_params << ","
+         << "\"nEmbd\":" << n_embd << ","
+         << "\"nLayer\":" << n_layer << ","
+         << "\"nHeadKv\":" << effective_kv_heads << ","
+         << "\"dHead\":" << d_head << ","
+         << "\"isRecurrentKV\":" << (is_recurrent ? "true" : "false") << ","
+         << "\"quant\":\"" << json_escape(quant_name) << "\""
+         << "}";
+    return env->NewStringUTF(json.str().c_str());
+}
+
 static int get_model_ftype(const llama_model* model) {
     char ftype_buf[32] = {};
     int ftype_val = -1;
@@ -355,6 +466,44 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
     cparams.n_ubatch               = std::min<uint32_t>(512, cparams.n_batch);
     cparams.n_threads              = static_cast<uint32_t>(nThreads);
     cparams.n_threads_batch        = static_cast<uint32_t>(nThreads);
+
+    // ---- KV-cache quantization (Hebel A, research_notes/20_kurzbericht_edge_kontext_agentik.md §5.2) ----
+    // q8_0 symmetric halves KV RAM (~36 -> ~19 KB/token for Qwen2.5-3B) at practically
+    // no quality cost. "Keys nie unter q8_0": coarser Key quantization distorts Q*K^T
+    // and degrades tool-calling, so the Key cache is q8_0 on every path below.
+    //
+    // llama.cpp constraint (verified in llama-context.cpp): quantizing the K cache does
+    // NOT require Flash Attention (the non-FA path computes Q*K^T via a mul_mat that
+    // natively dequantizes K), but quantizing the V cache DOES require Flash Attention —
+    // llama_init_from_model() hard-fails ("V cache quantization requires flash_attn") if
+    // type_v is quantized while flash_attn is disabled.
+    //
+    // Flash Attention is a known risk on AIpaca's Adreno/OpenCL GPU backend: the same
+    // FLASH_ATTN_EXT OpenCL kernel produced incorrect results for whisper.cpp on this
+    // GPU family (docs/lab_journal.md, 2026-06-05) and is force-disabled for the mtmd/
+    // vision context in this file for that reason (see nativeLoadMmproj below). Whether
+    // llama.cpp's own decode graph is affected the same way has NOT been verified on a
+    // real Adreno device yet. Until that verification happens, GPU-offloaded contexts
+    // keep flash_attn disabled and therefore only quantize Keys (V stays f16). The
+    // CPU-only path is not exposed to the Adreno OpenCL FA bug (CPU FA is llama.cpp's
+    // well-tested reference implementation), so it safely enables flash_attn and
+    // quantizes both Keys and Values to q8_0 for the full KV-RAM halving.
+    // KV-cache quantization is only safe on the CPU path for now.
+    // On the GPU (Adreno/OpenCL) path, q8_0 KV tensors may trigger unsupported
+    // kernel paths or crashes — keep KV at f16 (the llama.cpp default).
+    // CPU-only: enable flash_attn (well-tested CPU reference impl) + q8_0 for
+    // both K and V, giving ~50% KV-RAM savings.
+    const bool gpu_offload = (effective_gpu_layers > 0);
+    if (gpu_offload) {
+        // GPU path: keep defaults (type_k=F16, type_v=F16, flash_attn=disabled)
+        // TODO: verify q8_0 KV + FA on real Adreno device before enabling
+        LOGI("KV-cache quant: DISABLED (GPU offload active, Adreno compatibility)");
+    } else {
+        cparams.type_k          = GGML_TYPE_Q8_0;
+        cparams.type_v          = GGML_TYPE_Q8_0;
+        cparams.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
+        LOGI("KV-cache quant: type_k=Q8_0 type_v=Q8_0 flash_attn=enabled (CPU-only path)");
+    }
 
     llama_context* ctx = llama_init_from_model(model, cparams);
     if (ctx == nullptr) {
@@ -632,6 +781,22 @@ struct ThinkingStreamParser {
     }
 };
 
+// Returns true when the generation prompt already opened a thinking block
+// (e.g. Qwen3.5 appends "<think>\n"), so the stream parser should start
+// inside_thinking = true.
+static bool generation_prompt_opens_thinking(const std::string& gen_prompt,
+                                              const std::string& start_tag) {
+    if (start_tag.empty() || gen_prompt.size() < start_tag.size()) return false;
+    auto pos = gen_prompt.rfind(start_tag);
+    if (pos == std::string::npos) return false;
+    for (size_t i = pos + start_tag.size(); i < gen_prompt.size(); i++) {
+        if (gen_prompt[i] != '\n' && gen_prompt[i] != ' ' && gen_prompt[i] != '\r') {
+            return false;
+        }
+    }
+    return true;
+}
+
 static common_chat_params format_chat_with_common(
         const llama_model* model,
         const std::vector<std::pair<std::string, std::string>>& turns,
@@ -820,6 +985,11 @@ static void run_generate(
             !chat_params.thinking_end_tag.empty()) {
         thinking_parser.start_tag = chat_params.thinking_start_tag;
         thinking_parser.end_tag = chat_params.thinking_end_tag;
+        if (generation_prompt_opens_thinking(chat_params.generation_prompt,
+                                              chat_params.thinking_start_tag)) {
+            thinking_parser.inside_thinking = true;
+            LOGD("run_generate: generation prompt opened thinking block, starting inside_thinking=true");
+        }
     }
 
     int n_generated = 0;
@@ -1223,7 +1393,22 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
     }
 
 
-    json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << "}";
+    json << "\"supportsMultimodal\":" << (supports_multimodal ? "true" : "false") << ",";
+
+    // Model architecture — detect recurrent/SSM models (linear KV-cache growth)
+    char arch_buf[64] = {0};
+    bool is_recurrent_kv = false;
+    if (llama_model_meta_val_str(lc->model, "general.architecture", arch_buf, sizeof(arch_buf)) >= 0) {
+        std::string arch(arch_buf);
+        is_recurrent_kv = (arch == "mamba" || arch == "rwkv" || arch == "jamba" ||
+                           arch == "falcon-h1" || arch == "ssm" || arch == "recurrent");
+        LOGI("Model architecture: %s  isRecurrentKV=%s", arch_buf, is_recurrent_kv ? "true" : "false");
+    }
+    json << "\"architecture\":\"" << json_escape(arch_buf) << "\","
+         << "\"isRecurrentKV\":" << (is_recurrent_kv ? "true" : "false") << ","
+         << "\"nCtxTrain\":" << llama_model_n_ctx_train(lc->model) << ","
+         << "\"nParams\":" << llama_model_n_params(lc->model)
+         << "}";
     return env->NewStringUTF(json.str().c_str());
 }
 
@@ -1633,4 +1818,375 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
             tokenCallback);
 
     env->ReleaseByteArrayElements(jImageBytes, imgBytes, JNI_ABORT);
+}
+
+// ---------------------------------------------------------------------------
+// nativeProbeToolSupport
+//   Answers whether the loaded GGUF actually has a tool-calling chat template.
+//
+//   Applies the model's Jinja template once with a throwaway tool definition and
+//   checks whether the tool's name survives into the rendered prompt. A model
+//   without tool support silently drops the tool schemas, answers in prose, and
+//   leaves the PEG parser nothing to parse. Detecting that up front is what lets
+//   the Kotlin side pick an execution tier instead of handing every model a tool
+//   manifest it cannot use (see agent/AgentTier.kt).
+//
+//   Cheap: template application only, no tokenization and no decode.
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeToolSupport(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr)
+{
+    using json = nlohmann::ordered_json;
+
+    if (ctxPtr == 0L) {
+        LOGE("nativeProbeToolSupport: null context pointer");
+        return JNI_FALSE;
+    }
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+
+    // A name no chat template would emit on its own, so finding it in the rendered
+    // prompt proves the template really rendered the tool definition.
+    static const char* PROBE_TOOL_NAME = "aipaca_probe_tool";
+    static const char* PROBE_MESSAGES  = R"([{"role":"user","content":"hi"}])";
+    static const char* PROBE_TOOLS =
+        R"([{"type":"function","function":{"name":"aipaca_probe_tool",)"
+        R"("description":"probe","parameters":{"type":"object","properties":{}}}}])";
+
+    try {
+        std::vector<common_chat_msg>  messages = common_chat_msgs_parse_oaicompat(json::parse(PROBE_MESSAGES));
+        std::vector<common_chat_tool> tools    = common_chat_tools_parse_oaicompat(json::parse(PROBE_TOOLS));
+
+        auto tmpls = common_chat_templates_init(lc->model, "");
+
+        common_chat_templates_inputs inputs;
+        inputs.add_generation_prompt = true;
+        inputs.use_jinja             = true;
+        inputs.enable_thinking       = false;
+        inputs.reasoning_format      = COMMON_REASONING_FORMAT_NONE;
+        inputs.messages              = messages;
+        inputs.tools                 = tools;
+        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        inputs.parallel_tool_calls   = false;
+
+        common_chat_params cp = common_chat_templates_apply(tmpls.get(), inputs);
+
+        // The signal is whether the rendered prompt actually mentions the probe tool.
+        // A template that ignores `inputs.tools` produces a plain chat prompt, and the
+        // tool name cannot appear in it. Checking the rendered text rather than the
+        // chat-format enum keeps this independent of llama.cpp's enum naming, which
+        // changes across upstream revisions.
+        const bool supported = (cp.prompt.find(PROBE_TOOL_NAME) != std::string::npos);
+        LOGI("nativeProbeToolSupport: format=%d prompt_len=%zu tool_calling=%s",
+             (int)cp.format, cp.prompt.size(), supported ? "yes" : "no");
+        return supported ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception& e) {
+        LOGE("nativeProbeToolSupport: template probe failed: %s", e.what());
+        return JNI_FALSE;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// nativeGenerateAgent
+//   Native tool-calling generation: applies Jinja tool templates, generates
+//   with streaming, then parses tool calls via llama.cpp's PEG parser.
+//   Returns JSON: {"content":"...","tool_calls":[{"id","name","arguments":{}}]}
+// ---------------------------------------------------------------------------
+extern "C"
+JNIEXPORT jstring JNICALL
+Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateAgent(
+        JNIEnv*  env,
+        jobject  /* thiz */,
+        jlong    ctxPtr,
+        jstring  jMessagesJson,
+        jstring  jToolsJson,
+        jfloat   temperature,
+        jfloat   topP,
+        jfloat   repeatPenalty,
+        jint     maxTokens,
+        jint     thinkingBudget,
+        jobject  tokenCallback)
+{
+    using json = nlohmann::ordered_json;
+
+    if (ctxPtr == 0L) {
+        LOGE("nativeGenerateAgent: null context pointer");
+        return env->NewStringUTF("{\"error\":\"null context\"}");
+    }
+    auto* lc = reinterpret_cast<LlamaContext*>(ctxPtr);
+    lc->stop_flag.store(false);
+
+    // ---- 1. Parse incoming JSON messages + tools ----------------------------
+    std::string messagesStr = jstring_to_std(env, jMessagesJson);
+    std::string toolsStr    = jstring_to_std(env, jToolsJson);
+
+    std::vector<common_chat_msg>  messages;
+    std::vector<common_chat_tool> tools;
+    try {
+        auto messagesObj = json::parse(messagesStr);
+        messages = common_chat_msgs_parse_oaicompat(messagesObj);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: failed to parse messagesJson: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"invalid messagesJson\"}");
+    }
+    try {
+        auto toolsObj = json::parse(toolsStr);
+        tools = common_chat_tools_parse_oaicompat(toolsObj);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: failed to parse toolsJson: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"invalid toolsJson\"}");
+    }
+
+    LOGI("nativeGenerateAgent: %zu messages, %zu tools, temp=%.2f maxTok=%d thinkBudget=%d",
+         messages.size(), tools.size(), (double)temperature, (int)maxTokens, (int)thinkingBudget);
+
+    // ---- 2. Apply Jinja chat template with tools ----------------------------
+    const llama_model* model = lc->model;
+    const llama_vocab* vocab = llama_model_get_vocab(model);
+
+    common_chat_params cp;
+    try {
+        auto tmpls = common_chat_templates_init(model, "");
+
+        common_chat_templates_inputs inputs;
+        inputs.add_generation_prompt = true;
+        inputs.use_jinja             = true;
+        inputs.enable_thinking       = (thinkingBudget != 0);
+        inputs.reasoning_format      = (thinkingBudget != 0)
+                                         ? COMMON_REASONING_FORMAT_DEEPSEEK
+                                         : COMMON_REASONING_FORMAT_NONE;
+        inputs.messages              = messages;
+        inputs.tools                 = tools;
+        inputs.tool_choice           = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        inputs.parallel_tool_calls   = false;
+
+        cp = common_chat_templates_apply(tmpls.get(), inputs);
+    } catch (const std::exception& e) {
+        LOGE("nativeGenerateAgent: template apply failed: %s", e.what());
+        return env->NewStringUTF("{\"error\":\"template apply failed\"}");
+    }
+
+    LOGD("nativeGenerateAgent: prompt_len=%zu format=%d supports_thinking=%d",
+         cp.prompt.size(), (int)cp.format, cp.supports_thinking ? 1 : 0);
+
+    // Log the last 500 chars of the rendered prompt to debug template issues
+    if (cp.prompt.size() > 500) {
+        LOGD("nativeGenerateAgent: prompt tail: ...%s", cp.prompt.substr(cp.prompt.size() - 500).c_str());
+    } else {
+        LOGD("nativeGenerateAgent: prompt: %s", cp.prompt.c_str());
+    }
+
+    // ---- 3. Tokenize --------------------------------------------------------
+    std::vector<llama_token> tokens(cp.prompt.size() + 64);
+    int n_tokens = llama_tokenize(
+            vocab, cp.prompt.c_str(), (int32_t)cp.prompt.size(),
+            tokens.data(), (int32_t)tokens.size(),
+            /*add_special=*/true, /*parse_special=*/true);
+    if (n_tokens < 0) {
+        tokens.resize(-n_tokens + 4);
+        n_tokens = llama_tokenize(
+                vocab, cp.prompt.c_str(), (int32_t)cp.prompt.size(),
+                tokens.data(), (int32_t)tokens.size(),
+                /*add_special=*/true, /*parse_special=*/true);
+    }
+    if (n_tokens <= 0) {
+        LOGE("nativeGenerateAgent: tokenisation failed");
+        return env->NewStringUTF("{\"error\":\"tokenisation failed\"}");
+    }
+    tokens.resize(n_tokens);
+
+    // Truncate to context window
+    const uint32_t n_ctx   = llama_n_ctx(lc->ctx);
+    const uint32_t reserve = std::max<uint32_t>(64u, n_ctx / 10u);
+    const uint32_t max_prompt_tokens = n_ctx > reserve ? n_ctx - reserve : n_ctx;
+    if ((uint32_t)n_tokens > max_prompt_tokens) {
+        LOGW("nativeGenerateAgent: truncating prompt %d → %u tokens", n_tokens, max_prompt_tokens);
+        tokens.erase(tokens.begin(), tokens.begin() + (n_tokens - (int)max_prompt_tokens));
+        n_tokens = (int)max_prompt_tokens;
+    }
+
+    LOGI("nativeGenerateAgent: %d prompt tokens (ctx=%u)", n_tokens, n_ctx);
+
+    // ---- 4. Callback setup --------------------------------------------------
+    jclass cbClass = env->GetObjectClass(tokenCallback);
+    jmethodID onTokMid = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;Ljava/lang/String;)V");
+    if (onTokMid == nullptr) {
+        LOGE("nativeGenerateAgent: could not find onToken on callback");
+        return env->NewStringUTF("{\"error\":\"callback method not found\"}");
+    }
+
+    // ---- 5. Prefill ---------------------------------------------------------
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+    llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
+    if (llama_decode(lc->ctx, batch) != 0) {
+        LOGE("nativeGenerateAgent: prefill decode failed");
+        return env->NewStringUTF("{\"error\":\"prefill failed\"}");
+    }
+
+    // ---- 6. Sampler chain ---------------------------------------------------
+    llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+            /*penalty_last_n=*/64,
+            /*penalty_repeat=*/repeatPenalty,
+            /*penalty_freq=*/0.0f,
+            /*penalty_present=*/0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+
+    // Think suppression
+    ThinkSuppressor suppressor;
+    bool suppress_thinking = (thinkingBudget == 0);
+    if (suppress_thinking) {
+        auto tokenize_fn = [&](const std::string& text) -> std::vector<llama_token> {
+            std::vector<llama_token> toks(text.size() + 4);
+            int n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
+                                   toks.data(), (int32_t)toks.size(),
+                                   /*add_special=*/false, /*parse_special=*/true);
+            if (n > 0) { toks.resize(n); } else { toks.clear(); }
+            return toks;
+        };
+        auto add_tag_pair = [&](const std::string& open, const std::string& close) {
+            auto ot = tokenize_fn(open);
+            auto ct = tokenize_fn(close);
+            if (!ot.empty() && !ct.empty()) {
+                suppressor.tag_pairs.push_back({ ot, ct });
+            }
+        };
+        if (!cp.thinking_start_tag.empty() && !cp.thinking_end_tag.empty()) {
+            add_tag_pair(cp.thinking_start_tag, cp.thinking_end_tag);
+        }
+        add_tag_pair("<think>", "</think>");
+    }
+
+    // Thinking stream parser for streaming thinking/content split
+    ThinkingStreamParser thinking_parser;
+    if (cp.supports_thinking && !cp.thinking_start_tag.empty() && !cp.thinking_end_tag.empty()) {
+        thinking_parser.start_tag = cp.thinking_start_tag;
+        thinking_parser.end_tag   = cp.thinking_end_tag;
+        if (generation_prompt_opens_thinking(cp.generation_prompt, cp.thinking_start_tag)) {
+            thinking_parser.inside_thinking = true;
+            LOGD("nativeGenerateAgent: generation prompt opened thinking block, starting inside_thinking=true");
+        }
+    }
+
+    // ---- 7. Generation loop (accumulate full text for tool-call parsing) -----
+    int n_generated = 0;
+    std::string full_generated_text;
+    std::string utf8_tail;
+
+    while (n_generated < maxTokens && !lc->stop_flag.load()) {
+        llama_token new_token;
+
+        if (suppress_thinking && suppressor.state == ThinkSuppressor::FORCING_CLOSE) {
+            new_token = suppressor.get_forced_token();
+            llama_sampler_accept(sampler, new_token);
+        } else {
+            new_token = llama_sampler_sample(sampler, lc->ctx, -1);
+        }
+
+        if (llama_vocab_is_eog(vocab, new_token)) {
+            LOGD("nativeGenerateAgent: EOS after %d tokens", n_generated);
+            break;
+        }
+
+        if (suppress_thinking && suppressor.state != ThinkSuppressor::FORCING_CLOSE) {
+            suppressor.should_suppress(new_token);
+        }
+
+        const bool is_control = llama_vocab_is_control(vocab, new_token);
+
+        char piece_buf[512] = {};
+        int piece_len = llama_token_to_piece(
+                vocab, new_token, piece_buf, sizeof(piece_buf) - 1,
+                /*lstrip=*/0, /*special=*/is_control);
+        if (piece_len < 0) break;
+        piece_buf[piece_len] = '\0';
+
+        std::string piece = utf8_tail + std::string(piece_buf, piece_len);
+        utf8_tail.clear();
+        size_t tail_len = utf8_incomplete_tail(piece);
+        if (tail_len > 0) {
+            utf8_tail = piece.substr(piece.size() - tail_len);
+            piece.resize(piece.size() - tail_len);
+        }
+
+        // Accumulate raw text for tool-call parsing after generation
+        full_generated_text += piece;
+
+        // Stream to Kotlin via callback
+        if (is_control && !thinking_parser.should_consume_control_piece(piece)) {
+            // skip control tokens
+        } else {
+            auto parsed = thinking_parser.feed(piece);
+            if (!parsed.content.empty() || !parsed.thinking.empty()) {
+                jstring jContent  = env->NewStringUTF(parsed.content.c_str());
+                jstring jThinking = env->NewStringUTF(parsed.thinking.c_str());
+                env->CallVoidMethod(tokenCallback, onTokMid, jContent, jThinking);
+                env->DeleteLocalRef(jContent);
+                env->DeleteLocalRef(jThinking);
+            }
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            LOGE("nativeGenerateAgent: exception in callback; stopping");
+            break;
+        }
+
+        llama_batch next_batch = llama_batch_get_one(&new_token, 1);
+        if (llama_decode(lc->ctx, next_batch) != 0) {
+            LOGE("nativeGenerateAgent: decode failed at step %d", n_generated);
+            break;
+        }
+        n_generated++;
+    }
+
+    lc->tokens_per_sec = 0.0f; // will be set by Kotlin layer via elapsed time
+    llama_sampler_free(sampler);
+    llama_memory_clear(llama_get_memory(lc->ctx), true);
+
+    LOGI("nativeGenerateAgent: generated %d tokens, full_text_len=%zu",
+         n_generated, full_generated_text.size());
+
+    // ---- 8. Parse tool calls from generated text ----------------------------
+    common_chat_msg parsed_msg;
+    try {
+        common_chat_parser_params parser_params(cp);
+        parser_params.parse_tool_calls = true;
+        parser_params.parser.load(cp.parser);  // PEG grammar for tool-call extraction
+        parser_params.reasoning_format = cp.supports_thinking
+            ? COMMON_REASONING_FORMAT_DEEPSEEK : COMMON_REASONING_FORMAT_NONE;
+        parsed_msg = common_chat_parse(full_generated_text, /*is_partial=*/false, parser_params);
+    } catch (const std::exception& e) {
+        LOGW("nativeGenerateAgent: tool-call parse failed (%s), returning raw content", e.what());
+        parsed_msg.content = full_generated_text;
+    }
+
+    // ---- 9. Build result JSON -----------------------------------------------
+    json result = json::object();
+    result["content"] = parsed_msg.content;
+
+    json tc_array = json::array();
+    for (const auto& tc : parsed_msg.tool_calls) {
+        json call = json::object();
+        call["id"]   = tc.id;
+        call["name"] = tc.name;
+        // arguments is a JSON string — parse it into an object for the Kotlin side
+        try {
+            call["arguments"] = json::parse(tc.arguments);
+        } catch (...) {
+            call["arguments"] = json::object();
+        }
+        tc_array.push_back(call);
+    }
+    result["tool_calls"] = tc_array;
+
+    std::string result_str = result.dump();
+    LOGI("nativeGenerateAgent: result=%s", result_str.c_str());
+    return env->NewStringUTF(result_str.c_str());
 }

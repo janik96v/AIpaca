@@ -43,3 +43,6 @@ app/src/main/cpp/llama.cpp/*
 # Python virtual environments
 .venv/
 venv/
+
+# Claude Code scratch worktrees
+.claude/worktrees/

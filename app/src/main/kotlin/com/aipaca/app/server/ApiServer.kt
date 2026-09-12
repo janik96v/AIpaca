@@ -20,7 +20,6 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
@@ -66,9 +65,6 @@ object ApiServer {
     val requestCount = AtomicLong(0L)
 
     private var server: ApplicationEngine? = null
-
-    /** Mutex to ensure only one generate call runs at a time through the API. */
-    private val generateMutex = Mutex()
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -267,18 +263,27 @@ object ApiServer {
                 val completionId = "chatcmpl-${UUID.randomUUID()}"
                 val createdAt = System.currentTimeMillis() / 1000
 
+                val useOllama = engineState.useOllama.value
+
                 if (!request.stream) {
                     // ---- Non-streaming path ----------------------------------
                     val fullText = StringBuilder()
                     val thinkText = StringBuilder()
                     val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                         try {
-                            generateMutex.withLock {
-                                engineState.engine.generateChat(chatTurns, params).collect { chunk ->
+                            val generateBlock: suspend () -> Unit = {
+                                val flow = if (useOllama) {
+                                    engineState.ollamaEngine.generateChat(chatTurns, params)
+                                } else {
+                                    engineState.engine.generateChat(chatTurns, params)
+                                }
+                                flow.collect { chunk ->
                                     fullText.append(chunk.content)
                                     thinkText.append(chunk.thinking)
                                 }
                             }
+                            if (useOllama) generateBlock()
+                            else engineState.generateMutex.withLock { generateBlock() }
                             true
                         } catch (e: Exception) {
                             Log.e(TAG, "Generation error", e)
@@ -347,8 +352,13 @@ object ApiServer {
 
                         val acquired = withTimeoutOrNull(GENERATE_TIMEOUT_MS) {
                             try {
-                                generateMutex.withLock {
-                                    engineState.engine.generateChat(chatTurns, params).collect { generationChunk ->
+                                val generateBlock: suspend () -> Unit = {
+                                    val flow = if (useOllama) {
+                                        engineState.ollamaEngine.generateChat(chatTurns, params)
+                                    } else {
+                                        engineState.engine.generateChat(chatTurns, params)
+                                    }
+                                    flow.collect { generationChunk ->
                                         val output = if (request.includeThinking)
                                             generationChunk.thinking + generationChunk.content
                                         else
@@ -371,6 +381,8 @@ object ApiServer {
                                         }
                                     }
                                 }
+                                if (useOllama) generateBlock()
+                                else engineState.generateMutex.withLock { generateBlock() }
                                 true
                             } catch (e: Exception) {
                                 Log.e(TAG, "Streaming generation error", e)

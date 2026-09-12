@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -13,8 +14,8 @@ android {
         applicationId = "com.aipaca.app"
         minSdk = 28
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 5
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -151,7 +152,7 @@ dependencies {
     implementation(libs.ktor.serialization.kotlinx.json)
     implementation(libs.ktor.server.status.pages)
 
-    // Ktor client (e.g. Hugging Face model tree API)
+    // Ktor client (HF model tree API + MCP Streamable HTTP)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.cio)
     implementation(libs.ktor.client.content.negotiation)
@@ -169,6 +170,14 @@ dependencies {
 
     // PDF text extraction (API < 35 fallback)
     implementation(libs.pdfbox.android)
+
+    // WorkManager (idle-time memory consolidation loop)
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // Room (FTS5 cross-session recall)
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     // Debug
     debugImplementation(libs.androidx.compose.ui.tooling)

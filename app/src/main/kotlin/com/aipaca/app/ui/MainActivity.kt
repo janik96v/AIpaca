@@ -1,6 +1,7 @@
 package com.aipaca.app.ui
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,6 +25,7 @@ import androidx.navigation.compose.rememberNavController
 import com.aipaca.app.ui.chat.ChatScreen
 import com.aipaca.app.ui.components.AlpacaBottomNav
 import com.aipaca.app.ui.components.AlpacaTab
+import com.aipaca.app.ui.memory.MemoryScreen
 import com.aipaca.app.ui.models.ModelScreen
 import com.aipaca.app.ui.server.ServerScreen
 import com.aipaca.app.ui.theme.AIpacaTheme
@@ -34,6 +36,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             AIpacaTheme {
                 AIpacaApp()
@@ -83,6 +86,7 @@ private fun AIpacaApp() {
                 .background(AlpacaColors.Surface.Canvas)
         ) {
             composable(AlpacaTab.Chat.route)   { ChatScreen() }
+            composable(AlpacaTab.Memory.route) { MemoryScreen() }
             composable(AlpacaTab.Models.route) { ModelScreen() }
             composable(AlpacaTab.Server.route) { ServerScreen() }
         }
