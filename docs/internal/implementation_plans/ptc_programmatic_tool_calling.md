@@ -10,8 +10,8 @@ Hermes Agent does this via Python subprocess + Unix socket — impossible on And
 
 ### Research & References
 
-- Hermes Agent analysis: [docs/hermes_agent/hermes_erklaert.md](../../hermes_agent/hermes_erklaert.md)
-- PTC deep-dive: [docs/hermes_agent/progammatic_tool_calling_explained.html](../../hermes_agent/progammatic_tool_calling_explained.html)
+- Hermes Agent analysis: [docs/internal/reference/hermes_erklaert.md](../reference/hermes_erklaert.md)
+- PTC deep-dive: [docs/internal/reference/programmatic_tool_calling_explained.html](../reference/programmatic_tool_calling_explained.html)
 - CodeAct paper (ICML 2024): [arXiv:2402.01030](https://arxiv.org/abs/2402.01030) — LLMs are ~20% better at writing orchestration code than emitting JSON tool schemas
 - QuickJS-kt library: [dokar3/quickjs-kt](https://github.com/dokar3/quickjs-kt) (Maven: `io.github.dokar3:quickjs-kt:1.0.8`)
 

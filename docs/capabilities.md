@@ -12,7 +12,7 @@ AIpaca runs GGUF language models entirely on-device via llama.cpp, compiled as a
 - Load any GGUF model from device storage
 - GPU-accelerated inference via Adreno OpenCL with optimized kernels
 - Automatic GPU probing with CPU fallback (signal handler detects driver crashes)
-- Configurable context size (default 10240 tokens)
+- Architecture-aware, RAM-aware context window sizing — options and a recommendation are computed from the GGUF header and device memory, not a fixed default (see [Context Window Sizing](#context-window-sizing) below and [architecture.md](architecture.md#context-window-sizing))
 - Configurable thread count (default 6)
 - Full or partial GPU layer offload (`nGpuLayers = -1` for full offload)
 - Real-time tokens-per-second measurement
@@ -25,6 +25,15 @@ All other quantizations fall back to CPU silently. The app auto-detects GPU comp
 
 **Reasoning/thinking support:**
 Models with DeepSeek-style thinking tokens (e.g., `<think>...</think>`) are supported. Thinking content is streamed separately from visible content via the `TokenCallback.onToken(content, thinking)` interface, displayed in collapsible UI blocks.
+
+### Context Window Sizing
+
+`EngineState.computeContextConfig()` replaces a fixed default with options derived from the loaded GGUF's header (`nativeProbeGgufMeta` — a header-only read, no tensors loaded) and the device's total RAM:
+
+- **Recurrent/SSM architectures** (mamba, rwkv, jamba, falcon-h1, and similar): KV cost does not scale with context the way it does for transformers, so options go up to 262144 tokens, bounded by the model's trained context.
+- **Transformer architectures**: a RAM budget is computed as `total device RAM − estimated model weight − 3 GB reserve`, then converted to a max context length via the KV cache cost per token (`2 × n_layer × n_head_kv × d_head × bytes-per-element`). The result is clamped to the model's trained context length (`n_ctx_train`).
+
+The computed options and a recommended value are shown in a "Context Window" dialog on the Chat and Models tabs. Full formulas: [architecture.md § Context Window Sizing](architecture.md#context-window-sizing).
 
 ---
 
@@ -137,11 +146,15 @@ There is no agent mode toggle. What a turn is allowed to do follows from what th
 |---|---|---|---|
 | `PLAIN` | 0 | 1 | No tool-calling support, image attached, or context < 4096 |
 | `ASSISTED` | 3 | 2 | Context size 4096–8191 |
-| `DEEP` | 6 | 6 | Context >= 8192, or remote backend (Ollama) |
+| `DEEP` | 8 (12 on a remote backend) | 6 | Context >= 8192, or remote backend (Ollama) |
 
-Tools are selected in priority order: `memory`, `session_search`, `web_search` (if configured), `session_view`, `skill_view`, `skill_manage`. Lower tiers get only the highest-priority tools that fit their budget.
+The DEEP tool budget was raised from 6 to 8 for the `files` tool (issue #54) — the five local tools plus `files` plus web search no longer fit in six slots. Remote backends (Ollama) are not bound by the on-device context budget, so they get a wider 12-tool ceiling instead.
+
+Tools are selected in priority order: `memory`, `session_search`, `web_search` (if configured), `files`, `session_view`, `skill_view`, `skill_manage`. `files` is DEEP-only — its schema is too large to spend one of ASSISTED's three slots on. Lower tiers get only the highest-priority tools that fit their budget.
 
 The only user-facing choice is whether web search may send queries off-device (requires a Tavily API key).
+
+Malformed or hallucinated tool calls are tolerated up to a point: `TierPolicy.MALFORMED_CALLS_BEFORE_DEGRADE = 2` consecutive malformed calls in a turn triggers a graceful degrade rather than a crash or an infinite retry loop.
 
 ### Tool Calling
 
@@ -174,13 +187,16 @@ The agent has persistent memory across sessions, implemented as a set of plain-t
 **Memory files:**
 - `agent_soul.md` — persona, core identity, guiding principles (max ~1375 chars / ~500 tokens)
 - `agent_user.md` — user preferences, communication style, name (max ~1375 chars / ~500 tokens)
-- `agent_memory.md` — environment facts, project conventions, corrections, session index (max ~2200 chars / ~800 tokens)
+- `agent_memory.md` — environment facts, project conventions, corrections (max ~2200 chars / ~800 tokens)
+- `agent_sessions.md` — the session index (see [Session Index](#session-index) below); a separate file from `agent_memory.md`, with its own caps
 
 **How it works:**
 - Entries are separated by the `§` character (Hermes Agent convention)
 - When a file exceeds its character limit after an addition, oldest entries are trimmed (FIFO)
-- All three files are injected into the agent's system prompt at the start of each turn so the model has cross-session context
-- An `AntiPoisoning` guard rejects writes that contain transient errors or negative claims, preventing the model from permanently recording dead-end states
+- All memory files are injected into the agent's system prompt at the start of each turn so the model has cross-session context; each heading now names its backing file (e.g. `## Who You Are (memory/agent_soul.md)`) — see [The `files` Tool](#the-files-tool) below for why
+- An `AntiPoisoning` guard rejects writes to `agent_user.md` and `agent_memory.md` that contain transient errors or negative claims, preventing the model from permanently recording dead-end states. `agent_soul.md` is read-only for direct writes — see **Pending Proposals** below
+- **Undo:** `MemoryStore` keeps the last `MAX_BACKUPS = 5` versions of every file in `agent_memory/backup/`, not just one — the Memory screen's undo restores the most recent backup, but up to five generations are retained on disk
+- **Pending proposals:** a write to `agent_soul.md` is never applied directly. It is staged via `MemoryStore.writePending()` to `<file>.pending` (e.g. `agent_soul.md.pending`) and surfaces on the Memory screen for the user to approve (`applyPending()` — snapshots the current file, then applies) or reject (`discardPending()` — deletes the pending file). This is how both the learn pass and the `files` tool route soul changes through user review
 
 ### Skills
 
@@ -207,26 +223,32 @@ Up to 5 sessions are returned per query, capped at 6000 characters total.
 
 ### Session View
 
-The `session_view` tool lets the agent load a full past conversation by session ID (obtained from `session_search` results or the session index in `agent_memory.md`). It renders the conversation as head/tail messages: up to 8 messages from the start and 8 from the end, each capped at 400 characters, with a total output limit of 6000 characters. Each view bumps the session's access counter.
+The `session_view` tool lets the agent load a full past conversation by session ID (obtained from `session_search` results or the session index in `agent_sessions.md`). It renders the conversation as head/tail messages: up to 8 messages from the start and 8 from the end, each capped at 400 characters, with a total output limit of 6000 characters. Each view bumps the session's access counter.
 
 ### Session Index
 
-The `SessionIndexStore` maintains a one-line summary per finished conversation in `agent_memory.md`. After each conversation ends, `SessionSummarizer` generates a short summary and appends it to the index. The index is pruned against live session IDs in the Room database during consolidation.
+The `SessionIndexStore` maintains a one-line summary per finished conversation in its own file, `agent_sessions.md` (`filesDir/agent_memory/agent_sessions.md`) — a separate file from `agent_memory.md`, with its own caps: `MAX_NOTES = 30` (indexed sessions) and `MAX_INDEX_CHARS = 1500`. After each conversation ends, `SessionSummarizer` generates a short summary and appends it to the index. The index is pruned against live session IDs in the Room database during consolidation, and eviction keeps the 30 highest-scoring notes (recency + access count).
 
 ### LearnPass
 
-After each agent turn (once the user has their answer), a counter-triggered background pass examines a digest of the recent conversation and decides whether to extract skills or memory entries.
+After each agent turn (once the user has their answer), counter-triggered background passes examine a digest of the recent conversation and decide whether to extract memory facts or a skill. There are two separate passes with different cost profiles:
 
 **Trigger thresholds** (both default to 10):
-- Every 10 user turns → memory review
-- Every 10 tool iterations → skill review
+- Every 10 user turns → `LearnPass` memory review
+- Every 10 tool iterations → `SkillReviewPass` skill review
 - When both thresholds are hit simultaneously → combined review
 
-**How it works:**
-- Uses a restricted `ToolRegistry` with only `memory` and `skill_manage` (never calls external MCP tools)
-- Receives only the last 6-8 messages as a digest, not full history
-- Capped at 4 tool rounds and 512 output tokens — review is deliberately cheap
-- The current memory snapshot is injected into the review prompt so the model avoids writing duplicates
+**`LearnPass` (memory review):**
+- Plain completion, no tool calls — `engine.complete()` with `maxTokens = 256`, asking for line-structured text that is parsed deterministically (`MemoryExtraction`), not a tool-calling round
+- Works even on models with no tool-calling template at all, since it never drives the orchestrator
+- Receives the last `DIGEST_MESSAGES = 8` messages as a digest, not full history
+- The current memory snapshot is injected into the prompt so the model avoids writing duplicates
+
+**`SkillReviewPass` (skill review):**
+- Stays on the tool-calling path (`skill_manage` calls), because a skill body is multi-paragraph markdown — the shape line-structured parsing handles badly
+- Capped at `MAX_TOOL_ROUNDS = 4` tool rounds — a review is a lookup-and-write, not an investigation
+- Gated on `AgentTier.DEEP` — only runs for models that can actually call tools
+- Uses a restricted `ToolRegistry` with only `skill_manage` (never calls external MCP tools)
 
 ### Memory Maintenance (Consolidation)
 
@@ -245,25 +267,56 @@ An idle-time background worker (`MemoryMaintenanceWorker`) runs periodically to 
 
 A dedicated bottom-navigation tab (`Memory`) provides full visibility and control over the memory system:
 
-- **Four sub-tabs:** Soul, User, Memory, Sessions — one per memory file plus the session index
+- **Four sub-tabs:** Soul, User, Facts, Sessions — one per memory file plus the session index
 - **Editor:** view and edit memory file contents with save/revert
-- **Approval flow:** review and approve or reject pending proposals from the learn pass
-- **Undo:** restore the previous version of any memory file (one-level backup)
+- **Approval flow:** review and approve or reject pending proposals from the learn pass, or from a `files` write to `agent_soul.md`
+- **Undo:** restore a previous version of any memory file — up to `MAX_BACKUPS = 5` generations are kept per file
 - **Manual triggers:** "Update memory now" button to run extraction on demand, consolidation trigger
-- **Status display:** learning on/off toggle, current execution tier chip, consolidation status
+- **Status display:** learning on/off toggle, current execution tier chip (`tierLabel()`: "Plain chat" / "Assisted" / "Deep"), consolidation status. This tier chip lives only on the Memory tab — the Chat tab has no execution-tier indicator.
 
 ### Current Tools
 
 | Tool | Source | Description |
 |---|---|---|
-| `tavily_search` | MCP server | Search the web for current information (via Tavily) |
+| `web_search` | MCP server (Tavily) | Search the web for current information. The tier-policy slot name is `web_search`; the actual MCP tool name the model calls is `tavily_search` — the two names differ |
 | `memory` | Local | Add, replace, or remove entries in persistent memory files |
+| `files` | Local | Sandboxed list/read/write/append/edit/delete over memory/skills/workspace files (DEEP tier only) — see [The `files` Tool](#the-files-tool) below |
 | `skill_view` | Local | Load the full procedure of a named skill |
 | `skill_manage` | Local | Create, patch, or delete a skill |
 | `session_search` | Local | FTS5 full-text search over past conversation sessions |
 | `session_view` | Local | Load a full past conversation by session ID |
 
 The `ToolRegistry` aggregates tools from all MCP server connections and registered local tools into a single flat manifest.
+
+### The `files` Tool
+
+Before this tool existed, the agent's memory reached the model only as frozen prompt text, and the `memory` tool was write-only — asked directly about its own `agent_soul.md`, the agent would truthfully answer it had none. `files` gives the agent live read access to what it already writes.
+
+It is a single tool with an `action` discriminator rather than six separate tools, because tool-schema size is itself a binary enablement factor at small context budgets (`research/20_kurzbericht_edge_kontext.md`, Hebel C). It is DEEP-tier only — its schema is too large to spend one of ASSISTED's three tool slots on.
+
+**Actions and parameters:** `action` (required: `list`/`read`/`write`/`append`/`edit`/`delete`), `path` (required), `content` (write/append), `old_text` + `new_text` (edit).
+
+- **list** — directory listing renders as sorted `- name (N bytes)` for files and `- name/` for subdirectories; file target renders as `path (N bytes)`. Backup and pending entries are hidden from listings.
+- **read** — truncates at `MAX_READ_CHARS = 8000` with a `[...truncated]` marker; errors on directories.
+- **write / append** — append reads the existing content first, then concatenates.
+- **edit** — `replaceFirst(old_text, new_text)`; errors if `old_text` is not found.
+- **delete** — workspace root only; refuses to delete the workspace root itself; deletes recursively.
+
+**Three sandbox roots** (`AgentWorkspace`):
+
+| Root | Backing directory | Write behavior |
+|---|---|---|
+| `memory` | `filesDir/agent_memory` | `agent_user.md` and `agent_memory.md` are writable, routed through the `AntiPoisoning` filter; `agent_soul.md` is read-only for direct writes — a write stages a pending proposal instead |
+| `skills` | `filesDir/agent_skills` | Writable, unfiltered |
+| `workspace` | `filesDir/agent_workspace` | Writable, unfiltered scratch space |
+
+**Path resolution rejects, in order:** (1) empty path; (2) absolute paths (leading `/` or `\`, or containing `:`); (3) unknown root; (4) approval-gated artifacts — any path segment equal to `backup` or ending in `.pending`, because reading or writing these would route around user approval; (5) canonical-path escape — the target and the root are both canonicalized and the target must resolve under the root, which is what actually catches `..` traversal and symlinks (the raw string is never trusted, only the canonicalized comparison).
+
+**Caps:** `MAX_READ_CHARS = 8000`; `MAX_WRITE_CHARS = 32000` per file, checked against the merged (post-edit) content; `MAX_WORKSPACE_BYTES = 2 MiB` total under `workspace/`, projected before every write.
+
+**Write pipeline, in order:** (1) size cap against the merged content; (2) a write to `agent_soul.md` becomes `memoryStore.writePending(...)` and returns a non-error message explaining it is a proposal awaiting approval, never an overwrite; (3) writes to `agent_user.md`/`agent_memory.md` run `AntiPoisoning.isPoisoned()` against the caller-supplied fragment, not the merged file — so an `append` cannot smuggle disallowed content past a filter that only ever sees already-trusted text; (4) workspace quota projection; (5) `mkdirs()` + `writeText()`.
+
+The chat UI shows "Reading its own files" as the tool-call status string while `files` is active.
 
 ### Streaming UI
 
@@ -341,6 +394,11 @@ AIpaca uses SSH-style public key authentication:
 | Agent config (API keys, MCP URL) | EncryptedSharedPreferences (AES256-GCM) |
 | Authorized client keys | EncryptedSharedPreferences (AES256-GCM) |
 | TLS certificate | Android Keystore |
+| `filesDir/agent_memory` (soul, user, memory, sessions) | Plain, unencrypted |
+| `filesDir/agent_skills` | Plain, unencrypted |
+| `filesDir/agent_workspace` | Plain, unencrypted, and agent-writable — the sandbox scratch space the `files` tool writes to |
+
+The three `filesDir/agent_*` directories are not encrypted. This is a deliberate tradeoff (the content is model-extracted summaries, not raw user messages) but is security-relevant now that `agent_workspace` exists specifically for the agent to write to at will.
 
 ---
 
@@ -353,20 +411,21 @@ Built with Jetpack Compose and Material 3 (dark theme).
 - Input field with send button
 - Microphone button for speech-to-text
 - Image/PDF attachment picker
-- Modes overflow menu: System prompt, Thinking, and Ollama toggles
+- Modes overflow menu: System Prompt, Thinking (shown only when the model supports it), Web search, and Ollama
 - Ollama connection dialog (server URL + model name, test connectivity)
 - Collapsible thinking blocks for reasoning models
 - Drawer menu with conversation history and settings
-- Execution tier chip showing current capability level
+
+There is no execution-tier chip on the Chat tab. The tier label is shown only on the Memory tab (see below).
 
 ### Memory Tab
-- Four sub-tabs: Soul, User, Memory, Sessions
+- Four sub-tabs: Soul, User, Facts, Sessions
 - Inline editor for each memory file with save/revert
-- Pending proposal review (approve/reject learn pass output)
-- Undo last change (one-level backup restore)
+- Pending proposal review (approve/reject learn pass output, or a `files` write to `agent_soul.md`)
+- Undo last change (restores the most recent of up to 5 retained backups per file)
 - Manual extraction and consolidation triggers
 - Learning on/off toggle
-- Current tier and consolidation status display
+- Current tier chip ("Plain chat" / "Assisted" / "Deep") and consolidation status display
 
 ### Models Tab
 - Curated list of tested models with links to Hugging Face
@@ -401,7 +460,8 @@ Built with Jetpack Compose and Material 3 (dark theme).
 | `AuthorizedKeysStore` | EncryptedSharedPreferences | Paired client public keys |
 | `MemoryStore` | Plain files (filesDir/agent_memory/) | Agent cross-session memory (soul, user, memory) |
 | `SkillStore` | Plain files (filesDir/agent_skills/) | Agent learned skill procedures |
-| `SessionIndexStore` | Plain files (filesDir/agent_memory/) | One-line session summaries |
+| `SessionIndexStore` | Plain file (filesDir/agent_memory/agent_sessions.md) | One-line session summaries |
+| `AgentWorkspace` | Plain files (filesDir/agent_workspace/) | Agent scratch space, backing the `files` tool's `workspace` root |
 | `MessageDatabase` | Room SQLite + FTS5 | Indexed conversation messages for session_search |
 | `DownloadedModelStore` | SharedPreferences | Downloaded model tracking |
 

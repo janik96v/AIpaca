@@ -1,8 +1,7 @@
 # Issue #52 — Self-Learning Loop on Memory, `user.md` and `soul.md`
 
-> Status: **planning**. Baseline for this plan is branch `feature/agent-memory-skills`
-> (commit `8a0d4b7`), **not** `main` — the whole memory subsystem lives there and is
-> not yet merged / not yet in a PR.
+> Status: **SHIPPED** in `06b4976`. Baseline for this plan was branch `feature/agent-memory-skills`
+> (commit `8a0d4b7`); that branch has since merged. Kept for history.
 
 ## 1. What the issue asks for
 

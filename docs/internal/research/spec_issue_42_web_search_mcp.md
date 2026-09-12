@@ -1,5 +1,7 @@
 # Implementierungs-Spec — Issue #42: Web Search via MCP (Tavily)
 
+> **Status: IMPLEMENTED** in `a803ad7` (`HttpMcpClient.kt`, `TavilyMcp.kt`). Kept for history.
+
 Issue: #42 "Web Search capability through MCP servers" · Label: enhancement · State: open
 Rolle im Gesamtbild: **Brick 1 von #43** — erster echter End-to-End-Tool-Call in AIpaca.
 Grundlage: siehe `00_repo_analysis.md`.

@@ -1,5 +1,9 @@
 # AIpaca — Konsolidierte Implementation-Spec
 
+> **Status:** Parts A/B/C (App-Review, Agent-Mode-Bewertung, Agent-Mode-Neubau) are IMPLEMENTED.
+> Part D (KV-Prefix-Cache, Hebel F) is still PENDING — tracked in
+> [spec_kv_prefix_cache.md](spec_kv_prefix_cache.md). Kept for history.
+
 **Inhalt:** (A) vollständiger App-Review · (B) ehrliche Bewertung des bestehenden Agent-Mode ·
 (C) Agent-Mode-Neubau · (D) KV-Prefix-Cache (Hebel F) · (E) Roadmap, Risiken, Tests
 Stand: 2026-07-28 · Alle Code-Fundstellen aus dem echten Repo verifiziert

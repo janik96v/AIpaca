@@ -1,5 +1,12 @@
 # Implementierungs-Spec — Issue #43: On-Device Agent Mode ("mini-OpenClaw")
 
+> **Status: SUPERSEDED.** This spec plans a user-facing agent-mode toggle (`ui/agent/AgentScreen.kt`
+> or a chat-input toggle, see §"Agent-Modus/Tab bzw. Chat-Toggle" below). A chat-toggle version of
+> this was built in `433c3c2` and then deliberately removed in favour of capability-based execution
+> tiers — see the header comment in `AgentTier.kt` for why. No `ui/agent/` directory exists in the
+> current codebase. This is the last doc that still describes a user-facing agent toggle as the plan
+> of record; treat it as historical. Current behavior: `docs/capabilities.md` §5 (Agent Mode).
+
 Issue: #43 "[Feature] On-device agent mode — a native 'mini-OpenClaw' (agent loop + MCP client)"
 Label: enhancement · State: open
 Referenz-Architektur zum Spiegeln: OpenClaw (https://github.com/openclaw/openclaw · https://docs.openclaw.ai)

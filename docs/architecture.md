@@ -17,8 +17,8 @@ EngineState (process-scoped singleton)
          |-- OpenAI tool-calling (streamed deltas)      [OllamaEngine path]
          |-- ToolRegistry
          |   |-- MCP tools (HttpMcpClient, Streamable HTTP/SSE)
-         |   +-- Local tools (memory, skill_view, skill_manage, session_search)
-         |-- MemoryStore / SkillStore (filesystem, filesDir/agent_memory|skills)
+         |   +-- Local tools (memory, session_search, web_search, files, session_view, skill_view, skill_manage)
+         |-- MemoryStore / SkillStore / AgentWorkspace (filesystem, filesDir/agent_memory|agent_skills|agent_workspace)
          |-- MessageDatabase (Room + FTS5, session_search index)
          +-- LearnPass (counter-triggered post-turn review)
 
@@ -41,7 +41,7 @@ Open WebUI / OpenClaw / LangChain / curl
 app/src/main/
 |-- kotlin/com/aipaca/app/
 |   |-- AIpacaApp.kt                    # Application entry point
-|   |-- EngineState.kt                  # Process-scoped engine singleton
+|   |-- EngineState.kt                  # Process-scoped engine singleton (agentWorkspace, memoryStore, computeContextConfig)
 |   |-- agent/                          # Agent mode + MCP client
 |   |   |-- AgentOrchestrator.kt        # Think->tool->observe loop
 |   |   |-- AgentConfig.kt              # System prompt + persona
@@ -55,7 +55,9 @@ app/src/main/
 |   |   |   +-- McpModels.kt            # JSON-RPC 2.0 + MCP types
 |   |   |-- tool/
 |   |   |   |-- ToolRegistry.kt         # Aggregates MCP + local tools
-|   |   |   +-- TavilyMcp.kt            # Tavily web search integration
+|   |   |   |-- TavilyMcp.kt            # Tavily web search integration
+|   |   |   |-- FileTool.kt             # "files" tool: sandboxed list/read/write/append/edit/delete
+|   |   |   +-- AgentWorkspace.kt       # Sandbox roots for "files" (memory/skills/workspace)
 |   |   +-- memory/                     # Agent memory + skills + learning
 |   |       |-- MemoryStore.kt          # Filesystem-backed memory files (agent_soul.md, agent_user.md, agent_memory.md)
 |   |       |-- MemoryTool.kt           # "memory" tool: add/replace/remove memory entries
@@ -97,7 +99,7 @@ app/src/main/
 |   |   |-- chat/ChatScreen.kt          # Chat + streaming + agent steps
 |   |   |-- chat/ChatViewModel.kt       # Chat state management
 |   |   |-- chat/ThinkTagParser.kt      # Thinking token extraction
-|   |   |-- memory/MemoryScreen.kt      # Memory viewer/editor (4 tabs: Soul, User, Memory, Sessions)
+|   |   |-- memory/MemoryScreen.kt      # Memory viewer/editor (4 tabs: Soul, User, Facts, Sessions)
 |   |   |-- memory/MemoryViewModel.kt   # Memory state management
 |   |   |-- server/ServerScreen.kt      # Server dashboard + pairing
 |   |   |-- models/ModelScreen.kt       # Model library + quant guide
@@ -215,6 +217,41 @@ The native layer is built via CMake through the Android Gradle Plugin:
 | `nativeGetModelInfo` | GGUF metadata (name, size, quant type) |
 | `nativeGetChatTemplate` | Extract Jinja chat template from model |
 | `nativeProbeToolSupport` | Check if chat template supports tool calling |
+| `nativeProbeGgufMeta` | Header-only GGUF read (`no_alloc=true`) — architecture, `n_ctx_train`, param count, layer/head shape; feeds context-window sizing |
 | `nativeLoadMmproj` | Load multimodal projector GGUF |
 | `nativeUnloadMmproj` | Free mmproj resources |
 | `nativeIsMmprojLoaded` | Query mmproj state |
+
+### JNI Functions (whisper_jni.cpp)
+
+| Function | Purpose |
+|---|---|
+| `nativeLoadWhisperModel` | Load whisper model from path, GPU probe, `flash_attn` forced off |
+| `nativeProbeWhisperGpu` | Test GPU with signal handler on a 1s silent buffer |
+| `nativeReloadWhisperCpuOnly` | Free GPU context, reload last model path CPU-only |
+| `nativeTranscribe` | Transcribe float PCM (16kHz mono) to text |
+| `nativeGetLanguage` | Query detected language code |
+| `nativeFreeWhisperModel` | Free whisper context |
+
+---
+
+## Context Window Sizing
+
+`EngineState.computeContextConfig()` (`EngineState.kt:117-238`) derives selectable context sizes from the GGUF header and device RAM, instead of a fixed default.
+
+**1. Header probe** — `nativeProbeGgufMeta` reads the GGUF header only (`gguf_init_from_file` with `no_alloc=true`, no tensors loaded) and returns architecture, `n_ctx_train`, estimated param count, layer count, KV head count, and head dimension.
+
+**2. Recurrent/SSM branch** — if the architecture is a recurrent/SSM family (mamba, rwkv, jamba, falcon-h1, ssm, recurrent), KV cost does not scale with context length the way it does for transformers, so the option list goes up to `[16384, 32768, 65536, 131072, 262144]`, filtered to `<= n_ctx_train * 4` (train context floored at 8192).
+
+**3. Transformer branch** — computes a RAM budget for the KV cache:
+```
+availableForKvMb = totalDeviceRamMb - modelWeightMb - 3072 (reserve)   // floored at 512 MB
+kvBytesPerToken  = 2 * n_layer * n_head_kv * d_head * kvTypeBytes      // kvTypeBytes: 2 (f16, GPU) or 1 (q8_0, CPU)
+maxCtxFromRam    = (availableForKvMb * 1024 * 1024) / kvBytesPerToken
+maxSafe          = min(maxCtxFromRam, n_ctx_train) , floored at 2048
+```
+`modelWeightMb` is estimated from param count and quantization (bits-per-param table: Q4≈4.5, Q5≈5.5, Q6≈6.5, Q8≈8.0, F16≈16.0, ...). The offered options are `[4096, 8192, 16384, 32768, 65536, 131072]` filtered to `<= maxSafe`; the recommended option is the first one `>= 10240`, else the largest that fits.
+
+**4. Clamping** — both branches clamp the final option list to `n_ctx_train`, so the UI never offers a context size the model was not trained for.
+
+This is rendered as a "Context Window" dialog in `ChatScreen.kt` and `ModelScreen.kt`, showing the computed options with the recommended one marked.

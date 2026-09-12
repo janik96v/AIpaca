@@ -1,5 +1,8 @@
 # AIpaca — Repo-Analyse (Grundlage für Specs #42 & #43)
 
+> **Status: HISTORICAL SNAPSHOT**, dated 2026-07-09. The app has moved substantially since —
+> see [docs/capabilities.md](../../capabilities.md) for current state.
+
 Repo: https://github.com/janik96v/AIpaca
 Analysiert am: 2026-07-09 (flacher Klon `--depth 50`, unauthentifizierte GitHub REST API)
 Erstellt von: innovation-specialist (Kanban t_bb2b4001)

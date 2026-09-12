@@ -91,7 +91,9 @@ data class InitializeParams(
 @Serializable
 data class ClientInfo(
     val name: String = "AIpaca",
-    val version: String = "0.3.0"
+    // Reported to MCP servers during initialize. Keep in sync with versionName
+    // in app/build.gradle.kts.
+    val version: String = "0.5.0"
 )
 
 @Serializable

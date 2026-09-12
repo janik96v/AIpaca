@@ -1,5 +1,7 @@
 # Agent Memory & Skills System for AIpaca
 
+> **Status: IMPLEMENTED** (`6a0c2f8`, `06b4976`); superseded by [docs/capabilities.md](../../capabilities.md) §5. Kept for history.
+
 ## Context
 
 Hermes Agent feels "human" because it writes itself notes (MEMORY.md, USER.md) and reusable procedures (Skills) that persist across sessions. No training, no RL — pure filesystem + prompt engineering. This plan ports that pattern to on-device Android. Limits match Hermes defaults — even edge models increasingly support 32k-128k contexts, and Hermes's limits are already conservative by design (curated summaries, not logs).

@@ -23,9 +23,12 @@
 | Tavily web search | First MCP tool integration |
 | Ollama remote backend | Route generation through a local-network Ollama server (OllamaEngine) |
 | Tiered execution | Tool count and round budget derived from the model's probed capabilities — no agent toggle |
-| Agent memory | agent_soul.md / agent_user.md / agent_memory.md with a frozen-snapshot prompt layer |
+| Agent memory | agent_soul.md / agent_user.md / agent_memory.md / agent_sessions.md, injected into the prompt each turn as file-path-labeled sections, now complemented by live reads via the `files` tool (issue #54) |
 | Self-learning loop | Post-turn extraction, per-session summaries, idle-time consolidation (issue #52) |
 | Memory screen | Inspect, edit, approve and undo everything the loops write |
+| Sandboxed `files` tool | Agent can list/read/write/edit its own memory, skills, and a scratch workspace; DEEP tier only (issue #54) |
+| Context window sizing | Architecture-aware, RAM-aware context options derived from the GGUF header and device RAM |
+| HuggingFace download pipeline | Browse and download GGUF models from Hugging Face directly in-app |
 
 ---
 
@@ -81,7 +84,6 @@
 
 | Feature | Description |
 |---|---|
-| In-app model browser | Browse and download GGUF models from HuggingFace directly |
 | Multi-request queuing | Queue API requests when engine is busy |
 
 ### Medium-Term
@@ -95,9 +97,9 @@
 | Feature | Description |
 |---|---|
 | iOS port | SwiftUI frontend sharing the same llama.cpp/whisper.cpp core |
-| Encrypted memory files | Move `agent_memory/` behind `EncryptedFile`, matching conversation storage |
+| Encrypted memory files | Move `agent_memory/`, `agent_skills/`, and `agent_workspace/` behind `EncryptedFile`, matching conversation storage. Scope grew with issue #54 — `agent_workspace/` is agent-writable scratch space and is plaintext today, same as the other two |
 | Local embedding provider | On-device embedding model for semantic memory search |
-| Additional MCP tools | File system, calculator, calendar, and other local tool integrations |
+| Additional MCP tools | Calculator, calendar, and other local tool integrations. (File system access shipped as the local `files` tool, issue #54 — no longer on this list.) |
 
 ---
 

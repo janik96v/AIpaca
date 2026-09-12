@@ -12,9 +12,9 @@ AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. 
 
 ## Screenshots
 
-| Chat | Chat History | Memory | Models | Server |
-|:---:|:---:|:---:|:---:|:---:|
-| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Memory tab](docs/screenshots/memory_tab.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
+| Chat | Chat History | Models | Server |
+|:---:|:---:|:---:|:---:|
+| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
 
 ---
 
@@ -23,6 +23,7 @@ AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. 
 ### On-Device LLM Chat
 - Run any GGUF model locally via llama.cpp — no cloud, no subscription
 - GPU-accelerated inference on Qualcomm Adreno (OpenCL)
+- Architecture-aware, RAM-aware context window sizing — options and a recommendation computed from the GGUF header and device memory
 - Streaming token output with real-time display
 - Encrypted conversation history with multiple saved chats
 - Reasoning/thinking token support (DeepSeek-style models)
@@ -46,6 +47,7 @@ AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. 
 - MCP (Model Context Protocol) client over Streamable HTTP
 - Tavily web search integration
 - Persistent agent memory (soul, user, environment) with self-learning loop
+- Sandboxed `files` tool — the agent can list/read/write/edit its own memory, skills, and a scratch workspace (Deep tier only)
 - Skill system with progressive disclosure and background extraction
 - Cross-session recall via FTS5 full-text search
 - Streaming agent steps in the UI (thinking, tool calls, observations)
@@ -102,7 +104,10 @@ The in-app **Models tab** links directly to each model's Hugging Face page.
 | Gemma 4 E2B Instruct (unsloth) | ~2.5 GB | Q4_0 | Yes | Yes | Yes |
 | **Qwen 2.5 3B Instruct** (recommended) | ~1.9 GB | Q4_0 | Yes | No | Yes |
 | Qwen3 4B | ~2.6 GB | Q4_0 | Yes | Yes | Yes |
-| HY-MT 1.5 1.8B (translation) | ~440 MB | Q4_0 | TBD | No | TBD |
+| Qwen3.5 4B (unsloth) | ~2.7 GB | Q4_K_M | Yes | Yes | Yes |
+| HY-MT 1.5 1.8B (translation, experimental) | ~440 MB | TBD | TBD | No | TBD |
+
+The in-app **Models tab** also lists three Whisper speech-to-text models (Tiny/Base/Small).
 
 > **GPU compatibility:** AIpaca uses the Adreno OpenCL backend with optimized kernels. GPU-accelerated quantizations: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU automatically.
 
@@ -156,7 +161,8 @@ EngineState (process-scoped singleton)
     |-- WhisperEngine ---> whisper_jni.cpp --> whisper.cpp (GPU/CPU)
     |-- OllamaEngine ----> Ktor HTTP Client --> Ollama server (local network)
     +-- AgentOrchestrator --> MCP tools (Streamable HTTP)
-         |-- MemoryStore / SkillStore (filesystem)
+         |-- MemoryStore / SkillStore / AgentWorkspace (filesystem)
+         |-- files tool (sandboxed read/write over memory, skills, workspace)
          +-- LearnPass (background extraction)
 
 --- parallel ---
@@ -213,12 +219,14 @@ For full request/response examples, authentication details, and client code (Pyt
 - [x] Idle-time memory consolidation (WorkManager)
 - [x] Reasoning/thinking token support
 - [x] PDF text extraction
+- [x] In-app HuggingFace model browser and downloader
+- [x] Sandboxed `files` tool for agent self-inspection (Deep tier)
+- [x] Architecture-aware, RAM-aware context window sizing
 
 ### Planned
 
 - [ ] KV-cache prefix reuse across agent turns (PR2 Phase 1 — in-session)
 - [ ] Persistent KV-cache for system prompt (PR2 Phase 2)
-- [ ] In-app HuggingFace model browser
 - [ ] Multi-request queuing for API server
 - [ ] Programmatic tool calling (in-process JS sandbox)
 - [ ] iOS port (shared llama.cpp core + SwiftUI)
