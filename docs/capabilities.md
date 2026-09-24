@@ -408,10 +408,10 @@ Built with Jetpack Compose and Material 3 (dark theme).
 
 ### Chat Tab
 - Message list with streaming token display
-- Input field with send button
-- Microphone button for speech-to-text
+- Input field with a square send button (stop while generating)
+- Speech-to-text: with a Whisper model loaded and the input empty, the send button becomes a microphone; the sine line above the input runs at full amplitude while listening
 - Image/PDF attachment picker
-- Modes overflow menu: System Prompt, Thinking (shown only when the model supports it), Web search, and Ollama
+- Modes menu (sliders glyph at the bottom of the navigation rail, reachable from every screen): System Prompt, Thinking (shown only when the model supports it), Web search, and Ollama
 - Ollama connection dialog (server URL + model name, test connectivity)
 - Collapsible thinking blocks for reasoning models
 - History sheet with conversation history (from the rail's clock icon)

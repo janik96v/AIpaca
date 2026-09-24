@@ -13,7 +13,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
   chrome; Inter (bundled) and Phosphor Thin icons replace Roboto and Material icons; zero
   corner radius throughout. The bottom navigation is replaced by a collapsible left rail with
   a status line (`NO MODEL LOADED` / `READING QWEN3.GGUF HEADER` / `THINKING` /
-  `… · GPU · READY`), and chat history moves to a bottom sheet
+  `… · GPU · READY`), chat history moves to a bottom sheet, and the Modes menu moves to the
+  bottom of the rail
 - Models screen reorganised into what is on the phone (load / unload / delete) and a browse
   view (catalog with kind filters, RAM fit, inline download progress, quant guide)
 
