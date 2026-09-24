@@ -1,6 +1,5 @@
 package com.aipaca.app.ui.theme
 
-import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -117,25 +116,3 @@ object InkType {
     /** Composer placeholder: `MESSAGE`, `LOAD A MODEL FIRST`. */
     val Placeholder   = inter(13.sp, 1.6f, .22f)
 }
-
-// ---- M3 Typography mapping --------------------------------------------------
-// Material components that still render text (menus, snackbars, text fields)
-// read from here, so they pick up Inter and the Instrument scale by default.
-
-val Typography = Typography(
-    displayLarge   = InkType.ScreenTitle,
-    displayMedium  = InkType.ScreenTitle,
-    displaySmall   = InkType.ScreenTitle,
-    headlineLarge  = InkType.ScreenTitle,
-    headlineMedium = InkType.ScreenTitle,
-    headlineSmall  = InkType.EmptyTitle,
-    titleLarge     = InkType.EmptyTitle,
-    titleMedium    = InkType.SheetTitle,
-    titleSmall     = InkType.SheetTitle,
-    bodyLarge      = InkType.Body,
-    bodyMedium     = InkType.Body,
-    bodySmall      = InkType.Secondary,
-    labelLarge     = InkType.Button,
-    labelMedium    = InkType.Action,
-    labelSmall     = InkType.Label
-)

@@ -5,6 +5,7 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -67,6 +68,30 @@ private val InkScheme = darkColorScheme(
     scrim                = Ink.Scrim
 )
 
+// ---- M3 Typography mapping --------------------------------------------------
+// Material components that still render text (menus, snackbars, text fields)
+// read from here, so they pick up Inter and the Instrument scale by default.
+// Kept out of Typography.kt: a top-level val there that reads InkType would make
+// the two classes' static initialisers depend on each other.
+
+private val InkMaterialTypography = Typography(
+    displayLarge   = InkType.ScreenTitle,
+    displayMedium  = InkType.ScreenTitle,
+    displaySmall   = InkType.ScreenTitle,
+    headlineLarge  = InkType.ScreenTitle,
+    headlineMedium = InkType.ScreenTitle,
+    headlineSmall  = InkType.EmptyTitle,
+    titleLarge     = InkType.EmptyTitle,
+    titleMedium    = InkType.SheetTitle,
+    titleSmall     = InkType.SheetTitle,
+    bodyLarge      = InkType.Body,
+    bodyMedium     = InkType.Body,
+    bodySmall      = InkType.Secondary,
+    labelLarge     = InkType.Button,
+    labelMedium    = InkType.Action,
+    labelSmall     = InkType.Label
+)
+
 /** Zero corner radius everywhere. */
 private val SquareShapes = Shapes(
     extraSmall = RoundedCornerShape(0.dp),
@@ -97,7 +122,7 @@ fun AIpacaTheme(
 
     MaterialTheme(
         colorScheme = InkScheme,
-        typography  = Typography,
+        typography  = InkMaterialTypography,
         shapes      = SquareShapes
     ) {
         // Inside MaterialTheme, which installs a ripple of its own.

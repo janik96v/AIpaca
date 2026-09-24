@@ -68,7 +68,12 @@ fun ChatEmptyState(
                         size      = WorldSize
                     )
                 },
-                readout = { HeaderReadout(presence.worldHeader) },
+                readout = {
+                    HeaderReadout(
+                        header   = presence.worldHeader,
+                        idleText = if (presence.remote) "Remote model · no header read" else "No header read · idle"
+                    )
+                },
                 copy = {
                     CopyBlock(
                         presence     = presence,
