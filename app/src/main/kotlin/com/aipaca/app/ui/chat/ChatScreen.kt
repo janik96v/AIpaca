@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.aipaca.app.EngineState
-import com.aipaca.app.data.OllamaPrefs
 import com.aipaca.app.ui.components.InkSnackbarHost
 import com.aipaca.app.ui.components.world.WorldMotion
 import com.aipaca.app.ui.shell.ModelPresence
@@ -61,21 +60,15 @@ fun ChatScreen(
     chatViewModel: ChatViewModel = viewModel()
 ) {
     val messages        by chatViewModel.messages.collectAsState()
-    val systemPrompt    by chatViewModel.systemPrompt.collectAsState()
     val isGenerating    by chatViewModel.isGenerating.collectAsState()
-    val thinkingEnabled by chatViewModel.thinkingEnabled.collectAsState()
-    val modelInfo       by EngineState.modelInfo.collectAsState()
     val contextSize     by EngineState.contextSize.collectAsState()
     val isMmprojLoaded  by EngineState.isMmprojLoaded.collectAsState()
     val whisperPath     by EngineState.whisperModelPath.collectAsState()
-    val ollamaActive    by EngineState.useOllama.collectAsState()
-    val ollamaModelName by EngineState.ollamaModelName.collectAsState()
 
     val isRecording         by chatViewModel.isRecording.collectAsState()
     val isTranscribing      by chatViewModel.isTranscribing.collectAsState()
     val transcriptionResult by chatViewModel.transcriptionResult.collectAsState()
     val transcriptionError  by chatViewModel.transcriptionError.collectAsState()
-    val webSearchConfigured by chatViewModel.webSearchConfigured.collectAsState()
 
     // Reserve 25% of context for generation output; ~4 chars per token.
     val docCharLimit = ((contextSize * 0.75) * 4).toInt().coerceAtLeast(2_000)
@@ -87,9 +80,6 @@ fun ChatScreen(
     val context       = LocalContext.current
 
     var inputText              by remember { mutableStateOf("") }
-    var showSystemPromptDialog by remember { mutableStateOf(false) }
-    var showWebSearchDialog    by remember { mutableStateOf(false) }
-    var showOllamaDialog       by remember { mutableStateOf(false) }
 
     var selectedImageUri     by remember { mutableStateOf<Uri?>(null) }
     var selectedDocumentName by remember { mutableStateOf<String?>(null) }
@@ -217,18 +207,6 @@ fun ChatScreen(
                 attachedImage      = selectedImageUri,
                 attachedDocument   = selectedDocumentName,
                 canAttachImage     = isMmprojLoaded && presence.chatReady,
-                modes              = ComposerModes(
-                    systemPromptSet  = systemPrompt.isNotBlank(),
-                    supportsThinking = modelInfo.supportsThinking,
-                    thinkingEnabled  = thinkingEnabled,
-                    webSearchOn      = webSearchConfigured,
-                    ollamaActive     = ollamaActive,
-                    ollamaModelName  = ollamaModelName
-                ),
-                onSystemPrompt     = { showSystemPromptDialog = true },
-                onToggleThinking   = { chatViewModel.toggleThinking() },
-                onWebSearch        = { showWebSearchDialog = true },
-                onOllama           = { showOllamaDialog = true },
                 onAttachImage      = {
                     imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
@@ -250,55 +228,6 @@ fun ChatScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(bottom = 96.dp)
-        )
-    }
-
-    if (showSystemPromptDialog) {
-        SystemPromptDialog(
-            initialValue = systemPrompt,
-            onSave       = { chatViewModel.updateSystemPrompt(it); showSystemPromptDialog = false },
-            onClear      = { chatViewModel.updateSystemPrompt(""); showSystemPromptDialog = false },
-            onDismiss    = { showSystemPromptDialog = false }
-        )
-    }
-
-    if (showWebSearchDialog) {
-        WebSearchKeyDialog(
-            hasExistingKey = !chatViewModel.agentPrefs.getTavilyApiKey().isNullOrBlank(),
-            onSave = { key ->
-                chatViewModel.agentPrefs.saveTavilyApiKey(key)
-                chatViewModel.agentPrefs.setWebSearchEnabled(true)
-                chatViewModel.refreshWebSearchConfigured()
-                showWebSearchDialog = false
-            },
-            onContinue = {
-                chatViewModel.refreshWebSearchConfigured()
-                showWebSearchDialog = false
-            },
-            onClear = {
-                chatViewModel.agentPrefs.clearTavilyApiKey()
-                chatViewModel.agentPrefs.setWebSearchEnabled(false)
-                chatViewModel.refreshWebSearchConfigured()
-                // Stays open so a new key can be entered.
-            },
-            onDismiss = { showWebSearchDialog = false }
-        )
-    }
-
-    if (showOllamaDialog) {
-        OllamaConnectionDialog(
-            isConnected  = ollamaActive,
-            currentUrl   = OllamaPrefs.getServerUrl(context),
-            currentModel = OllamaPrefs.getModelName(context),
-            onConnect    = { url, model ->
-                EngineState.enableOllama(url, model)
-                showOllamaDialog = false
-            },
-            onDisconnect = {
-                EngineState.disableOllama()
-                showOllamaDialog = false
-            },
-            onDismiss    = { showOllamaDialog = false }
         )
     }
 }

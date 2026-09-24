@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -45,6 +46,10 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.aipaca.app.ui.chat.ChatScreen
 import com.aipaca.app.ui.chat.ChatViewModel
+import com.aipaca.app.ui.chat.ModeDialog
+import com.aipaca.app.ui.chat.ModeDialogs
+import com.aipaca.app.ui.chat.ModesButton
+import com.aipaca.app.ui.chat.rememberComposerModes
 import com.aipaca.app.ui.components.hairlineStart
 import com.aipaca.app.ui.components.world.WorldMotion
 import com.aipaca.app.ui.memory.MemoryScreen
@@ -95,6 +100,22 @@ private fun AIpacaApp() {
     // loaded from Models unfolds when you come back.
     val worldMotion = remember { WorldMotion() }
 
+    // Session modes (system prompt, thinking, web search, Ollama) live at the
+    // bottom of the rail, so they are reachable from every screen.
+    val modes = rememberComposerModes(chatViewModel)
+    var modeDialog by rememberSaveable { mutableStateOf<ModeDialog?>(null) }
+    val modesButton: @Composable (Dp, Dp) -> Unit = { iconSize, touch ->
+        ModesButton(
+            modes            = modes,
+            onSystemPrompt   = { modeDialog = ModeDialog.SystemPrompt },
+            onToggleThinking = { chatViewModel.toggleThinking() },
+            onWebSearch      = { modeDialog = ModeDialog.WebSearch },
+            onOllama         = { modeDialog = ModeDialog.Ollama },
+            iconSize         = iconSize,
+            touch            = touch
+        )
+    }
+
     var railHidden  by rememberSaveable { mutableStateOf(false) }
     var historyOpen by rememberSaveable { mutableStateOf(false) }
 
@@ -125,6 +146,7 @@ private fun AIpacaApp() {
                     onSelect   = ::navigate,
                     onCollapse = { railHidden = true },
                     onHistory  = { historyOpen = true },
+                    modes      = modesButton,
                     modifier   = Modifier.windowInsetsPadding(
                         WindowInsets.systemBars.union(WindowInsets.displayCutout)
                             .only(WindowInsetsSides.Vertical + WindowInsetsSides.Start)
@@ -151,7 +173,8 @@ private fun AIpacaApp() {
                         text          = presence.statusLine,
                         railCollapsed = railHidden,
                         onExpandRail  = { railHidden = false },
-                        onHistory     = { historyOpen = true }
+                        onHistory     = { historyOpen = true },
+                        modes         = modesButton
                     )
                     NavHost(
                         navController      = navController,
@@ -201,4 +224,6 @@ private fun AIpacaApp() {
             }
         }
     }
+
+    ModeDialogs(open = modeDialog, chat = chatViewModel, onDismiss = { modeDialog = null })
 }

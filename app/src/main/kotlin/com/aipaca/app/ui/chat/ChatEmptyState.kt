@@ -166,7 +166,7 @@ private fun CopyBlock(
                     },
                     style    = InkType.Body,
                     color    = Ink.Body,
-                    modifier = Modifier.widthIn(max = 252.dp)
+                    modifier = Modifier.widthIn(max = 260.dp)   // 32ch
                 )
                 FlowRow(
                     modifier              = Modifier.padding(top = 2.dp),
@@ -184,7 +184,7 @@ private fun CopyBlock(
                     text     = "Header read. The weights are loading — the model unfolds when it is ready.",
                     style    = InkType.Body,
                     color    = Ink.Body,
-                    modifier = Modifier.widthIn(max = 268.dp)
+                    modifier = Modifier.widthIn(max = 276.dp)   // 34ch
                 )
             }
             else -> {
@@ -197,7 +197,7 @@ private fun CopyBlock(
                         "one ring per block, one point per KV head.",
                     style    = InkType.Body,
                     color    = Ink.Body,
-                    modifier = Modifier.widthIn(max = 268.dp)
+                    modifier = Modifier.widthIn(max = 276.dp)   // 34ch
                 )
                 OutlineButton(
                     label    = "Open models",

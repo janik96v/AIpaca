@@ -18,6 +18,21 @@ class MemoryLinesTest {
     }
 
     @Test
+    fun `entries sharing a date keep file order`() {
+        val content = "2026-09-13 | I run on this phone.\n§ 2026-09-13 | I answer concisely.\n§ 2026-09-01 | Older."
+        assertEquals(
+            listOf("I run on this phone.", "I answer concisely.", "Older."),
+            memoryLines(content, sessions = false).map { it.text }
+        )
+    }
+
+    @Test
+    fun `undated entries sort after dated ones`() {
+        val content = "Legacy line\n§ 2026-09-13 | Dated line"
+        assertEquals(listOf("Dated line", "Legacy line"), memoryLines(content, sessions = false).map { it.text })
+    }
+
+    @Test
     fun `legacy undated entries keep their text without a stamp`() {
         assertEquals(listOf(MemoryLine("", "I run on this phone.")), memoryLines("I run on this phone.", sessions = false))
     }

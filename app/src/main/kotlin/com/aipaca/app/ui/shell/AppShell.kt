@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
@@ -32,6 +33,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.aipaca.app.EngineState
 import com.aipaca.app.engine.ModelHeader
@@ -153,6 +155,7 @@ fun rememberModelPresence(chat: ChatViewModel): ModelPresence {
 /**
  * Left rail, 66dp. The 3×3 mark with a caret collapses it; items are icon over
  * a tracked label, the active one white with a 1×16dp bar on the left edge.
+ * At the bottom: session modes and chat history.
  */
 @Composable
 fun Rail(
@@ -160,7 +163,8 @@ fun Rail(
     onSelect: (Screen) -> Unit,
     onCollapse: () -> Unit,
     onHistory: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    modes: @Composable (iconSize: Dp, touch: Dp) -> Unit = { _, _ -> }
 ) {
     Column(
         modifier            = modifier
@@ -187,6 +191,7 @@ fun Rail(
         }
 
         Spacer(Modifier.weight(1f))
+        modes(18.dp, 44.dp)
         IconAction(
             icon               = Ph.ClockCounterClockwise,
             contentDescription = "Chat history",
@@ -231,7 +236,8 @@ private fun RailItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
 
 /**
  * Top line of the content column: a 4dp square and the model state. With the
- * rail collapsed it also carries the rail handle (left) and history (right).
+ * rail collapsed it also carries the rail handle (left) and the rail's bottom
+ * actions — modes and history — on the right.
  */
 @Composable
 fun StatusLine(
@@ -239,7 +245,8 @@ fun StatusLine(
     railCollapsed: Boolean,
     onExpandRail: () -> Unit,
     onHistory: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    modes: @Composable (iconSize: Dp, touch: Dp) -> Unit = { _, _ -> }
 ) {
     Row(
         modifier              = modifier
@@ -271,14 +278,22 @@ fun StatusLine(
             modifier = Modifier.weight(1f)
         )
         if (railCollapsed) {
-            IconAction(
-                icon               = Ph.ClockCounterClockwise,
-                contentDescription = "Chat history",
-                onClick            = onHistory,
-                size               = 16.dp,
-                tint               = Ink.Micro,
-                touch              = 32.dp
-            )
+            // Touch targets keep 32dp but must not make the line taller than its
+            // text, or content would shift when the rail is toggled.
+            Row(
+                modifier          = Modifier.height(14.dp).wrapContentHeight(unbounded = true),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                modes(16.dp, 32.dp)
+                IconAction(
+                    icon               = Ph.ClockCounterClockwise,
+                    contentDescription = "Chat history",
+                    onClick            = onHistory,
+                    size               = 16.dp,
+                    tint               = Ink.Micro,
+                    touch              = 32.dp
+                )
+            }
         }
     }
 }

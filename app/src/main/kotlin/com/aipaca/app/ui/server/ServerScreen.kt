@@ -127,7 +127,7 @@ fun ServerScreen(
             },
             style    = InkType.Body,
             color    = Ink.Meta,
-            modifier = Modifier.widthIn(max = 268.dp)
+            modifier = Modifier.widthIn(max = 276.dp)   // 34ch
         )
 
         if (isRunning && url != null) {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -37,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.aipaca.app.ui.components.IconAction
@@ -50,7 +52,7 @@ import com.aipaca.app.ui.theme.Ph
 import kotlin.math.PI
 import kotlin.math.sin
 
-/** Session switches reachable from the composer's modes menu. */
+/** Session switches reachable from the modes menu at the bottom of the rail. */
 @Immutable
 data class ComposerModes(
     val systemPromptSet: Boolean,
@@ -64,7 +66,7 @@ data class ComposerModes(
 }
 
 /**
- * The composer: a live sine line over a row of modes · attach · input · action.
+ * The composer: a live sine line over a row of attach · input · action.
  *
  * The square action is send (arrow), stop while the model streams or the mic
  * records, and the microphone when the input is empty and a Whisper model is
@@ -82,11 +84,6 @@ fun Composer(
     attachedImage: Uri?,
     attachedDocument: String?,
     canAttachImage: Boolean,
-    modes: ComposerModes,
-    onSystemPrompt: () -> Unit,
-    onToggleThinking: () -> Unit,
-    onWebSearch: () -> Unit,
-    onOllama: () -> Unit,
     onAttachImage: () -> Unit,
     onAttachDocument: () -> Unit,
     onClearAttachment: () -> Unit,
@@ -112,7 +109,6 @@ fun Composer(
             verticalAlignment     = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            ModesButton(modes, onSystemPrompt, onToggleThinking, onWebSearch, onOllama)
             AttachButton(
                 enabled          = chatReady && !isGenerating,
                 canAttachImage   = canAttachImage,
@@ -200,24 +196,29 @@ private fun SquareButton(action: SquareAction, enabled: Boolean, onClick: () -> 
     }
 }
 
-/** Session switches: system prompt, thinking, web search, Ollama. */
+/**
+ * Session switches — system prompt, thinking, web search, Ollama — as a glyph
+ * for the rail; white while any of them is on.
+ */
 @Composable
-private fun ModesButton(
+fun ModesButton(
     modes: ComposerModes,
     onSystemPrompt: () -> Unit,
     onToggleThinking: () -> Unit,
     onWebSearch: () -> Unit,
-    onOllama: () -> Unit
+    onOllama: () -> Unit,
+    iconSize: Dp = 18.dp,
+    touch: Dp = 44.dp
 ) {
     var open by remember { mutableStateOf(false) }
-    Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
+    Box {
         IconAction(
             icon               = Ph.SlidersHorizontal,
             contentDescription = "Modes",
             onClick            = { open = true },
-            size               = 19.dp,
-            tint               = if (modes.anyActive) Ink.White else Ink.TertiaryIcon,
-            touch              = 32.dp
+            size               = iconSize,
+            tint               = if (modes.anyActive) Ink.White else Ink.Micro,
+            touch              = touch
         )
         InkMenu(expanded = open, onDismissRequest = { open = false }) {
             InkMenuItem(
@@ -267,6 +268,7 @@ private fun AttachButton(
     var open by remember { mutableStateOf(false) }
     Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
         IconAction(
+            modifier           = Modifier.width(28.dp),
             icon               = Ph.Paperclip,
             contentDescription = "Attach",
             onClick            = {

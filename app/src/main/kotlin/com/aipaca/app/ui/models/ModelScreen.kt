@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -404,7 +405,9 @@ private fun InstalledRow(
             onClick            = onDelete,
             size               = 16.dp,
             tint               = Ink.DisabledIcon,
-            touch              = 36.dp
+            touch              = 40.dp,
+            // As narrow as the design's glyph so the name column keeps its width.
+            modifier           = Modifier.width(24.dp)
         )
     }
 }

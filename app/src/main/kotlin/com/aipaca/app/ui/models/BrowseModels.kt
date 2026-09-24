@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -106,6 +108,9 @@ fun BrowseModels(
         ) {
             Row(
                 modifier = Modifier
+                    // Measured as the 14dp line of the design; the 26dp touch area overflows it.
+                    .height(14.dp)
+                    .wrapContentHeight(unbounded = true)
                     .clickable(onClickLabel = "Back to models", role = Role.Button, onClick = onBack)
                     .padding(vertical = 6.dp),
                 verticalAlignment     = Alignment.CenterVertically,

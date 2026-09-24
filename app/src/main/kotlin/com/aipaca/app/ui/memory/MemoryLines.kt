@@ -9,11 +9,13 @@ import java.util.Locale
 data class MemoryLine(val stamp: String, val text: String)
 
 /**
- * Turns a memory file into display lines, newest first. Session-index entries
- * read as `title — summary`; malformed lines are skipped rather than shown raw.
+ * Turns a memory file into display lines, newest date first; entries sharing a
+ * date keep their order in the file (the soul reads as it was written).
+ * Session-index entries read as `title — summary`; malformed lines are skipped
+ * rather than shown raw.
  */
 fun memoryLines(content: String, sessions: Boolean): List<MemoryLine> =
-    MemoryFormat.parse(content).mapNotNull { entry ->
+    MemoryFormat.parse(content).sortedByDescending { it.date }.mapNotNull { entry ->
         val text = if (sessions) {
             SessionIndexStore.decode(entry.date, entry.text)?.let { note ->
                 listOf(note.title, note.summary).filter { it.isNotBlank() }.joinToString(" — ")
@@ -22,7 +24,7 @@ fun memoryLines(content: String, sessions: Boolean): List<MemoryLine> =
             entry.text
         }
         text?.takeIf { it.isNotBlank() }?.let { MemoryLine(stampFor(entry.date), it) }
-    }.asReversed()
+    }
 
 /** `2026-09-13` → `13 Sep`; undated entries get no stamp. */
 fun stampFor(isoDate: String): String {
