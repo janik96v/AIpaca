@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -65,6 +66,7 @@ data class DownloadRequest(val repoId: String, val modelType: ModelType, val fil
  * Models: what is on this phone (load, unload, delete), and — one level in —
  * the catalog and Hugging Face search to get more.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelScreen(modifier: Modifier = Modifier) {
     val scope    = rememberCoroutineScope()

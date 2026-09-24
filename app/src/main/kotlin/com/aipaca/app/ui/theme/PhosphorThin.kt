@@ -9,7 +9,7 @@ import androidx.compose.ui.unit.dp
 /**
  * Phosphor Icons, **Thin** weight — the only icon set the Instrument design uses.
  *
- * Generated from `@phosphor-icons/core` 2.1.1 (`assets/thin/*.svg`, MIT licence,
+ * Generated from `@phosphor-icons/core` 2.1.1 (the `assets/thin` SVGs, MIT licence,
  * see NOTICE). Each glyph is a single filled path on a 256×256 grid, so the icon
  * scales like the web font it was designed as: size the icon to the design's
  * `font-size` in dp and tint it with the text colour.
