@@ -1,68 +1,79 @@
 package com.aipaca.app.ui.theme
 
 import android.app.Activity
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
+import com.aipaca.app.ui.components.PressFill
 
 /**
- * AIpaca Editorial Retro — main theme entry point.
+ * Instrument — theme entry point.
  *
- * Dark-first (Editorial direction); light mode comes in a later pass.
+ * Minimal-futurist register: true black, white hairlines, tracked uppercase
+ * chrome. Dark only; the design has no light variant.
  */
 
-private val AlpacaDarkScheme = darkColorScheme(
-    // --- Primary (terracotta accent) ----------------------------------------
-    primary            = AlpacaColors.Accent.Primary,
-    onPrimary          = AlpacaColors.Text.OnAccent,
-    primaryContainer   = AlpacaColors.Accent.Soft,
-    onPrimaryContainer = AlpacaColors.Accent.Primary,
+private val InkScheme = darkColorScheme(
+    primary              = Ink.White,
+    onPrimary            = Ink.Black,
+    primaryContainer     = Ink.Sheet,
+    onPrimaryContainer   = Ink.Text,
 
-    // --- Secondary (kept neutral — Editorial uses one accent) ---------------
-    secondary            = AlpacaColors.Text.Primary,
-    onSecondary          = AlpacaColors.Surface.Canvas,
-    secondaryContainer   = AlpacaColors.Surface.Elevated,
-    onSecondaryContainer = AlpacaColors.Text.Body,
+    secondary            = Ink.Text,
+    onSecondary          = Ink.Black,
+    secondaryContainer   = Ink.Sheet,
+    onSecondaryContainer = Ink.Text,
 
-    // --- Tertiary (semantic info) -------------------------------------------
-    tertiary            = AlpacaColors.State.Info,
-    onTertiary          = AlpacaColors.Surface.Canvas,
-    tertiaryContainer   = AlpacaColors.Surface.Elevated,
-    onTertiaryContainer = AlpacaColors.State.Info,
+    tertiary             = Ink.Meta,
+    onTertiary           = Ink.Black,
+    tertiaryContainer    = Ink.Sheet,
+    onTertiaryContainer  = Ink.Text,
 
-    // --- Backgrounds & surfaces --------------------------------------------
-    background        = AlpacaColors.Surface.Canvas,
-    onBackground      = AlpacaColors.Text.Primary,
+    background           = Ink.Black,
+    onBackground         = Ink.Text,
 
-    surface           = AlpacaColors.Surface.Canvas,
-    onSurface         = AlpacaColors.Text.Primary,
-    surfaceVariant    = AlpacaColors.Surface.Elevated,
-    onSurfaceVariant  = AlpacaColors.Text.Muted,
-    surfaceContainer  = AlpacaColors.Surface.Elevated,
-    surfaceContainerHigh    = AlpacaColors.Surface.Card,
-    surfaceContainerHighest = AlpacaColors.Surface.Card,
-    surfaceContainerLow     = AlpacaColors.Surface.Canvas,
-    surfaceContainerLowest  = AlpacaColors.Surface.Recess,
+    surface                 = Ink.Black,
+    onSurface               = Ink.Text,
+    surfaceVariant          = Ink.Sheet,
+    onSurfaceVariant        = Ink.Meta,
+    surfaceTint             = Ink.Black,
+    surfaceContainer        = Ink.Sheet,
+    surfaceContainerHigh    = Ink.Sheet,
+    surfaceContainerHighest = Ink.Sheet,
+    surfaceContainerLow     = Ink.Black,
+    surfaceContainerLowest  = Ink.Black,
 
-    // --- Lines & outlines ---------------------------------------------------
-    outline         = AlpacaColors.Line.Hairline,
-    outlineVariant  = AlpacaColors.Line.Subtle,
+    outline              = Ink.Border,
+    outlineVariant       = Ink.Divider,
 
-    // --- Errors -------------------------------------------------------------
-    error              = AlpacaColors.State.Error,
-    onError            = AlpacaColors.Surface.Canvas,
-    errorContainer     = AlpacaColors.Surface.Elevated,
-    onErrorContainer   = AlpacaColors.State.Error,
+    // No colour for errors: severity is carried by copy, not hue.
+    error                = Ink.White,
+    onError              = Ink.Black,
+    errorContainer       = Ink.Sheet,
+    onErrorContainer     = Ink.Text,
 
-    // --- Inverse + scrim ----------------------------------------------------
-    inverseSurface     = AlpacaColors.Text.Primary,
-    inverseOnSurface   = AlpacaColors.Surface.Canvas,
-    inversePrimary     = AlpacaColors.Accent.Muted,
-    scrim              = AlpacaColors.Surface.Canvas
+    inverseSurface       = Ink.Text,
+    inverseOnSurface     = Ink.Black,
+    inversePrimary       = Ink.Meta,
+    scrim                = Ink.Scrim
+)
+
+/** Zero corner radius everywhere. */
+private val SquareShapes = Shapes(
+    extraSmall = RoundedCornerShape(0.dp),
+    small      = RoundedCornerShape(0.dp),
+    medium     = RoundedCornerShape(0.dp),
+    large      = RoundedCornerShape(0.dp),
+    extraLarge = RoundedCornerShape(0.dp)
 )
 
 @Composable
@@ -74,9 +85,9 @@ fun AIpacaTheme(
         SideEffect {
             val window = (view.context as Activity).window
             @Suppress("DEPRECATION")
-            window.statusBarColor     = AlpacaColors.Surface.Canvas.toArgb()
+            window.statusBarColor     = Ink.Black.toArgb()
             @Suppress("DEPRECATION")
-            window.navigationBarColor = AlpacaColors.Surface.Canvas.toArgb()
+            window.navigationBarColor = Ink.Black.toArgb()
             WindowCompat.getInsetsController(window, view).apply {
                 isAppearanceLightStatusBars     = false
                 isAppearanceLightNavigationBars = false
@@ -85,8 +96,11 @@ fun AIpacaTheme(
     }
 
     MaterialTheme(
-        colorScheme = AlpacaDarkScheme,
+        colorScheme = InkScheme,
         typography  = Typography,
-        content     = content
-    )
+        shapes      = SquareShapes
+    ) {
+        // Inside MaterialTheme, which installs a ripple of its own.
+        CompositionLocalProvider(LocalIndication provides PressFill, content = content)
+    }
 }

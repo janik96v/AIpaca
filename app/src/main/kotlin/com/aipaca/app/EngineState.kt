@@ -10,6 +10,8 @@ import com.aipaca.app.engine.ChatTurn
 import com.aipaca.app.engine.GenerateParams
 import com.aipaca.app.engine.GgufProbeResult
 import com.aipaca.app.engine.LlamaCppEngine
+import com.aipaca.app.engine.ModelHeader
+import com.aipaca.app.engine.ModelHeaders
 import com.aipaca.app.engine.ModelInfo
 import com.aipaca.app.engine.OllamaEngine
 import com.aipaca.app.engine.WhisperEngine
@@ -89,6 +91,18 @@ object EngineState {
 
     private val _isLoadingModel = MutableStateFlow(false)
     val isLoadingModel: StateFlow<Boolean> = _isLoadingModel.asStateFlow()
+
+    /** Path of the model whose load is in flight, null when idle. */
+    private val _loadingModelPath = MutableStateFlow<String?>(null)
+    val loadingModelPath: StateFlow<String?> = _loadingModelPath.asStateFlow()
+
+    /**
+     * Header of the model being loaded or loaded — read *before* the weights so
+     * the UI can describe the model (and build its shape) while it loads.
+     * Null when no local model is loaded or its header could not be read.
+     */
+    private val _modelHeader = MutableStateFlow<ModelHeader?>(null)
+    val modelHeader: StateFlow<ModelHeader?> = _modelHeader.asStateFlow()
 
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
@@ -251,6 +265,10 @@ object EngineState {
     private val _isLoadingWhisperModel = MutableStateFlow(false)
     val isLoadingWhisperModel: StateFlow<Boolean> = _isLoadingWhisperModel.asStateFlow()
 
+    /** Header of the Whisper model being loaded or loaded (ggml `.bin`). */
+    private val _whisperHeader = MutableStateFlow<ModelHeader?>(null)
+    val whisperHeader: StateFlow<ModelHeader?> = _whisperHeader.asStateFlow()
+
     private val _whisperError = MutableStateFlow<String?>(null)
     val whisperError: StateFlow<String?> = _whisperError.asStateFlow()
 
@@ -399,14 +417,19 @@ object EngineState {
     ): Result<Unit> {
         _errorMessage.value = null
         _isLoadingModel.value = true
+        _loadingModelPath.value = path
         _isLoaded.value     = false
         _modelPath.value    = null
         _gpuLayers.value    = -1
         _modelInfo.value    = ModelInfo()
+        _modelHeader.value  = null
 
         Log.i(TAG, "loadModel: $path  threads=$nThreads  ctx=$contextSize  gpu_layers=$nGpuLayers")
         _contextSize.value = contextSize
         return try {
+            // Header first (no weights): lets the UI name the architecture and
+            // build the model's shape while the weights are still loading.
+            _modelHeader.value = ModelHeaders.read(path, engine)
             val result = engine.loadModel(path, nThreads, contextSize, nGpuLayers)
 
             result.fold(
@@ -425,6 +448,7 @@ object EngineState {
                 onFailure = { e ->
                     _gpuLayers.value = -1
                     _modelInfo.value = ModelInfo()
+                    _modelHeader.value = null
                     _toolCallingSupported.value = false
                     _errorMessage.value = e.message ?: "Unknown load error"
                     Log.e(TAG, "loadModel failed", e)
@@ -433,6 +457,7 @@ object EngineState {
             result
         } finally {
             _isLoadingModel.value = false
+            _loadingModelPath.value = null
         }
     }
 
@@ -444,9 +469,11 @@ object EngineState {
         _isLoaded.value       = false
         _modelPath.value      = null
         _isLoadingModel.value = false
+        _loadingModelPath.value = null
         _isGenerating.value   = false
         _gpuLayers.value      = -1
         _modelInfo.value      = ModelInfo()
+        _modelHeader.value    = null
         _toolCallingSupported.value = false
         _lastBenchmark.value  = BenchResult()
         _isBenchmarking.value = false
@@ -503,6 +530,7 @@ object EngineState {
         _whisperError.value = null
         _isLoadingWhisperModel.value = true
         return try {
+            _whisperHeader.value = ModelHeaders.read(path, engine)
             val result = whisperEngine.loadModel(path)
             result.fold(
                 onSuccess = {
@@ -511,6 +539,9 @@ object EngineState {
                     Log.i(TAG, "Whisper model loaded: $path")
                 },
                 onFailure = { e ->
+                    _whisperHeader.value = if (whisperEngine.isLoaded) {
+                        _whisperModelPath.value?.let { ModelHeaders.peek(it) }
+                    } else null
                     _whisperError.value = e.message ?: "Failed to load whisper model"
                     Log.e(TAG, "loadWhisperModel failed", e)
                 }
@@ -524,6 +555,7 @@ object EngineState {
     fun unloadWhisper() {
         whisperEngine.unload()
         _whisperModelPath.value = null
+        _whisperHeader.value = null
         _whisperError.value = null
         WhisperModelPrefs.clearPath(appContext)
         Log.i(TAG, "Whisper model unloaded")

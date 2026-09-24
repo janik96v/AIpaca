@@ -8,6 +8,32 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- Complete visual redesign ("Instrument"): true black, white hairlines and tracked uppercase
+  chrome; Inter (bundled) and Phosphor Thin icons replace Roboto and Material icons; zero
+  corner radius throughout. The bottom navigation is replaced by a collapsible left rail with
+  a status line (`NO MODEL LOADED` / `READING QWEN3.GGUF HEADER` / `THINKING` /
+  `… · GPU · READY`), and chat history moves to a bottom sheet
+- Models screen reorganised into what is on the phone (load / unload / delete) and a browse
+  view (catalog with kind filters, RAM fit, inline download progress, quant guide)
+
+### Added
+- Model World: the chat empty state draws the loaded model as a live point cloud built from
+  its header (sphere when idle; contracts and spins while loading; unfolds into the model when
+  ready; spins faster while generating). Whisper models show as two towers (encoder/decoder)
+- Header readout under the world: blocks, heads / KV heads, embedding width, context, quant,
+  parameters
+- Hugging Face search on the browse screen (GGUF repos, most downloaded first)
+- Files opened from the device are listed with downloaded models and can be reloaded or
+  deleted later
+- Delete confirmation for installed models
+
+### Fixed
+- The GGUF header probe no longer aborts on integer metadata stored with an unexpected width
+  or as a per-layer array; it now also reports `nHead`, `general.name` and an exact parameter
+  count from the tensor shapes (previously a rough estimate)
+- Loading a model no longer depends on the Models screen staying open
+
 ---
 
 ## [0.5.0] – 2026-09-12

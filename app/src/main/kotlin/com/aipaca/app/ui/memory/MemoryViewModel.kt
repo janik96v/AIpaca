@@ -30,7 +30,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     /** The four editable memory surfaces, in prompt order. */
     enum class Tab(val label: String) {
         SOUL("Soul"),
-        USER("User"),
+        USER("You"),
         MEMORY("Facts"),
         SESSIONS("Sessions")
     }

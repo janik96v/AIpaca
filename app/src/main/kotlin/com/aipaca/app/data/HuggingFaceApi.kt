@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.get
+import io.ktor.client.request.parameter
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
@@ -28,6 +29,21 @@ data class HfFile(
     val name: String,
     val sizeBytes: Long,
     val downloadUrl: String
+)
+
+/**
+ * A model repository found by [HuggingFaceApi.searchModels].
+ *
+ * @param id          Repo id, e.g. `unsloth/Qwen3.5-4B-GGUF`.
+ * @param downloads   Downloads in the last 30 days, as reported by the Hub.
+ * @param pipelineTag Hub task tag (`text-generation`, `automatic-speech-recognition`…), if any.
+ */
+@Serializable
+data class HfModel(
+    val id: String,
+    val downloads: Long = 0,
+    val likes: Long = 0,
+    @SerialName("pipeline_tag") val pipelineTag: String? = null
 )
 
 /** One raw entry as returned by the Hugging Face `tree/main` endpoint. */
@@ -104,6 +120,33 @@ class HuggingFaceApi(
             .toList()
     }
 
+    /**
+     * Searches the Hub for GGUF model repos matching [query], most downloaded first.
+     *
+     * @throws HuggingFaceApiException on transport errors or a non-2xx HTTP response.
+     */
+    suspend fun searchModels(query: String, limit: Int = 20): List<HfModel> {
+        val response: HttpResponse = try {
+            httpClient.get(SEARCH_URL) {
+                parameter("search", query.trim())
+                parameter("filter", "gguf")
+                parameter("sort", "downloads")
+                parameter("direction", "-1")
+                parameter("limit", limit)
+            }
+        } catch (e: Exception) {
+            throw HuggingFaceApiException("Failed to reach Hugging Face for search=$query", e)
+        }
+        if (!response.status.isSuccess()) {
+            throw HuggingFaceApiException("Hugging Face returned HTTP ${response.status} for search=$query")
+        }
+        return try {
+            json.decodeFromString(ListSerializer(HfModel.serializer()), response.bodyAsText())
+        } catch (e: Exception) {
+            throw HuggingFaceApiException("Failed to parse Hugging Face search response for search=$query", e)
+        }
+    }
+
     /** Releases the underlying HTTP client resources (connection pool). */
     fun close() {
         httpClient.close()
@@ -158,6 +201,8 @@ class HuggingFaceApi(
             return name.lowercase().contains("mmproj") &&
                 name.substringAfterLast('.', "").lowercase() == "gguf"
         }
+
+        private const val SEARCH_URL = "https://huggingface.co/api/models"
 
         private fun treeUrl(repoId: String): String =
             "https://huggingface.co/api/models/$repoId/tree/main"

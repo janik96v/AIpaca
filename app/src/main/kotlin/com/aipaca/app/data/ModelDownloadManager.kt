@@ -113,6 +113,9 @@ object ModelDownloadManager {
 
     // ---- Observable state ---------------------------------------------------
 
+    /** Repo id of files opened from the device (see [registerLocalFile]). */
+    const val LOCAL_REPO = "local"
+
     private val _downloads = MutableStateFlow<Map<String, DownloadProgress>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, DownloadProgress>> = _downloads.asStateFlow()
 
@@ -211,6 +214,23 @@ object ModelDownloadManager {
             }
         }
         activeJobs[k] = job
+    }
+
+    /**
+     * Tracks a model file that was opened from the device rather than downloaded,
+     * so it is listed with the downloads and can be loaded again or deleted later.
+     * Entries use [LOCAL_REPO] as their repo id.
+     */
+    fun registerLocalFile(file: File, modelType: ModelType): DownloadedModelEntry {
+        val entry = DownloadedModelEntry(
+            repoId    = LOCAL_REPO,
+            fileName  = file.name,
+            filePath  = file.absolutePath,
+            sizeBytes = file.length(),
+            modelType = modelType
+        )
+        _downloadedModels.value = store.add(entry)
+        return entry
     }
 
     /** Cancels an in-flight download for (repoId, fileName), if any. The partial file is removed. */

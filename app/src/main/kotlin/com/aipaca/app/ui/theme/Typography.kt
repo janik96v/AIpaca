@@ -2,194 +2,140 @@ package com.aipaca.app.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.aipaca.app.R
 
 /**
- * AIpaca Editorial Retro — type system.
+ * Instrument — type system.
  *
- * Two font families:
- *   • [InterFamily]  — sans, 90% of UI text
- *   • [MonoFamily]   — mono, only for microlabels, code, IDs, metrics
+ * Inter only, in two weights: 300 for titles, 400 for everything else. The
+ * static instances are bundled in `res/font` (SIL OFL 1.1, see NOTICE).
  *
- * ## Font upgrade path (currently using system fallback)
+ * Tracked uppercase is for chrome only — status, labels, actions. Anything the
+ * user actually reads (messages, memory, notes) stays sentence case.
  *
- * Inter and JetBrains Mono are the *target* fonts. They are currently mapped
- * to the system defaults (Roboto / Roboto Mono) which look ~90% identical for
- * UI purposes because the Editorial direction's style is driven by the
- * Type Scale + Hierarchy + Tracking, not glyph shapes.
- *
- * To swap in the real Inter and JetBrains Mono later, pick ONE of:
- *
- * **Option A — bundle as resources (offline, deterministic):**
- *   1. Download Inter from https://rsms.me/inter/  (use the static .ttf set)
- *   2. Download JetBrains Mono from https://www.jetbrains.com/lp/mono/
- *   3. Drop these into `app/src/main/res/font/`:
- *        inter_regular.ttf, inter_medium.ttf, inter_semibold.ttf,
- *        inter_bold.ttf, inter_extrabold.ttf,
- *        jetbrains_mono_regular.ttf, jetbrains_mono_medium.ttf,
- *        jetbrains_mono_bold.ttf
- *   4. Replace [InterFamily] / [MonoFamily] declarations below with
- *      `FontFamily(Font(R.font.inter_regular, FontWeight.Normal), …)`.
- *   Cost: ~600 KB APK growth. Both fonts are SIL OFL → Apache compatible.
- *
- * **Option B — GoogleFont provider (online, lazy):**
- *   1. Add `androidx.compose.ui:ui-text-google-fonts` to dependencies.
- *   2. Set up Provider with `com.google.android.gms.fonts` authority.
- *   3. Use `GoogleFont("Inter")` and `GoogleFont("JetBrains Mono")`.
- *   Cost: 0 APK, but requires Play Services and one-time network fetch.
- *
- * Neither is required for the Editorial style to look correct. Roboto is
- * a well-engineered Inter-adjacent typeface; the visual identity comes
- * from `AlpacaType.DisplayMasthead` size + weight + tracking, not the
- * specific letterforms.
+ * Tracking and line height are expressed in `em`, exactly as in the design
+ * reference, and every style centres its glyphs in the full line box with no
+ * trimming — the CSS box model the reference was built in. That keeps the
+ * reference's spacing values usable 1:1 as dp.
  */
+val Inter: FontFamily = FontFamily(
+    Font(R.font.inter_light,   FontWeight.Light),
+    Font(R.font.inter_regular, FontWeight.Normal)
+)
 
-val InterFamily: FontFamily = FontFamily.Default      // → Roboto on Android
-val MonoFamily:  FontFamily = FontFamily.Monospace    // → Roboto Mono on Android
+private val CssLineBox = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment.Center,
+    trim      = LineHeightStyle.Trim.None
+)
 
-// ---- Type tokens ------------------------------------------------------------
-// Mirrors design/02_design_system_spec.md §3 and figma/tokens.json.
+private fun inter(
+    size: TextUnit,
+    lineHeight: Float,
+    tracking: Float = 0f,
+    weight: FontWeight = FontWeight.Normal
+) = TextStyle(
+    fontFamily      = Inter,
+    fontWeight      = weight,
+    fontSize        = size,
+    lineHeight      = lineHeight.em,
+    letterSpacing   = tracking.em,
+    lineHeightStyle = CssLineBox
+)
 
-object AlpacaType {
+object InkType {
 
-    // Display ----------------------------------------------------------------
+    // ---- Titles (weight 300) -----------------------------------------------
+    /** `MEMORY`, `MODELS`, `SERVER`. */
+    val ScreenTitle   = inter(16.sp, 1.6f, .42f, FontWeight.Light)
 
-    /** Screen titles: "Alpaca." / "Models." / "Server." */
-    val DisplayMasthead = TextStyle(
-        fontFamily    = InterFamily,
-        fontWeight    = FontWeight.ExtraBold,
-        fontSize      = 36.sp,
-        lineHeight    = 40.sp,
-        letterSpacing = (-1.5).sp
-    )
+    /** `AVAILABLE / MODELS` — the two-line browse title. */
+    val BrowseTitle   = inter(16.sp, 1.8f, .40f, FontWeight.Light)
 
-    /** Hero number / status display. */
-    val DisplayHeadline = TextStyle(
-        fontFamily    = InterFamily,
-        fontWeight    = FontWeight.Bold,
-        fontSize      = 28.sp,
-        lineHeight    = 32.sp,
-        letterSpacing = (-0.8).sp
-    )
+    /** `LOAD A MODEL`, `ASK ME ANYTHING`. */
+    val EmptyTitle    = inter(15.sp, 1.9f, .36f, FontWeight.Light)
 
-    // Title ------------------------------------------------------------------
+    /** `HISTORY`, dialog titles. */
+    val SheetTitle    = inter(12.sp, 1.4f, .34f, FontWeight.Light)
 
-    /** Entry title (model name). */
-    val TitleLg = TextStyle(
-        fontFamily    = InterFamily,
-        fontWeight    = FontWeight.Bold,
-        fontSize      = 20.sp,
-        lineHeight    = 26.sp,
-        letterSpacing = (-0.3).sp
-    )
+    // ---- Reading text (sentence case) --------------------------------------
+    /** Empty-state copy, server blurb. */
+    val Body          = inter(13.sp, 1.7f)
 
-    /** Dialog title, section header. */
-    val TitleMd = TextStyle(
-        fontFamily    = InterFamily,
-        fontWeight    = FontWeight.SemiBold,
-        fontSize      = 17.sp,
-        lineHeight    = 24.sp,
-        letterSpacing = (-0.2).sp
-    )
+    /** Messages and memory entries. */
+    val BodyLoose     = inter(13.sp, 1.75f)
 
-    // Body -------------------------------------------------------------------
+    /** Row names: installed models, catalog entries, paired devices. */
+    val Name          = inter(13.sp, 1.3f)
 
-    /** Message text. */
-    val BodyLg = TextStyle(
-        fontFamily = InterFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 16.sp,
-        lineHeight = 24.sp
-    )
+    /** History rows. */
+    val NameLoose     = inter(13.sp, 1.4f)
 
-    val BodyMd = TextStyle(
-        fontFamily = InterFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 14.sp,
-        lineHeight = 22.sp
-    )
+    /** Composer input. */
+    val Input         = inter(13.sp, 1.6f)
 
-    /** Captions, footnotes. */
-    val BodySm = TextStyle(
-        fontFamily = InterFamily,
-        fontWeight = FontWeight.Normal,
-        fontSize   = 13.sp,
-        lineHeight = 20.sp
-    )
+    /** Tab hints, catalog notes. */
+    val Secondary     = inter(12.sp, 1.7f)
 
-    // Label ------------------------------------------------------------------
+    /** Learning meta line. */
+    val SecondaryTight = inter(12.sp, 1.6f)
 
-    /** Buttons, tabs. */
-    val LabelLg = TextStyle(
-        fontFamily = InterFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize   = 13.sp,
-        lineHeight = 18.sp
-    )
+    // ---- Chrome (always uppercase) -----------------------------------------
+    /** 10sp chrome at the given tracking — labels, actions, tabs. */
+    fun chrome(tracking: Float, lineHeight: Float = 1f) = inter(10.sp, lineHeight, tracking)
 
-    /** Chip labels. */
-    val LabelMd = TextStyle(
-        fontFamily    = InterFamily,
-        fontWeight    = FontWeight.SemiBold,
-        fontSize      = 11.sp,
-        lineHeight    = 14.sp,
-        letterSpacing = 0.4.sp
-    )
+    val RailLabel     = chrome(.18f)
+    val Action        = chrome(.20f)
+    val Button        = chrome(.22f)
+    val Status        = chrome(.24f, 1.4f)
+    val Label         = chrome(.24f)
+    val Count         = chrome(.26f)
+    val Stamp         = chrome(.28f)
 
-    // Mono (microlabels & code) ----------------------------------------------
+    /** Row meta under a name: `Q4_K_M · 2.7 GB · 128K CTX`. */
+    val Meta          = chrome(.24f, 1.6f)
 
-    /** Microlabel — `№ 01 · TESTED`, `YOU · 09:41`. Heavy tracking. */
-    val MonoLabel = TextStyle(
-        fontFamily    = MonoFamily,
-        fontWeight    = FontWeight.Bold,
-        fontSize      = 10.sp,
-        lineHeight    = 14.sp,
-        letterSpacing = 1.8.sp
-    )
+    /** Server URL / `OFFLINE`. */
+    val Url           = inter(13.sp, 1.6f, .16f)
 
-    /** Code block, multi-line code samples. */
-    val MonoBody = TextStyle(
-        fontFamily    = MonoFamily,
-        fontWeight    = FontWeight.Normal,
-        fontSize      = 12.sp,
-        lineHeight    = 18.sp,
-        letterSpacing = 0.4.sp
-    )
+    // ---- Micro (9sp) -------------------------------------------------------
+    /** Header readout label: `BLOCKS`. */
+    val ReadoutLabel  = inter(9.sp, 1f, .20f)
 
-    /** Metrics: `14.2 t/s · 1.8s · 412 tok`. Medium weight for emphasis. */
-    val MonoMetric = TextStyle(
-        fontFamily    = MonoFamily,
-        fontWeight    = FontWeight.Medium,
-        fontSize      = 11.sp,
-        lineHeight    = 14.sp,
-        letterSpacing = 0.6.sp
-    )
+    /** Header readout value: `36`, `Q4_K_M`. */
+    val ReadoutValue  = inter(11.sp, 1.1f, .08f)
+
+    /** `NO HEADER READ · IDLE`. */
+    val MicroLine     = inter(9.sp, 1.8f, .24f)
+
+    /** Composer placeholder: `MESSAGE`, `LOAD A MODEL FIRST`. */
+    val Placeholder   = inter(13.sp, 1.6f, .22f)
 }
 
 // ---- M3 Typography mapping --------------------------------------------------
-// Material 3 components (Button, Text, etc.) read from this. We map our tokens
-// onto M3 slots so default components inherit the right type.
+// Material components that still render text (menus, snackbars, text fields)
+// read from here, so they pick up Inter and the Instrument scale by default.
 
 val Typography = Typography(
-    displayLarge   = AlpacaType.DisplayMasthead,
-    displayMedium  = AlpacaType.DisplayHeadline,
-    displaySmall   = AlpacaType.DisplayHeadline.copy(fontSize = 22.sp, lineHeight = 28.sp),
-
-    headlineLarge  = AlpacaType.DisplayHeadline,
-    headlineMedium = AlpacaType.TitleLg,
-    headlineSmall  = AlpacaType.TitleMd,
-
-    titleLarge     = AlpacaType.TitleLg,
-    titleMedium    = AlpacaType.TitleMd,
-    titleSmall     = AlpacaType.LabelLg,
-
-    bodyLarge      = AlpacaType.BodyLg,
-    bodyMedium     = AlpacaType.BodyMd,
-    bodySmall      = AlpacaType.BodySm,
-
-    labelLarge     = AlpacaType.LabelLg,
-    labelMedium    = AlpacaType.LabelMd,
-    labelSmall     = AlpacaType.MonoLabel  // M3 labelSmall = our mono microlabel
+    displayLarge   = InkType.ScreenTitle,
+    displayMedium  = InkType.ScreenTitle,
+    displaySmall   = InkType.ScreenTitle,
+    headlineLarge  = InkType.ScreenTitle,
+    headlineMedium = InkType.ScreenTitle,
+    headlineSmall  = InkType.EmptyTitle,
+    titleLarge     = InkType.EmptyTitle,
+    titleMedium    = InkType.SheetTitle,
+    titleSmall     = InkType.SheetTitle,
+    bodyLarge      = InkType.Body,
+    bodyMedium     = InkType.Body,
+    bodySmall      = InkType.Secondary,
+    labelLarge     = InkType.Button,
+    labelMedium    = InkType.Action,
+    labelSmall     = InkType.Label
 )

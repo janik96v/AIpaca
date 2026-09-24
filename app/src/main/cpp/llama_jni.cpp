@@ -233,9 +233,51 @@ static TensorHistogram build_tensor_histogram(const std::string& model_path) {
 
 // ---------------------------------------------------------------------------
 // Lightweight GGUF metadata probe — reads header only, no model loading.
-// Returns JSON: {"architecture":"...","nCtxTrain":N,"nParams":N,
+// Returns JSON: {"architecture":"...","name":"...","nCtxTrain":N,"nParams":N,
+//                "nEmbd":N,"nLayer":N,"nHead":N,"nHeadKv":N,"dHead":N,
 //                "isRecurrentKV":bool,"quant":"..."}
 // ---------------------------------------------------------------------------
+
+// Reads an integer metadata value whatever its stored width. Some architectures
+// store per-layer values (e.g. head_count_kv) as arrays; those report their
+// largest element. gguf_get_val_u32 asserts on a type mismatch, so every read
+// goes through here — the probe runs for every installed model and must never
+// abort the process.
+static uint32_t gguf_read_u32(const gguf_context* ctx, const std::string& key, uint32_t fallback = 0) {
+    const int64_t id = gguf_find_key(ctx, key.c_str());
+    if (id < 0) return fallback;
+    switch (gguf_get_kv_type(ctx, id)) {
+        case GGUF_TYPE_UINT8:  return gguf_get_val_u8(ctx, id);
+        case GGUF_TYPE_INT8:   return (uint32_t) std::max<int8_t>(0, gguf_get_val_i8(ctx, id));
+        case GGUF_TYPE_UINT16: return gguf_get_val_u16(ctx, id);
+        case GGUF_TYPE_INT16:  return (uint32_t) std::max<int16_t>(0, gguf_get_val_i16(ctx, id));
+        case GGUF_TYPE_UINT32: return gguf_get_val_u32(ctx, id);
+        case GGUF_TYPE_INT32:  return (uint32_t) std::max<int32_t>(0, gguf_get_val_i32(ctx, id));
+        case GGUF_TYPE_UINT64: return (uint32_t) std::min<uint64_t>(UINT32_MAX, gguf_get_val_u64(ctx, id));
+        case GGUF_TYPE_INT64:  return (uint32_t) std::clamp<int64_t>(gguf_get_val_i64(ctx, id), 0, UINT32_MAX);
+        case GGUF_TYPE_ARRAY: {
+            const size_t n = gguf_get_arr_n(ctx, id);
+            const gguf_type t = gguf_get_arr_type(ctx, id);
+            if (n == 0 || (t != GGUF_TYPE_UINT32 && t != GGUF_TYPE_INT32)) return fallback;
+            const auto* data = static_cast<const int32_t*>(gguf_get_arr_data(ctx, id));
+            int64_t best = 0;
+            for (size_t i = 0; i < n; ++i) {
+                const int64_t v = (t == GGUF_TYPE_UINT32) ? (int64_t)(uint32_t)data[i] : (int64_t)data[i];
+                best = std::max(best, v);
+            }
+            return (uint32_t) best;
+        }
+        default: return fallback;
+    }
+}
+
+static std::string gguf_read_str(const gguf_context* ctx, const char* key) {
+    const int64_t id = gguf_find_key(ctx, key);
+    if (id < 0 || gguf_get_kv_type(ctx, id) != GGUF_TYPE_STRING) return "";
+    const char* val = gguf_get_val_str(ctx, id);
+    return val ? val : "";
+}
+
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
@@ -244,73 +286,43 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
         jstring  jModelPath)
 {
     std::string model_path = jstring_to_std(env, jModelPath);
-    gguf_init_params params = { /*.no_alloc =*/ true, /*.ctx =*/ nullptr };
+    // no_alloc + a metadata context: tensor shapes are read, weights are not.
+    ggml_context* meta = nullptr;
+    gguf_init_params params = { /*.no_alloc =*/ true, /*.ctx =*/ &meta };
     gguf_context* ctx = gguf_init_from_file(model_path.c_str(), params);
     if (ctx == nullptr) {
+        if (meta) ggml_free(meta);
         return env->NewStringUTF("{\"architecture\":\"\",\"nCtxTrain\":0,\"nParams\":0,"
                                  "\"isRecurrentKV\":false,\"quant\":\"unknown\"}");
     }
 
-    std::string arch;
-    int64_t arch_key = gguf_find_key(ctx, "general.architecture");
-    if (arch_key >= 0) {
-        const char* val = gguf_get_val_str(ctx, arch_key);
-        if (val) arch = val;
-    }
+    const std::string arch = gguf_read_str(ctx, "general.architecture");
+    const std::string name = gguf_read_str(ctx, "general.name");
 
     bool is_recurrent = (arch == "mamba" || arch == "rwkv" || arch == "jamba" ||
                          arch == "falcon-h1" || arch == "ssm" || arch == "recurrent");
 
-    // n_ctx_train lives under <arch>.context_length
-    uint32_t n_ctx_train = 0;
-    std::string ctx_key = arch + ".context_length";
-    int64_t ctx_id = gguf_find_key(ctx, ctx_key.c_str());
-    if (ctx_id >= 0) {
-        n_ctx_train = gguf_get_val_u32(ctx, ctx_id);
-    }
-
-    // n_embd for KV estimation
-    uint32_t n_embd = 0;
-    std::string embd_key = arch + ".embedding_length";
-    int64_t embd_id = gguf_find_key(ctx, embd_key.c_str());
-    if (embd_id >= 0) {
-        n_embd = gguf_get_val_u32(ctx, embd_id);
-    }
-
-    // n_layer (block_count)
-    uint32_t n_layer = 0;
-    std::string layer_key = arch + ".block_count";
-    int64_t layer_id = gguf_find_key(ctx, layer_key.c_str());
-    if (layer_id >= 0) {
-        n_layer = gguf_get_val_u32(ctx, layer_id);
-    }
-
-    // n_head_kv for accurate KV cache sizing
-    uint32_t n_head_kv = 0;
-    std::string hkv_key = arch + ".attention.head_count_kv";
-    int64_t hkv_id = gguf_find_key(ctx, hkv_key.c_str());
-    if (hkv_id >= 0) {
-        n_head_kv = gguf_get_val_u32(ctx, hkv_id);
-    }
-
-    uint32_t n_head = 0;
-    std::string h_key = arch + ".attention.head_count";
-    int64_t h_id = gguf_find_key(ctx, h_key.c_str());
-    if (h_id >= 0) {
-        n_head = gguf_get_val_u32(ctx, h_id);
-    }
+    const uint32_t n_ctx_train = gguf_read_u32(ctx, arch + ".context_length");
+    const uint32_t n_embd      = gguf_read_u32(ctx, arch + ".embedding_length");
+    const uint32_t n_layer     = gguf_read_u32(ctx, arch + ".block_count");
+    const uint32_t n_head_kv   = gguf_read_u32(ctx, arch + ".attention.head_count_kv");
+    const uint32_t n_head      = gguf_read_u32(ctx, arch + ".attention.head_count");
 
     // file_type → quant name
-    int ftype_val = -1;
-    int64_t ftype_id = gguf_find_key(ctx, "general.file_type");
-    if (ftype_id >= 0) {
-        ftype_val = (int)gguf_get_val_u32(ctx, ftype_id);
-    }
+    const int64_t ftype_id = gguf_find_key(ctx, "general.file_type");
+    const int ftype_val = ftype_id >= 0 ? (int) gguf_read_u32(ctx, "general.file_type") : -1;
     const char* quant_name = ftype_to_name(ftype_val);
 
-    // Rough nParams estimate: ~12 * n_layer * n_embd^2 (transformer scaling law)
+    // Exact parameter count from the tensor shapes; the scaling-law estimate
+    // (~12 · n_layer · n_embd²) is only the fallback for files without tensors.
     int64_t n_params = 0;
-    if (n_layer > 0 && n_embd > 0) {
+    if (meta) {
+        for (ggml_tensor* t = ggml_get_first_tensor(meta); t != nullptr; t = ggml_get_next_tensor(meta, t)) {
+            n_params += ggml_nelements(t);
+        }
+        ggml_free(meta);
+    }
+    if (n_params <= 0 && n_layer > 0 && n_embd > 0) {
         n_params = (int64_t)12 * n_layer * (int64_t)n_embd * (int64_t)n_embd;
     }
 
@@ -321,7 +333,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
     gguf_free(ctx);
 
     LOGI("probeGgufMeta: arch=%s  n_ctx_train=%u  n_embd=%u  n_layer=%u  n_head=%u  "
-         "n_head_kv=%u  d_head=%u  ftype=%d  recurrent=%s  nParams~%lld",
+         "n_head_kv=%u  d_head=%u  ftype=%d  recurrent=%s  nParams=%lld",
          arch.c_str(), n_ctx_train, n_embd, n_layer, n_head,
          effective_kv_heads, d_head, ftype_val,
          is_recurrent ? "true" : "false", (long long)n_params);
@@ -329,10 +341,12 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
     std::ostringstream json;
     json << "{"
          << "\"architecture\":\"" << json_escape(arch) << "\","
+         << "\"name\":\"" << json_escape(name) << "\","
          << "\"nCtxTrain\":" << n_ctx_train << ","
          << "\"nParams\":" << n_params << ","
          << "\"nEmbd\":" << n_embd << ","
          << "\"nLayer\":" << n_layer << ","
+         << "\"nHead\":" << n_head << ","
          << "\"nHeadKv\":" << effective_kv_heads << ","
          << "\"dHead\":" << d_head << ","
          << "\"isRecurrentKV\":" << (is_recurrent ? "true" : "false") << ","

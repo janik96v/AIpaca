@@ -94,18 +94,24 @@ app/src/main/
 |   |       |-- PairingManager.kt       # One-time PIN sessions
 |   |       |-- Ed25519Verifier.kt       # Request signature verification
 |   |       +-- AuthPlugin.kt           # Ktor auth plugin
-|   |-- ui/                             # Jetpack Compose UI
-|   |   |-- MainActivity.kt             # Navigation host + bottom nav
+|   |-- engine/ModelHeader.kt           # Header-only model description (GGUF probe / Whisper ggml header)
+|   |-- ui/                             # Jetpack Compose UI ("Instrument" design)
+|   |   |-- MainActivity.kt             # App shell: rail, status line, nav host, history sheet
+|   |   |-- shell/                      # Rail, status line, position ladder, haze, history sheet
 |   |   |-- chat/ChatScreen.kt          # Chat + streaming + agent steps
+|   |   |-- chat/ChatEmptyState.kt      # Model World + header readout + next step
+|   |   |-- chat/Composer.kt            # Sine line, modes, attach, dictation, send/stop
 |   |   |-- chat/ChatViewModel.kt       # Chat state management
 |   |   |-- chat/ThinkTagParser.kt      # Thinking token extraction
-|   |   |-- memory/MemoryScreen.kt      # Memory viewer/editor (4 tabs: Soul, User, Facts, Sessions)
+|   |   |-- memory/MemoryScreen.kt      # Memory viewer/editor (4 tabs: Soul, You, Facts, Sessions)
 |   |   |-- memory/MemoryViewModel.kt   # Memory state management
 |   |   |-- server/ServerScreen.kt      # Server dashboard + pairing
-|   |   |-- models/ModelScreen.kt       # Model library + quant guide
-|   |   |-- models/GgufFilePickerSheet.kt # Model file picker
-|   |   |-- components/                 # Shared UI components
-|   |   +-- theme/                      # Material 3 dark theme
+|   |   |-- models/ModelScreen.kt       # Installed models: load, unload, delete, open a file
+|   |   |-- models/BrowseModels.kt      # Catalog, Hugging Face search, quant guide
+|   |   |-- models/GgufFilePickerSheet.kt # Quant picker for a repo
+|   |   |-- components/                 # Instrument component kit
+|   |   |-- components/world/           # Model World: geometry, motion, renderer, Canvas
+|   |   +-- theme/                      # Ink colours, Inter type scale, Phosphor Thin icons
 |   |-- work/                           # Background workers
 |   |   |-- MemoryMaintenance.kt        # WorkManager scheduler (24h periodic + on-demand)
 |   |   +-- MemoryMaintenanceWorker.kt  # Idle-time consolidation (charging + idle)

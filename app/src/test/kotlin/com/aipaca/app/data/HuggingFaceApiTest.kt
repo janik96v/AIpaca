@@ -175,4 +175,41 @@ class HuggingFaceApiTest {
 
         assertEquals("https://huggingface.co/org/repo/resolve/main/model.Q4_K_M.gguf", url)
     }
+
+    @Test
+    fun `searchModels asks for gguf repos by downloads and parses the listing`() = runTest {
+        var requested: io.ktor.http.Url? = null
+        val engine = MockEngine { request ->
+            requested = request.url
+            respond(
+                content = """
+                    [
+                      {"_id":"x","id":"unsloth/Qwen3.5-4B-GGUF","downloads":81234,"likes":120,"pipeline_tag":"image-text-to-text","tags":["gguf"]},
+                      {"_id":"y","id":"ggerganov/whisper.cpp","downloads":5000,"likes":900}
+                    ]
+                """.trimIndent(),
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val api = HuggingFaceApi(httpClient = HttpClient(engine))
+
+        val models = api.searchModels(" qwen ")
+
+        assertEquals(listOf("unsloth/Qwen3.5-4B-GGUF", "ggerganov/whisper.cpp"), models.map { it.id })
+        assertEquals(81234L, models[0].downloads)
+        assertEquals("image-text-to-text", models[0].pipelineTag)
+        assertEquals(null, models[1].pipelineTag)
+        val url = requested!!
+        assertEquals("/api/models", url.encodedPath)
+        assertEquals("qwen", url.parameters["search"])
+        assertEquals("gguf", url.parameters["filter"])
+        assertEquals("downloads", url.parameters["sort"])
+    }
+
+    @Test
+    fun `searchModels surfaces http errors`() = runTest {
+        val api = HuggingFaceApi(httpClient = mockClient("oops", HttpStatusCode.InternalServerError))
+        assertFailsWith<HuggingFaceApiException> { api.searchModels("qwen") }
+    }
 }

@@ -298,4 +298,33 @@ class ModelDownloadManagerTest {
 
         assertTrue(!ModelDownloadManager.downloadProgress.value.containsKey(k))
     }
+
+    @Test
+    fun `registerLocalFile lists an opened file and deleteDownload removes it`() {
+        configure(ByteArray(0))
+        val local = File(tempDir, "picked.Q4_0.gguf").apply { writeBytes(ByteArray(1234)) }
+
+        val entry = ModelDownloadManager.registerLocalFile(local, ModelType.LLM)
+
+        assertEquals(ModelDownloadManager.LOCAL_REPO, entry.repoId)
+        assertEquals(1234L, entry.sizeBytes)
+        assertEquals(listOf(entry), ModelDownloadManager.downloadedModels.value)
+        assertEquals(listOf(entry), store.list())
+
+        ModelDownloadManager.deleteDownload(entry.repoId, entry.fileName)
+
+        assertTrue(ModelDownloadManager.downloadedModels.value.isEmpty())
+        assertTrue(!local.exists())
+    }
+
+    @Test
+    fun `registering the same local file twice keeps one entry`() {
+        configure(ByteArray(0))
+        val local = File(tempDir, "ggml-base.bin").apply { writeBytes(ByteArray(10)) }
+
+        ModelDownloadManager.registerLocalFile(local, ModelType.WHISPER)
+        ModelDownloadManager.registerLocalFile(local, ModelType.WHISPER)
+
+        assertEquals(1, ModelDownloadManager.downloadedModels.value.size)
+    }
 }

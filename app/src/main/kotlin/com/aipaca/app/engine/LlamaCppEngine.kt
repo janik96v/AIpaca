@@ -694,15 +694,29 @@ class LlamaCppEngine : InferenceEngine {
         return try {
             val json = nativeProbeGgufMeta(modelPath)
             val arch = Regex("\"architecture\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: ""
+            val name = Regex("\"name\":\"((?:[^\"\\\\]|\\\\.)*)\"").find(json)?.groupValues?.get(1)?.let(::unescapeJson) ?: ""
             val isRecurrentKV = json.contains("\"isRecurrentKV\":true")
             val nCtxTrain = Regex("\"nCtxTrain\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val nParams = Regex("\"nParams\":(\\d+)").find(json)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
             val nEmbd = Regex("\"nEmbd\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val nLayer = Regex("\"nLayer\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            val nHead = Regex("\"nHead\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val nHeadKv = Regex("\"nHeadKv\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val dHead = Regex("\"dHead\":(\\d+)").find(json)?.groupValues?.get(1)?.toIntOrNull() ?: 0
             val quant = Regex("\"quant\":\"([^\"]*)\"").find(json)?.groupValues?.get(1) ?: "unknown"
-            GgufProbeResult(arch, isRecurrentKV, nCtxTrain, nParams, nEmbd, nLayer, nHeadKv, dHead, quant)
+            GgufProbeResult(
+                architecture  = arch,
+                isRecurrentKV = isRecurrentKV,
+                nCtxTrain     = nCtxTrain,
+                nParams       = nParams,
+                nEmbd         = nEmbd,
+                nLayer        = nLayer,
+                nHeadKv       = nHeadKv,
+                dHead         = dHead,
+                quant         = quant,
+                nHead         = nHead,
+                name          = name
+            )
         } catch (e: Exception) {
             Log.w(TAG, "probeGgufMeta failed for $modelPath", e)
             GgufProbeResult()
@@ -719,5 +733,33 @@ data class GgufProbeResult(
     val nLayer: Int = 0,
     val nHeadKv: Int = 0,
     val dHead: Int = 0,
-    val quant: String = "unknown"
+    val quant: String = "unknown",
+    /** `{arch}.attention.head_count` — readout only; KV sizing uses [nHeadKv]. */
+    val nHead: Int = 0,
+    /** `general.name`, empty when the file has none. */
+    val name: String = ""
 )
+
+/** Undoes the escaping `json_escape` applies in llama_jni.cpp. */
+private fun unescapeJson(s: String): String {
+    if ('\\' !in s) return s
+    val out = StringBuilder(s.length)
+    var i = 0
+    while (i < s.length) {
+        val c = s[i]
+        if (c != '\\' || i + 1 >= s.length) { out.append(c); i++; continue }
+        when (val n = s[i + 1]) {
+            'n' -> out.append('\n')
+            't' -> out.append('\t')
+            'r' -> out.append('\r')
+            'b' -> out.append('\b')
+            'f' -> out.append('\u000C')
+            'u' -> if (i + 5 < s.length) {
+                out.append(s.substring(i + 2, i + 6).toInt(16).toChar()); i += 4
+            }
+            else -> out.append(n)
+        }
+        i += 2
+    }
+    return out.toString()
+}

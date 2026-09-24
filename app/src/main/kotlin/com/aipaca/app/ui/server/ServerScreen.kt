@@ -4,31 +4,21 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.QrCode
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -39,39 +29,41 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
 import com.aipaca.app.EngineState
-import com.aipaca.app.engine.BenchResult
-import com.aipaca.app.engine.ModelInfo
 import com.aipaca.app.server.ServerManager
 import com.aipaca.app.server.security.AuthorizedKeysStore
 import com.aipaca.app.server.security.PairingManager
 import com.aipaca.app.server.security.TlsManager
-import com.aipaca.app.ui.components.ChipTone
-import com.aipaca.app.ui.components.EditorialDivider
-import com.aipaca.app.ui.components.EditorialMasthead
-import com.aipaca.app.ui.components.InlineCTA
-import com.aipaca.app.ui.components.ModelPickerButton
-import com.aipaca.app.ui.components.MonoLabel
-import com.aipaca.app.ui.components.MonoLabelTone
-import com.aipaca.app.ui.components.StatusChip
-import com.aipaca.app.ui.theme.AIpacaTheme
-import com.aipaca.app.ui.theme.AlpacaColors
-import com.aipaca.app.ui.theme.AlpacaType
+import com.aipaca.app.ui.components.Emphasis
+import com.aipaca.app.ui.components.IconAction
+import com.aipaca.app.ui.components.InkDialog
+import com.aipaca.app.ui.components.InkIcon
+import com.aipaca.app.ui.components.OutlineButton
+import com.aipaca.app.ui.components.ScreenTitle
+import com.aipaca.app.ui.components.TextAction
+import com.aipaca.app.ui.components.Tracked
+import com.aipaca.app.ui.components.hairlineBottom
+import com.aipaca.app.ui.shell.displayModelName
+import com.aipaca.app.ui.theme.Ink
+import com.aipaca.app.ui.theme.InkType
+import com.aipaca.app.ui.theme.Ph
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 // ---- ViewModel --------------------------------------------------------------
 
@@ -84,6 +76,10 @@ class ServerViewModel : ViewModel() {
 
 // ---- Screen -----------------------------------------------------------------
 
+/**
+ * Server: expose the loaded model on the local network as an
+ * OpenAI-compatible endpoint, and manage the devices allowed to use it.
+ */
 @Composable
 fun ServerScreen(
     modifier: Modifier = Modifier,
@@ -94,143 +90,132 @@ fun ServerScreen(
     val modelLoaded    by serverViewModel.modelLoaded.collectAsState()
     val modelPath      by serverViewModel.modelPath.collectAsState()
     val isLoadingModel by EngineState.isLoadingModel.collectAsState()
+    val header         by EngineState.modelHeader.collectAsState()
     val gpuLayers      by EngineState.gpuLayers.collectAsState()
     val modelInfo      by EngineState.modelInfo.collectAsState()
     val lastBenchmark  by EngineState.lastBenchmark.collectAsState()
     val isBenchmarking by EngineState.isBenchmarking.collectAsState()
+    val remote         by EngineState.useOllama.collectAsState()
 
-    val context          = LocalContext.current
-    val clipboardManager = LocalClipboardManager.current
-    val scrollState      = rememberScrollState()
+    val context   = LocalContext.current
+    val clipboard = LocalClipboardManager.current
 
-    var showPairingDialog by remember { mutableStateOf(false) }
-    var pairedClients     by remember { mutableStateOf(listOf<AuthorizedKeysStore.AuthorizedKey>()) }
+    var showPairing   by remember { mutableStateOf(false) }
+    var pairedClients by remember { mutableStateOf(listOf<AuthorizedKeysStore.AuthorizedKey>()) }
 
     LaunchedEffect(isRunning) {
-        pairedClients = AuthorizedKeysStore(context).getAll()
+        pairedClients = runCatching { AuthorizedKeysStore(context).getAll() }.getOrDefault(emptyList())
     }
+
+    val canStart = modelLoaded && !isLoadingModel
+    val url = serverUrl
 
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(AlpacaColors.Surface.Canvas)
-            .verticalScroll(scrollState)
+            .verticalScroll(rememberScrollState())
+            .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
-        EditorialMasthead(title = "Server.")
+        ScreenTitle("Server")
 
-        // ---- Hero status block --------------------------------------------
+        Text(
+            text = when {
+                isRunning -> "Any OpenAI-compatible client on your network can talk to this model."
+                canStart  -> "Expose this model to your network as an OpenAI-compatible endpoint."
+                else      -> "Load a model, then expose it to your network as an OpenAI-compatible endpoint."
+            },
+            style    = InkType.Body,
+            color    = Ink.Meta,
+            modifier = Modifier.widthIn(max = 268.dp)
+        )
+
+        if (isRunning && url != null) {
+            Row(
+                modifier = Modifier
+                    .clickable(onClickLabel = "Copy URL", role = Role.Button) {
+                        clipboard.setText(AnnotatedString(url))
+                    }
+                    .padding(vertical = 2.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(url, style = InkType.Url, color = Ink.Text, modifier = Modifier.weight(1f, fill = false))
+                InkIcon(Ph.Copy, 14.dp, tint = Ink.TertiaryIcon, contentDescription = "Copy URL")
+            }
+        } else {
+            Tracked("Offline", InkType.Url, color = Ink.Meta)
+        }
+
+        OutlineButton(
+            label     = if (isRunning) "Stop server" else "Start server",
+            icon      = Ph.Power,
+            iconSize  = 16.dp,
+            emphasis  = if (isRunning) Emphasis.Secondary else Emphasis.Primary,
+            enabled   = isRunning || canStart,
+            fillWidth = true,
+            centered  = true,
+            padding   = PaddingValues(16.dp),
+            style     = InkType.Label,
+            onClick   = {
+                if (isRunning) ServerManager.stop(context) else ServerManager.start(context)
+            }
+        )
+
+        // ---- Paired devices ------------------------------------------------------
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
+            modifier            = Modifier.padding(top = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            StatusChip(
-                text = if (isRunning) "Running" else "Stopped",
-                tone = if (isRunning) ChipTone.Success else ChipTone.Neutral
-            )
-
-            Spacer(Modifier.height(16.dp))
-
-            if (isRunning && serverUrl != null) {
-                Text(
-                    text  = serverUrl!!,
-                    style = AlpacaType.DisplayHeadline,
-                    color = AlpacaColors.Text.Primary
+            Tracked("Paired devices · ${pairedClients.size}", InkType.Count, color = Ink.Meta)
+            if (pairedClients.isEmpty()) {
+                Text("No devices paired yet.", style = InkType.Secondary, color = Ink.Secondary)
+            }
+            pairedClients.forEach { client ->
+                PairedDeviceRow(
+                    client   = client,
+                    onRemove = {
+                        AuthorizedKeysStore(context).remove(client.fingerprint)
+                        pairedClients = AuthorizedKeysStore(context).getAll()
+                    }
                 )
-                Spacer(Modifier.height(4.dp))
-                MonoLabel("OPENAI-COMPATIBLE BASE URL")
-
-                Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    InlineCTA(
-                        text = "Copy URL",
-                        onClick = {
-                            clipboardManager.setText(AnnotatedString(serverUrl!!))
-                        }
-                    )
-                    InlineCTA(
-                        text = "Pair device",
-                        onClick = { showPairingDialog = true }
-                    )
-                }
+            }
+            if (isRunning) {
+                TextAction("Pair a new device", onClick = { showPairing = true })
             } else {
-                Text(
-                    text  = "Server idle",
-                    style = AlpacaType.DisplayHeadline,
-                    color = AlpacaColors.Text.Primary
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text  = "Load a model, then start the server to expose an OpenAI-compatible endpoint on your LAN.",
-                    style = AlpacaType.BodyMd,
-                    color = AlpacaColors.Text.Muted
-                )
+                Text("Start the server to pair a device.", style = InkType.Secondary, color = Ink.Secondary)
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        EditorialDivider(
-            color    = AlpacaColors.Line.Subtle,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        )
-
-        // ---- Model section ------------------------------------------------
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 20.dp)
-        ) {
-            MonoLabel("ACTIVE MODEL")
-            Spacer(Modifier.height(8.dp))
-
-            if (!modelLoaded) {
-                Text(
-                    text  = if (isLoadingModel) "Loading…" else "No model loaded",
-                    style = AlpacaType.TitleMd,
-                    color = if (isLoadingModel) AlpacaColors.State.Warning else AlpacaColors.Text.Muted
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text  = if (isLoadingModel) "Background load in progress." else "Load a model first to start the server.",
-                    style = AlpacaType.BodySm,
-                    color = AlpacaColors.Text.Muted
-                )
-                Spacer(Modifier.height(16.dp))
-                ModelPickerButton(
-                    onModelSelected = { path ->
-                        EngineState.scope.launch { EngineState.loadModel(path) }
-                    },
-                    isLoading = isLoadingModel
-                )
-            } else {
-                Text(
-                    text  = modelPath?.substringAfterLast('/').orEmpty(),
-                    style = AlpacaType.TitleMd,
-                    color = AlpacaColors.Text.Primary
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text  = listOfNotNull(
+        // ---- Active model ------------------------------------------------------------
+        if (modelLoaded && !remote) {
+            Column(
+                modifier            = Modifier.padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Tracked("Active model", InkType.Count, color = Ink.Meta)
+                Text(displayModelName(modelPath, header), style = InkType.Name, color = Ink.Text)
+                Tracked(
+                    listOfNotNull(
                         if (gpuLayers > 0) "GPU · $gpuLayers layers" else "CPU",
-                        "Quant ${modelInfo.quant}",
+                        modelInfo.quant.takeIf { it != "unknown" },
                         if (modelInfo.pureQ4_0) "pure Q4_0" else null
                     ).joinToString(" · "),
-                    style = AlpacaType.BodySm,
-                    color = AlpacaColors.Text.Muted
+                    InkType.Meta,
+                    color = Ink.Meta
                 )
-
                 if (lastBenchmark.tgRuns > 0 || lastBenchmark.ppRuns > 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text  = "Last bench · pp ${"%.2f".format(lastBenchmark.ppAvg)} t/s · tg ${"%.2f".format(lastBenchmark.tgAvg)} t/s",
-                        style = AlpacaType.MonoMetric,
-                        color = if (lastBenchmark.tgAvg >= 5f) AlpacaColors.State.Success else AlpacaColors.State.Warning
+                    Tracked(
+                        String.format(
+                            Locale.US, "Last bench · pp %.2f t/s · tg %.2f t/s",
+                            lastBenchmark.ppAvg, lastBenchmark.tgAvg
+                        ),
+                        InkType.Meta,
+                        color = Ink.Text
                     )
                 }
-
-                Spacer(Modifier.height(16.dp))
-                InlineCTA(
-                    text    = if (isBenchmarking) "Benchmarking…" else "Run native bench",
+                TextAction(
+                    label   = if (isBenchmarking) "Benchmarking" else "Run native bench",
                     enabled = !isBenchmarking,
                     onClick = {
                         EngineState.scope.launch { EngineState.benchmark(pp = 128, tg = 128, pl = 1, nr = 3) }
@@ -239,90 +224,32 @@ fun ServerScreen(
             }
         }
 
-        // ---- Paired clients (only when running) ---------------------------
+        // ---- Quickstart ------------------------------------------------------------
         if (isRunning) {
-            EditorialDivider(
-                color    = AlpacaColors.Line.Subtle,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 20.dp)
+                modifier            = Modifier.padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                MonoLabel("AUTHORIZED CLIENTS · ${pairedClients.size}")
-                Spacer(Modifier.height(12.dp))
-
-                if (pairedClients.isEmpty()) {
-                    Text(
-                        text  = "No devices paired yet.",
-                        style = AlpacaType.BodyMd,
-                        color = AlpacaColors.Text.Muted
-                    )
-                } else {
-                    pairedClients.forEach { client ->
-                        PairedClientRow(
-                            client = client,
-                            onRemove = {
-                                AuthorizedKeysStore(context).remove(client.fingerprint)
-                                pairedClients = AuthorizedKeysStore(context).getAll()
-                            }
-                        )
-                        EditorialDivider(color = AlpacaColors.Line.Subtle)
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                InlineCTA(
-                    text    = "Pair new device",
-                    onClick = { showPairingDialog = true }
+                Tracked("Python quickstart · scripts/ in repo", InkType.Count, color = Ink.Meta)
+                QuickstartStep(
+                    description = "Pair once — tap “Pair a new device”, note the PIN, then run:",
+                    code        = "python3 pair.py"
                 )
-            }
-
-            // ---- Connect-with cheat-sheet -----------------------------------
-            EditorialDivider(
-                color    = AlpacaColors.Line.Subtle,
-                modifier = Modifier.padding(horizontal = 24.dp)
-            )
-            ConnectWithSection(url = serverUrl!!)
-        }
-
-        // ---- Start / Stop primary button ----------------------------------
-        Spacer(Modifier.height(24.dp))
-        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
-            Button(
-                onClick = {
-                    if (isRunning) ServerManager.stop(context)
-                    else           ServerManager.start(context)
-                },
-                enabled  = (modelLoaded && !isLoadingModel) || isRunning,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape    = RoundedCornerShape(6.dp),
-                colors   = ButtonDefaults.buttonColors(
-                    containerColor         = if (isRunning) AlpacaColors.State.Error else AlpacaColors.Accent.Primary,
-                    contentColor           = AlpacaColors.Text.OnAccent,
-                    disabledContainerColor = AlpacaColors.Surface.Elevated,
-                    disabledContentColor   = AlpacaColors.Text.Subtle
-                )
-            ) {
-                Text(
-                    text  = if (isRunning) "Stop server" else "Start server",
-                    style = AlpacaType.TitleMd
+                QuickstartStep(
+                    description = "Send a request — add --stream for streamed output:",
+                    code        = "python3 chat.py \"Hello\" --stream"
                 )
             }
         }
-        Spacer(Modifier.height(32.dp))
     }
 
-    if (showPairingDialog && serverUrl != null) {
+    if (showPairing && url != null) {
         val certFingerprint = remember { TlsManager.getCertFingerprint(context) }
         PairingDialog(
-            serverUrl       = serverUrl!!,
+            serverUrl       = url,
             certFingerprint = certFingerprint,
-            onDismiss = {
-                showPairingDialog = false
+            onDismiss       = {
+                showPairing = false
                 PairingManager.cancel()
                 pairedClients = AuthorizedKeysStore(context).getAll()
             }
@@ -333,32 +260,51 @@ fun ServerScreen(
 // ---- Sub-composables --------------------------------------------------------
 
 @Composable
-private fun PairedClientRow(
+private fun PairedDeviceRow(
     client: AuthorizedKeysStore.AuthorizedKey,
     onRemove: () -> Unit
 ) {
     Row(
-        modifier            = Modifier
+        modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp),
-        verticalAlignment   = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .hairlineBottom(Ink.Divider)
+            .padding(bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text  = client.displayName,
-                style = AlpacaType.BodyMd,
-                color = AlpacaColors.Text.Primary
-            )
-            Spacer(Modifier.height(2.dp))
-            MonoLabel(client.fingerprint.take(16) + "…")
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(client.displayName, style = InkType.Name, color = Ink.Text)
+            Tracked(shortFingerprint(client.fingerprint), InkType.Meta, color = Ink.Meta, maxLines = 1)
         }
-        IconButton(onClick = onRemove) {
-            Icon(
-                imageVector        = Icons.Outlined.Delete,
-                contentDescription = "Remove ${client.displayName}",
-                tint               = AlpacaColors.Text.Muted,
-                modifier           = Modifier.size(18.dp)
+        IconAction(
+            icon               = Ph.X,
+            contentDescription = "Remove ${client.displayName}",
+            onClick            = onRemove,
+            size               = 14.dp,
+            tint               = Ink.TertiaryIcon
+        )
+    }
+}
+
+/** `SHA256:8F3A…C21D` from a hex SHA-256 fingerprint. */
+internal fun shortFingerprint(hex: String): String {
+    val h = hex.uppercase(Locale.ROOT)
+    return if (h.length <= 8) "SHA256:$h" else "SHA256:${h.take(4)}…${h.takeLast(4)}"
+}
+
+@Composable
+private fun QuickstartStep(description: String, code: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(description, style = InkType.Secondary, color = Ink.Secondary)
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, Ink.Border)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+        ) {
+            Text(
+                code,
+                style = InkType.Secondary.copy(fontFamily = FontFamily.Monospace),
+                color = Ink.Text
             )
         }
     }
@@ -385,158 +331,54 @@ private fun PairingDialog(
     }
     val qrBitmap = remember(qrPayload) { generateQrBitmap(qrPayload, 512) }
 
-    AlertDialog(
-        onDismissRequest  = onDismiss,
-        containerColor    = AlpacaColors.Surface.Card,
-        titleContentColor = AlpacaColors.Text.Primary,
-        textContentColor  = AlpacaColors.Text.Body,
-        shape             = RoundedCornerShape(12.dp),
-        title = {
-            Column {
-                Text("Pair new device", style = AlpacaType.TitleMd, color = AlpacaColors.Text.Primary)
-                Spacer(Modifier.height(4.dp))
-                MonoLabel("SCAN QR OR ENTER PIN")
+    InkDialog(
+        title     = "Pair a new device",
+        subtitle  = "Scan the QR or enter the PIN",
+        onDismiss = onDismiss,
+        actions   = {
+            if (remainingSec <= 0) {
+                TextAction("New PIN", onClick = {
+                    pin = PairingManager.generatePin()
+                    remainingSec = (PairingManager.remainingMs() / 1000).toInt()
+                })
             }
-        },
-        text = {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier            = Modifier.fillMaxWidth()
+            TextAction("Close", onClick = onDismiss, color = Ink.Meta)
+        }
+    ) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            // QR codes need a light quiet zone to scan: the one white surface in the app.
+            Box(
+                Modifier
+                    .size(220.dp)
+                    .background(androidx.compose.ui.graphics.Color.White)
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center
             ) {
                 if (qrBitmap != null) {
-                    Box(
-                        modifier = Modifier
-                            .size(220.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(androidx.compose.ui.graphics.Color.White)
-                            .padding(8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            bitmap             = qrBitmap.asImageBitmap(),
-                            contentDescription = "Pairing QR code",
-                            modifier           = Modifier.fillMaxSize()
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier         = Modifier
-                            .size(220.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(AlpacaColors.Surface.Elevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Outlined.QrCode,
-                            contentDescription = null,
-                            modifier           = Modifier.size(80.dp),
-                            tint               = AlpacaColors.Accent.Primary
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(20.dp))
-                MonoLabel("PIN CODE")
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text  = pin,
-                    style = AlpacaType.DisplayHeadline.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                    color = AlpacaColors.Accent.Primary
-                )
-
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text  = if (remainingSec > 0) "Expires in ${remainingSec}s" else "Expired",
-                    style = AlpacaType.BodySm,
-                    color = if (remainingSec > 30) AlpacaColors.State.Success else AlpacaColors.State.Warning
-                )
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text  = "Scan the QR code with your client app, or use the PIN manually.",
-                    style = AlpacaType.BodySm,
-                    color = AlpacaColors.Text.Muted
-                )
-
-                if (remainingSec <= 0) {
-                    Spacer(Modifier.height(8.dp))
-                    InlineCTA(
-                        text    = "Regenerate PIN",
-                        onClick = {
-                            pin = PairingManager.generatePin()
-                            remainingSec = (PairingManager.remainingMs() / 1000).toInt()
-                        }
+                    Image(
+                        bitmap             = qrBitmap.asImageBitmap(),
+                        contentDescription = "Pairing QR code",
+                        modifier           = Modifier.fillMaxSize()
                     )
+                } else {
+                    InkIcon(Ph.QrCode, 80.dp, tint = Ink.Black)
                 }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close", style = AlpacaType.LabelLg, color = AlpacaColors.Text.Primary)
             }
         }
-    )
-}
-
-@Composable
-private fun ConnectWithSection(
-    url: String,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 20.dp)
-    ) {
-        MonoLabel("PYTHON QUICKSTART · scripts/ IN REPO")
-        Spacer(Modifier.height(16.dp))
-
-        ConnectEntry(
-            title       = "1. Pair once",
-            description = "Tap \"Pair device\", note the 6-digit PIN, then run:",
-            code        = "python3 pair.py"
-        )
-        Spacer(Modifier.height(16.dp))
-        ConnectEntry(
-            title       = "2. Send a request",
-            description = "Chat with the model — add --stream for streamed output:",
-            code        = "python3 chat.py \"Hello\" --stream"
-        )
-    }
-}
-
-@Composable
-private fun ConnectEntry(
-    title: String,
-    description: String,
-    code: String
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text  = title,
-            style = AlpacaType.TitleMd,
-            color = AlpacaColors.Text.Primary
-        )
-        Spacer(Modifier.height(4.dp))
-        Text(
-            text  = description,
-            style = AlpacaType.BodySm,
-            color = AlpacaColors.Text.Muted
-        )
-        Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(AlpacaColors.Surface.Recess)
-                .padding(12.dp)
-        ) {
-            Text(
-                text  = code,
-                style = AlpacaType.MonoBody,
-                color = AlpacaColors.Text.Body
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Tracked("PIN", InkType.Label, color = Ink.Meta)
+            Tracked(pin, InkType.ScreenTitle.copy(fontSize = 26.sp), color = Ink.White)
+            Tracked(
+                if (remainingSec > 0) "Expires in ${remainingSec}s" else "Expired",
+                InkType.Label,
+                color = if (remainingSec > 30) Ink.Meta else Ink.White
             )
         }
+        Text(
+            "Scan the code with your client app, or type the PIN.",
+            style = InkType.Secondary,
+            color = Ink.Secondary
+        )
     }
 }
 
@@ -555,15 +397,5 @@ private fun generateQrBitmap(content: String, sizePx: Int): Bitmap? {
         bmp
     } catch (e: Exception) {
         null
-    }
-}
-
-// ---- Previews ---------------------------------------------------------------
-
-@Preview(showBackground = true, name = "ServerScreen — stopped, no model")
-@Composable
-private fun ServerScreenStoppedPreview() {
-    AIpacaTheme {
-        ServerScreen()
     }
 }

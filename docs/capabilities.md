@@ -265,9 +265,9 @@ An idle-time background worker (`MemoryMaintenanceWorker`) runs periodically to 
 
 ### Memory Screen
 
-A dedicated bottom-navigation tab (`Memory`) provides full visibility and control over the memory system:
+A dedicated screen (`Mem` in the navigation rail) provides full visibility and control over the memory system:
 
-- **Four sub-tabs:** Soul, User, Facts, Sessions — one per memory file plus the session index
+- **Four sub-tabs:** Soul, You, Facts, Sessions — one per memory file plus the session index
 - **Editor:** view and edit memory file contents with save/revert
 - **Approval flow:** review and approve or reject pending proposals from the learn pass, or from a `files` write to `agent_soul.md`
 - **Undo:** restore a previous version of any memory file — up to `MAX_BACKUPS = 5` generations are kept per file
@@ -414,7 +414,10 @@ Built with Jetpack Compose and Material 3 (dark theme).
 - Modes overflow menu: System Prompt, Thinking (shown only when the model supports it), Web search, and Ollama
 - Ollama connection dialog (server URL + model name, test connectivity)
 - Collapsible thinking blocks for reasoning models
-- Drawer menu with conversation history and settings
+- History sheet with conversation history (from the rail's clock icon)
+- Model World on the empty chat: the loaded model drawn from its GGUF header — one ring per
+  block, one point per KV head, radius from the embedding width, twist from the trained
+  context, dot weight from the quantisation — with a six-cell header readout
 
 There is no execution-tier chip on the Chat tab. The tier label is shown only on the Memory tab (see below).
 
