@@ -207,7 +207,7 @@ class ModelDownloadManagerTest {
 
         startAndAwait()
 
-        val downloadedFile = File(tempDir, fileName)
+        val downloadedFile = ModelDownloadManager.fileFor(repoId, fileName)
         assertTrue(downloadedFile.exists())
         assertEquals(payload.size.toLong(), downloadedFile.length())
 
@@ -217,6 +217,33 @@ class ModelDownloadManagerTest {
         assertEquals(fileName, entries.first().fileName)
         assertEquals(ModelType.LLM, entries.first().modelType)
         assertEquals(downloadedFile.absolutePath, entries.first().filePath)
+    }
+
+    @Test
+    fun `repos shipping the same file name keep separate files`() {
+        val gemma = "unsloth/gemma-4-E2B-it-GGUF"
+        val qwen = "unsloth/Qwen3.5-4B-GGUF"
+        val mmproj = "mmproj-F16.gguf"
+        val engine = MockEngine { request ->
+            val body = if ("gemma" in request.url.encodedPath) ByteArray(300) { 1 } else ByteArray(200) { 2 }
+            respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentLength, body.size.toString()))
+        }
+        ModelDownloadManager.configureForTest(
+            store = store,
+            modelsDir = tempDir,
+            httpClient = HttpClient(engine),
+            scope = scope
+        )
+
+        startAndAwait(gemma, mmproj)
+        startAndAwait(qwen, mmproj)
+
+        assertEquals(300L, ModelDownloadManager.fileFor(gemma, mmproj).length())
+        assertEquals(200L, ModelDownloadManager.fileFor(qwen, mmproj).length())
+        assertEquals(2, ModelDownloadManager.downloadedModels.value.map { it.filePath }.toSet().size)
+
+        ModelDownloadManager.deleteDownload(qwen, mmproj)
+        assertTrue(ModelDownloadManager.fileFor(gemma, mmproj).exists(), "deleting one repo's file keeps the other")
     }
 
     @Test
@@ -230,7 +257,7 @@ class ModelDownloadManagerTest {
         assertEquals(DownloadState.FAILED, progress.state)
         assertTrue(progress.error != null)
         assertTrue(ModelDownloadManager.downloadedModels.value.isEmpty())
-        assertTrue(!File(tempDir, fileName).exists())
+        assertTrue(!ModelDownloadManager.fileFor(repoId, fileName).exists())
     }
 
     @Test
@@ -240,12 +267,12 @@ class ModelDownloadManagerTest {
 
         startAndAwait()
 
-        assertTrue(File(tempDir, fileName).exists())
+        assertTrue(ModelDownloadManager.fileFor(repoId, fileName).exists())
         assertEquals(1, ModelDownloadManager.downloadedModels.value.size)
 
         ModelDownloadManager.deleteDownload(repoId, fileName)
 
-        assertTrue(!File(tempDir, fileName).exists())
+        assertTrue(!ModelDownloadManager.fileFor(repoId, fileName).exists())
         assertTrue(ModelDownloadManager.downloadedModels.value.isEmpty())
         assertTrue(store.list().isEmpty())
     }

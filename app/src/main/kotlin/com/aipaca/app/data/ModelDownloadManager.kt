@@ -149,8 +149,9 @@ object ModelDownloadManager {
         _downloads.update { it + (k to DownloadProgress(repoId, fileName, state = DownloadState.DOWNLOADING)) }
 
         val job = scope.launch {
-            val targetFile = File(modelsDir, fileName)
+            val targetFile = fileFor(repoId, fileName)
             try {
+                targetFile.parentFile?.mkdirs()
                 httpClient.prepareGet(downloadUrl).execute { response ->
                     if (!response.status.isSuccess()) {
                         throw ModelDownloadException(
@@ -248,7 +249,7 @@ object ModelDownloadManager {
         activeJobs.remove(k)?.cancel()
 
         val entry = store.list().firstOrNull { it.repoId == repoId && it.fileName == fileName }
-        val file = if (entry != null) File(entry.filePath) else File(modelsDir, fileName)
+        val file = if (entry != null) File(entry.filePath) else fileFor(repoId, fileName)
         file.delete()
 
         _downloadedModels.value = store.remove(repoId, fileName)
@@ -264,6 +265,13 @@ object ModelDownloadManager {
     internal fun activeJob(repoId: String, fileName: String): Job? = activeJobs[key(repoId, fileName)]
 
     private fun key(repoId: String, fileName: String) = "$repoId/$fileName"
+
+    /**
+     * Where a download lands: one folder per repo, so repos that ship the same file name
+     * (every vision repo has an `mmproj-F16.gguf`) cannot overwrite each other.
+     */
+    internal fun fileFor(repoId: String, fileName: String): File =
+        File(File(modelsDir, repoId.replace('/', '_')), fileName)
 
     private fun defaultHttpClient(): HttpClient = HttpClient(CIO) {
         install(HttpTimeout) {
