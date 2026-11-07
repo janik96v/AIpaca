@@ -93,7 +93,7 @@ data class ClientInfo(
     val name: String = "firn",
     // Reported to MCP servers during initialize. Keep in sync with versionName
     // in app/build.gradle.kts.
-    val version: String = "0.5.0"
+    val version: String = "1.0.0"
 )
 
 @Serializable

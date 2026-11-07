@@ -8,6 +8,10 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] – 2026-11-07
+
 ### Changed
 - **Renamed to firn.** New application ID `ch.firn.app` (installs alongside the old
   `com.aipaca.app` build — uninstall that one by hand), Kotlin package `ch.firn.app`, native
@@ -166,7 +170,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Python example scripts (`chat.py`, `pair.py`)
 - Full API client guide (`docs/api-client-guide.md`)
 
-[Unreleased]: https://github.com/janik96v/AIpaca/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/janik96v/AIpaca/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/janik96v/AIpaca/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/janik96v/AIpaca/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/janik96v/AIpaca/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/janik96v/AIpaca/compare/v0.2.0...v0.3.0
