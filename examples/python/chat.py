@@ -30,8 +30,9 @@ CFG_FILE = os.path.expanduser("~/.firn/config.json")
 
 class PinnedCertAdapter(HTTPAdapter):
     """Verify TLS cert against pinned file but skip hostname check.
-    firn's self-signed cert has CN=firn (no IP SAN), so hostname
-    verification always fails. Security is maintained via fingerprint pinning.
+    firn's self-signed cert (CN=firn) may lack an IP SAN for the address
+    you connect to, so hostname verification is skipped. Security is
+    maintained via fingerprint pinning.
 
     Note: urllib3 1.x has TWO hostname checks — one in ssl.SSLContext and one
     internal to urllib3. Both must be disabled via check_hostname=False and

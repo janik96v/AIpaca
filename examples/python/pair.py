@@ -6,8 +6,8 @@ Usage:
     pip install -r requirements.txt
     python3 pair.py
 
-On your phone: Server tab → PAIR_NEW_DEVICE → enter the PIN shown here.
-After pairing, your key and the server config are saved to ~/.firn/.
+On your phone: SRV → Start server → Pair a new device, then enter the PIN shown there.
+After pairing, your key, the pinned server cert and the config are saved to ~/.firn/.
 """
 
 import base64
@@ -36,8 +36,9 @@ os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
 
 class PinnedCertAdapter(HTTPAdapter):
     """Verify TLS cert against pinned file but skip hostname check.
-    firn's self-signed cert has CN=firn (no IP SAN), so hostname
-    verification always fails. Security is maintained via fingerprint pinning.
+    firn's self-signed cert (CN=firn) may lack an IP SAN for the address
+    you connect to, so hostname verification is skipped. Security is
+    maintained via fingerprint pinning.
 
     Note: urllib3 1.x has TWO hostname checks — one in ssl.SSLContext and one
     internal to urllib3. Both must be disabled via check_hostname=False and

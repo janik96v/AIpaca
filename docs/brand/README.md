@@ -9,17 +9,16 @@
 
 | File | Use |
 |---|---|
-| svg/firn-mark.svg | Primary mark with glowing ridge, for dark backgrounds |
-| svg/firn-mark-thinking.svg | Thinking state, static |
-| svg/firn-mark-thinking-animated.svg | Thinking state, animated (lit path wanders through the net) |
-| svg/firn-mark-thinking-small-animated.svg | Thinking state, animated, for 16–48 px (status line, chat) |
-| svg/firn-mark-flat-white.svg / -black.svg | Flat mark without glow: print, embossing, single-colour use |
-| svg/firn-mark-small-white.svg / -black.svg | 16–48 px: heavier lines, the two long crossing links removed |
-| svg/firn-app-icon.svg | App icon master, 1024 px: black, top haze, glow, grain |
-| svg/firn-app-icon-small.svg | App icon for ≤ 192 px, no glow, larger mark |
-| svg/firn-wordmark-white.svg / -black.svg | FIRN wordmark, outlined |
-| svg/firn-lockup-white.svg / -black.svg | Mark + wordmark, horizontal |
-| png/… | Ready-made PNG exports (transparent where the name has no "app-icon") |
+| firn-mark.svg | Primary mark with glowing ridge, for dark backgrounds |
+| firn-mark-thinking.svg | Thinking state, static |
+| firn-mark-thinking-animated.svg | Thinking state, animated (lit path wanders through the net) |
+| firn-mark-thinking-small-animated.svg | Thinking state, animated, for 16–48 px (status line, chat) |
+| firn-mark-flat-white.svg / -black.svg | Flat mark without glow: print, embossing, single-colour use |
+| firn-mark-small-white.svg / -black.svg | 16–48 px: heavier lines, the two long crossing links removed |
+| firn-app-icon.svg | App icon master, 1024 px: black, top haze, glow, grain |
+| firn-app-icon-small.svg | App icon for ≤ 192 px, no glow, larger mark |
+| firn-wordmark-white.svg / -black.svg | FIRN wordmark, outlined |
+| firn-lockup-white.svg / -black.svg | Mark + wordmark, horizontal |
 
 ## Rules
 

@@ -11,7 +11,7 @@ package ch.firn.app.agent
  * from the model's measured capabilities.
  *
  * Evidence behind the thresholds:
- * - `docs/internal/research/20_kurzbericht_edge_kontext.md` Hebel C: at an 8K budget,
+ * - arXiv:2605.26165: at an 8K budget,
  *   uncompressed tool JSON collapses tool-calling to ~2.6 % EM while compact schemas
  *   restore +20.5 pp. Tool-schema size is a binary enablement factor, so the tool
  *   count is capped rather than "everything that is registered".

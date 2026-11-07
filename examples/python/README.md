@@ -12,19 +12,19 @@ pip install -r requirements.txt
 
 ### 1. Start the server on your phone
 
-Open firn → **Server tab** → load a model → tap **Start server**.
+Open firn, load a model on **MDL**, then open **SRV** and tap **Start server**.
 
 Note the address shown (e.g. `https://192.168.1.42:8443`). Your Mac and phone must be on the same WiFi network.
 
 ### 2. Pair your machine (once)
 
-On your phone tap **PAIR_NEW_DEVICE** and note the 6-digit PIN. Then run:
+On **SRV** tap **Pair a new device** and note the 6-digit PIN. Then run:
 
 ```bash
 python3 pair.py
 ```
 
-Enter the server URL, PIN, and a device name when prompted. Your key pair and the server config are saved to `~/.firn/`.
+Enter the server URL, PIN, and a device name when prompted. Your key pair, the pinned server certificate and the config are saved to `~/.firn/`.
 
 ### 3. Send a request
 
@@ -50,7 +50,7 @@ The signed message is `Firn-Ed25519:<timestamp>`. The timestamp must be within *
 
 ## TLS note
 
-firn uses a self-signed certificate. The scripts use `verify=False` for development convenience. For production use, pin the certificate fingerprint returned by the pairing response — see the full [API Client Guide](../../docs/api-client-guide.md) for details.
+firn uses a self-signed certificate. `pair.py` downloads it, checks it against the fingerprint returned by the pairing response and saves it as `~/.firn/server.pem`; `chat.py` then trusts only that certificate. If the phone's IP changes, firn regenerates the certificate — run `pair.py` again.
 
 ## Troubleshooting
 
@@ -58,8 +58,8 @@ firn uses a self-signed certificate. The scripts use `verify=False` for developm
 |---|---|
 | `401 Public key not registered` | Run `pair.py` again |
 | `401 Timestamp outside allowed window` | Sync your clock: `sudo ntpdate pool.ntp.org` |
-| `503 model_not_loaded` | Load a GGUF model in the firn app first |
+| `503 model_not_loaded` | Load a model in the firn app first (MDL) |
 | Connection refused | Check that phone and Mac are on the same WiFi |
-| SSL error | Expected — use `verify=False` or see cert pinning in the API guide |
+| SSL error / certificate verify failed | The server certificate changed — run `pair.py` again |
 
 For the full API reference, error codes, and examples in other languages (curl, Kotlin, Swift), see [`docs/api-client-guide.md`](../../docs/api-client-guide.md).

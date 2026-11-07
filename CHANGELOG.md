@@ -60,6 +60,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
   or as a per-layer array; it now also reports `nHead`, `general.name` and an exact parameter
   count from the tensor shapes (previously a rough estimate)
 - Loading a model no longer depends on the Models screen staying open
+- Downloads from different repos no longer overwrite each other: each repo's files are kept in
+  their own folder (two repos shipping `mmproj-F16.gguf` broke one model's vision encoder).
+  Existing downloads keep working
 
 ---
 

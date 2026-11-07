@@ -1,4 +1,7 @@
-# firn
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/firn-lockup-white.svg">
+  <img src="docs/brand/firn-lockup-black.svg" alt="firn" width="240">
+</picture>
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-API%2028%2B-green.svg)](https://developer.android.com/about/versions/pie)
@@ -14,9 +17,9 @@ firn runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It
 
 ## Screenshots
 
-| Chat | Chat History | Models | Server |
+| Chat | Memory | Models | Server |
 |:---:|:---:|:---:|:---:|
-| ![Chat tab](docs/screenshots/chat_tab.jpeg) | ![Chat history](docs/screenshots/chat_history.jpeg) | ![Models tab](docs/screenshots/model_tab.jpeg) | ![Server tab](docs/screenshots/server_tab.jpeg) |
+| ![Chat tab with the model visualised from its GGUF header](docs/screenshots/chat.jpeg) | ![Memory tab with the agent's soul file](docs/screenshots/memory.jpeg) | ![Model browser with downloadable GGUF models](docs/screenshots/models.jpeg) | ![Server tab for the OpenAI-compatible endpoint](docs/screenshots/server.jpeg) |
 
 ---
 
@@ -29,6 +32,7 @@ firn runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It
 - Streaming token output with real-time display
 - Encrypted conversation history with multiple saved chats
 - Reasoning/thinking token support (DeepSeek-style models)
+- Model World: the loaded model drawn live from its GGUF header (one ring per block, one point per KV head)
 
 ### Vision / Multimodal
 - Image + text prompts via llama.cpp's mtmd library
@@ -38,7 +42,7 @@ firn runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It
 - Attach images and documents directly in chat
 
 ### Speech-to-Text
-- On-device transcription via whisper.cpp (v1.8.4)
+- On-device transcription via whisper.cpp (v1.9.1)
 - GPU-accelerated (OpenCL, standard attention path)
 - Real-time microphone input with automatic transcription
 
@@ -59,7 +63,7 @@ firn runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It
 - Route generation through a local-network Ollama server for testing with larger models
 - OpenAI-compatible streaming via Ktor HTTP client
 - Full agent tool-calling pipeline over Ollama's native format
-- Connection dialog with connectivity test in the Modes menu
+- Server URL and model set in the Modes menu (sliders icon on the rail)
 
 ### OpenAI-Compatible REST API
 - HTTPS server on port 8443 with self-signed TLS certificates
@@ -98,20 +102,20 @@ git submodule update --init --recursive   # pulls llama.cpp + whisper.cpp
 
 ### 3. Download a model
 
-Download a GGUF file and copy it to your phone (USB, cloud storage, or adb push).
-The in-app **Models tab** links directly to each model's Hugging Face page.
+**MDL tab** → **Browse models** → tap **Download** next to a model. You can also search Hugging Face from the same screen.
+To use a GGUF file that is already on the phone, tap **Open a .gguf file** on the MDL tab instead.
 
 | Model | Size | Quant | GPU | Vision | Tool-Calling |
 |---|---|---|---|---|---|
 | Gemma 4 E2B Instruct (unsloth) | ~2.5 GB | Q4_0 | Yes | Yes | Yes |
 | **Qwen 2.5 3B Instruct** (recommended) | ~1.9 GB | Q4_0 | Yes | No | Yes |
-| Qwen3 4B | ~2.6 GB | Q4_0 | Yes | Yes | Yes |
+| Qwen3 4B | ~2.6 GB | Q4_0 | Yes | No | Yes |
 | Qwen3.5 4B (unsloth) | ~2.7 GB | Q4_K_M | Yes | Yes | Yes |
 | HY-MT 1.5 1.8B (translation, experimental) | ~440 MB | TBD | TBD | No | TBD |
 
-The in-app **Models tab** also lists three Whisper speech-to-text models (Tiny/Base/Small).
+The model browser also lists three Whisper speech-to-text models (Tiny/Base/Small).
 
-> **GPU compatibility:** firn uses the Adreno OpenCL backend with optimized kernels. GPU-accelerated quantizations: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU automatically.
+> **GPU compatibility:** firn uses the Adreno OpenCL backend with optimized kernels. GPU-accelerated quantizations: Q4_0 (pure), Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU automatically.
 
 ### 4. Build and run
 
@@ -127,18 +131,18 @@ Or via CLI:
 
 ### 5. Load model in app
 
-**Chat tab** → tap **"Load model from storage"** → pick the `.gguf` file.
+**MDL tab** → under **On this phone**, tap **Load** next to the model.
 The model loads in the background (~5-15 seconds depending on size and GPU offload).
 
 ### 6. (Optional) Start the API server
 
-**Server tab** → tap **"START_SERVER"**
+**SRV tab** → tap **Start server**
 
 The notification shows: `firn server • https://192.168.x.x:8443`
 
 ### 7. (Optional) Pair a client device
 
-**Server tab** → tap **"PAIR_NEW_DEVICE"** → scan the QR code or enter the 6-digit PIN.
+**SRV tab** → tap **Pair a new device** → scan the QR code or enter the 6-digit PIN.
 
 ```bash
 # Health check — no auth needed
@@ -156,16 +160,17 @@ curl -k -X POST https://192.168.1.XX:8443/v1/chat/completions \
 ## Architecture
 
 ```
-UI (Jetpack Compose + Material 3)
+UI (Jetpack Compose, Instrument design system)
     |  StateFlow
 EngineState (process-scoped singleton)
     |-- LlamaCppEngine --> llama_jni.cpp --> llama.cpp (GPU/CPU)
     |-- WhisperEngine ---> whisper_jni.cpp --> whisper.cpp (GPU/CPU)
     |-- OllamaEngine ----> Ktor HTTP Client --> Ollama server (local network)
-    +-- AgentOrchestrator --> MCP tools (Streamable HTTP)
-         |-- MemoryStore / SkillStore / AgentWorkspace (filesystem)
-         |-- files tool (sandboxed read/write over memory, skills, workspace)
-         +-- LearnPass (background extraction)
+    |-- AgentOrchestrator
+    |    |-- MCP tools (Streamable HTTP/SSE, e.g. Tavily web search)
+    |    +-- Local tools (memory, files, session_search/view, skill_view/manage)
+    +-- Memory loops (LearnPass, SessionSummarizer, idle-time consolidation)
+         +-- MemoryStore / SkillStore / AgentWorkspace (filesystem)
 
 --- parallel ---
 
@@ -224,11 +229,13 @@ For full request/response examples, authentication details, and client code (Pyt
 - [x] In-app HuggingFace model browser and downloader
 - [x] Sandboxed `files` tool for agent self-inspection (Deep tier)
 - [x] Architecture-aware, RAM-aware context window sizing
+- [x] Instrument redesign with the GGUF Model World
+- [x] Google Play readiness (API 36, 16 KB page alignment)
 
 ### Planned
 
-- [ ] KV-cache prefix reuse across agent turns (PR2 Phase 1 — in-session)
-- [ ] Persistent KV-cache for system prompt (PR2 Phase 2)
+- [ ] KV-cache prefix reuse across agent turns (in-session)
+- [ ] Persistent KV-cache for system prompt
 - [ ] Multi-request queuing for API server
 - [ ] Programmatic tool calling (in-process JS sandbox)
 - [ ] iOS port (shared llama.cpp core + SwiftUI)

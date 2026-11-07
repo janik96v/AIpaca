@@ -227,7 +227,7 @@ fun ServerScreen(
                 modifier            = Modifier.padding(top = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Tracked("Python quickstart · scripts/ in repo", InkType.Count, color = Ink.Meta)
+                Tracked("Python quickstart · examples/python in repo", InkType.Count, color = Ink.Meta)
                 QuickstartStep(
                     description = "Pair once — tap “Pair a new device”, note the PIN, then run:",
                     code        = "python3 pair.py"

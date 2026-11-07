@@ -46,3 +46,6 @@ venv/
 
 # Claude Code scratch worktrees
 .claude/worktrees/
+
+# Internal notes (plans, research, lab drafts) — kept locally, not published
+docs/internal/

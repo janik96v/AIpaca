@@ -23,8 +23,9 @@ data class GenerationChunk(
 
 /**
  * Quantization and GPU compatibility info for a loaded model.
- * [gpuCompatible] is true only for Q4_0 and Q6_K — the quant types with
- * optimised Adreno OpenCL kernels. All others silently fall back to CPU.
+ * [gpuCompatible] is true for the quant types the Adreno OpenCL backend runs
+ * (pure Q4_0, Q4_1, Q4_K_S/M, Q5_K_S/M, Q6_K, Q8_0, IQ4_NL). All others
+ * silently fall back to CPU.
  */
 data class ModelInfo(
     val quant: String       = "unknown",

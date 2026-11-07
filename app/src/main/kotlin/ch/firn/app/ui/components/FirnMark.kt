@@ -24,7 +24,7 @@ import kotlin.math.min
 
 /*
  * The firn mark, small version — a ridge with a 1·2·3 neural net inside —
- * transcribed from docs/design-rebranding/brand/firn-mark-small-white.svg
+ * transcribed from docs/brand/firn-mark-small-white.svg
  * (viewBox 104 80 192 140). Drawn rather than shipped as a drawable so the
  * thinking state (firn-mark-thinking-small-animated.svg) can light one path
  * through the net at a time.

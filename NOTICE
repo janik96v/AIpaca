@@ -31,6 +31,17 @@ License: MIT
 Copyright (c) 2022-2024 Georgi Gerganov
 
 --------------------------------------------------------------------------------
+whisper.cpp
+--------------------------------------------------------------------------------
+Bundled as a git submodule at app/src/main/cpp/whisper.cpp/
+Source: https://github.com/ggml-org/whisper.cpp
+License: MIT
+Copyright (c) 2023-2026 The ggml authors
+
+The full text of the MIT License is provided in the submodule directory at
+app/src/main/cpp/whisper.cpp/LICENSE.
+
+--------------------------------------------------------------------------------
 Ktor
 --------------------------------------------------------------------------------
 Source: https://github.com/ktorio/ktor
@@ -50,6 +61,13 @@ AndroidX (Compose, Lifecycle, Activity, Navigation, Security-Crypto, Core)
 Source: https://android.googlesource.com/platform/frameworks/support/
 License: Apache License, Version 2.0
 Copyright (C) The Android Open Source Project
+
+--------------------------------------------------------------------------------
+PdfBox-Android
+--------------------------------------------------------------------------------
+Source: https://github.com/TomRoush/PdfBox-Android
+License: Apache License, Version 2.0
+Copyright The Apache Software Foundation and PdfBox-Android contributors
 
 --------------------------------------------------------------------------------
 Material Icons Extended
@@ -125,7 +143,7 @@ Copyright The Netty Project
 Model weights
 ================================================================================
 
-AIpaca does not bundle any model weights. Users download GGUF model files from
+firn does not bundle any model weights. Users download GGUF model files from
 third-party sources (e.g. HuggingFace). Those models are licensed independently
 by their respective publishers; please review the license of any model you load
-into AIpaca.
+into firn.

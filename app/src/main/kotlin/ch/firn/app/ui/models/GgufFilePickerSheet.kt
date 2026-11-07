@@ -336,7 +336,7 @@ private fun PickerErrorState(
 
 // ---- Helpers --------------------------------------------------------------
 
-/** GPU-compatible quant tokens — mirrors the GPU compatibility guide in BrowseModels. */
+/** GPU-compatible quant tokens — mirrors the list in docs/architecture.md (GPU Acceleration). */
 private val gpuCompatibleQuants = setOf(
     "Q4_0", "Q4_1", "Q4_K_S", "Q4_K_M",
     "Q5_K_S", "Q5_K_M", "Q6_K", "Q8_0", "IQ4_NL"
@@ -348,8 +348,7 @@ private val cpuOnlyQuants = setOf("Q5_0", "Q5_1", "Q2_K", "Q3_K")
 /**
  * Derives a (label, tone) pair for the GPU-compatibility chip from a GGUF
  * file name, by matching the known quantization tokens used across the
- * repo's Adreno OpenCL backend (see the GPU compatibility guide in BrowseModels for the
- * authoritative list).
+ * repo's Adreno OpenCL backend.
  *
  * `internal` (not `private`) so [GgufFilePickerSheetTest] can exercise it
  * directly as a pure function, without pulling in Compose/Robolectric.

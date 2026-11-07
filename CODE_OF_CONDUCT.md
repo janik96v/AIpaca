@@ -2,7 +2,7 @@
 
 ## Our Standards
 
-We want AIpaca to be a welcoming project for everyone. We expect all participants to:
+We want firn to be a welcoming project for everyone. We expect all participants to:
 
 - Be respectful and constructive in discussions and reviews
 - Focus feedback on ideas and code, not on people
@@ -17,7 +17,7 @@ We want AIpaca to be a welcoming project for everyone. We expect all participant
 
 ## Reporting
 
-If you witness or experience unacceptable behaviour, please open a private GitHub issue or email the maintainer directly. All reports will be reviewed and handled confidentially.
+If you witness or experience unacceptable behaviour, please contact the maintainer ([@janik96v](https://github.com/janik96v)) privately rather than in a public issue. All reports will be reviewed and handled confidentially.
 
 ## Enforcement
 
