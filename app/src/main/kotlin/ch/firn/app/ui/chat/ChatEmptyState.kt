@@ -19,9 +19,10 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import ch.firn.app.ui.components.ChipButton
 import ch.firn.app.ui.components.FadeRule
-import ch.firn.app.ui.components.OutlineButton
+import ch.firn.app.ui.components.ButtonKind
+import ch.firn.app.ui.components.SoftButton
+import ch.firn.app.ui.components.SoftChip
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.world.HeaderReadout
 import ch.firn.app.ui.components.world.ModelWorld
@@ -173,8 +174,8 @@ private fun CopyBlock(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement   = Arrangement.spacedBy(8.dp)
                 ) {
-                    ChipButton("Summarise a PDF", onClick = onSummarise)
-                    ChipButton("What do you recall", onClick = onRecall)
+                    SoftChip("Summarise a PDF", onClick = onSummarise, large = true)
+                    SoftChip("What do you recall", onClick = onRecall, large = true)
                 }
             }
             presence.chatLoading -> {
@@ -199,9 +200,10 @@ private fun CopyBlock(
                     color    = Ink.Body,
                     modifier = Modifier.widthIn(max = 276.dp)   // 34ch
                 )
-                OutlineButton(
+                SoftButton(
                     label    = "Open models",
                     icon     = Ph.Cube,
+                    kind     = ButtonKind.Primary,
                     onClick  = onOpenModels,
                     modifier = Modifier.padding(top = 2.dp)
                 )

@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import ch.firn.app.EngineState
 import ch.firn.app.engine.formatContext
 import ch.firn.app.ui.components.InkDialog
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.theme.Ink
@@ -44,7 +44,7 @@ fun ContextWindowDialog(
         title     = "Context window",
         subtitle  = name,
         onDismiss = onDismiss,
-        actions   = { TextAction("Cancel", onClick = onDismiss, color = Ink.Meta) }
+        actions   = { SoftButton("Cancel", onClick = onDismiss) }
     ) {
         val c = config
         Text(

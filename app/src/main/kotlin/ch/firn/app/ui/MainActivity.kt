@@ -173,6 +173,7 @@ private fun FirnApp() {
                 ) {
                     StatusLine(
                         text          = presence.statusLine,
+                        thinking      = presence.streaming,
                         railCollapsed = railHidden,
                         onExpandRail  = { railHidden = false },
                         onHistory     = { historyOpen = true },

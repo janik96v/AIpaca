@@ -13,10 +13,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import ch.firn.app.ui.components.ButtonKind
 import ch.firn.app.ui.components.FieldLabel
 import ch.firn.app.ui.components.InkDialog
 import ch.firn.app.ui.components.InkTextField
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.theme.Ink
 import ch.firn.app.ui.theme.InkType
 
@@ -37,8 +38,8 @@ fun SystemPromptDialog(
         subtitle  = "Instruction for the model",
         onDismiss = { onSave(value); onDismiss() },
         actions   = {
-            TextAction("Clear", onClick = onClear, color = Ink.Meta)
-            TextAction("Done", onClick = { onSave(value) })
+            SoftButton("Clear", onClick = onClear)
+            SoftButton("Done", onClick = { onSave(value) }, kind = ButtonKind.Primary)
         }
     ) {
         InkTextField(
@@ -66,8 +67,8 @@ fun WebSearchKeyDialog(
             subtitle  = "Tavily API key",
             onDismiss = onDismiss,
             actions   = {
-                TextAction("Delete key", onClick = onClear, color = Ink.Meta)
-                TextAction("Continue", onClick = onContinue)
+                SoftButton("Delete key", onClick = onClear)
+                SoftButton("Continue", onClick = onContinue, kind = ButtonKind.Primary)
             }
         ) {
             Text("API key  ••••••••••••", style = InkType.Body, color = Ink.Text)
@@ -85,8 +86,8 @@ fun WebSearchKeyDialog(
             subtitle  = "Tavily API key for web search",
             onDismiss = onDismiss,
             actions   = {
-                TextAction("Cancel", onClick = onDismiss, color = Ink.Meta)
-                TextAction("Save", onClick = { onSave(key.trim()) }, enabled = key.isNotBlank())
+                SoftButton("Cancel", onClick = onDismiss)
+                SoftButton("Save", onClick = { onSave(key.trim()) }, kind = ButtonKind.Primary, enabled = key.isNotBlank())
             }
         ) {
             InkTextField(
@@ -118,11 +119,12 @@ fun OllamaConnectionDialog(
         subtitle  = if (isConnected) "Connected" else "Disconnected",
         onDismiss = onDismiss,
         actions   = {
-            if (isConnected) TextAction("Disconnect", onClick = onDisconnect, color = Ink.Meta)
-            else TextAction("Cancel", onClick = onDismiss, color = Ink.Meta)
-            TextAction(
+            if (isConnected) SoftButton("Disconnect", onClick = onDisconnect)
+            else SoftButton("Cancel", onClick = onDismiss)
+            SoftButton(
                 if (isConnected) "Update" else "Connect",
                 onClick = { onConnect(url.trim(), model.trim()) },
+                kind    = ButtonKind.Primary,
                 enabled = url.isNotBlank() && model.isNotBlank()
             )
         }

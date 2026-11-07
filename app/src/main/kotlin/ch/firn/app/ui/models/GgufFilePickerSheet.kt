@@ -32,14 +32,14 @@ import ch.firn.app.data.HfFile
 import ch.firn.app.data.HuggingFaceApi
 import ch.firn.app.data.HuggingFaceApiException
 import ch.firn.app.ui.components.ChipTone
-import ch.firn.app.ui.components.OutlineButton
 import ch.firn.app.ui.components.StatusChip
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.components.hairlineTop
 import ch.firn.app.ui.theme.Ink
 import ch.firn.app.ui.theme.InkType
+import ch.firn.app.ui.theme.Ph
 import kotlinx.coroutines.launch
 import java.util.Locale
 import kotlin.math.ln
@@ -231,7 +231,7 @@ fun MmprojFilePickerSheet(
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             contentAlignment = Alignment.CenterEnd
         ) {
-            TextAction("Skip", onClick = ::dismiss, color = Ink.Meta)
+            SoftButton("Skip", onClick = ::dismiss)
         }
     }
 }
@@ -330,7 +330,7 @@ private fun PickerErrorState(
     ) {
         Tracked("Couldn't load files", InkType.Label, color = Ink.White)
         Text(message, style = InkType.Secondary, color = Ink.Secondary)
-        OutlineButton(label = "Retry", onClick = onRetry)
+        SoftButton(label = "Retry", icon = Ph.ArrowsClockwise, onClick = onRetry)
     }
 }
 

@@ -13,11 +13,12 @@ import ch.firn.app.R
 /**
  * Instrument — type system.
  *
- * Inter only, in two weights: 300 for titles, 400 for everything else. The
- * static instances are bundled in `res/font` (SIL OFL 1.1, see NOTICE).
+ * Inter only, in three weights: 300 for titles, 500 for control labels, 400
+ * for everything else. The static instances are bundled in `res/font`
+ * (SIL OFL 1.1, see NOTICE).
  *
- * Tracked uppercase is for chrome only — status, labels, actions. Anything the
- * user actually reads (messages, memory, notes) stays sentence case.
+ * Tracked uppercase is for chrome only — status and labels. Anything the user
+ * reads or taps (messages, memory, notes, button labels) stays sentence case.
  *
  * Tracking and line height are expressed in `em`, exactly as in the design
  * reference, and every style centres its glyphs in the full line box with no
@@ -26,7 +27,8 @@ import ch.firn.app.R
  */
 val Inter: FontFamily = FontFamily(
     Font(R.font.inter_light,   FontWeight.Light),
-    Font(R.font.inter_regular, FontWeight.Normal)
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium,  FontWeight.Medium)
 )
 
 private val CssLineBox = LineHeightStyle(
@@ -115,4 +117,20 @@ object InkType {
 
     /** Composer placeholder: `MESSAGE`, `LOAD A MODEL FIRST`. */
     val Placeholder   = inter(13.sp, 1.6f, .22f)
+
+    // ---- Controls (weight 500, sentence case, no tracking) -----------------
+    /** Primary and secondary buttons. */
+    val Control       = inter(14.sp, 1f, weight = FontWeight.Medium)
+
+    /** Small buttons in rows: `Load`, `Unload`, `Download`. */
+    val ControlSmall  = inter(12.sp, 1f, weight = FontWeight.Medium)
+
+    /** Filter chips. */
+    val Chip          = inter(12.sp, 1f, weight = FontWeight.Medium)
+
+    /** Suggestion chips and segmented-control cells. */
+    val ChipLarge     = inter(13.sp, 1f, weight = FontWeight.Medium)
+
+    /** Settings-card title: `Learning`. */
+    val CardTitle     = inter(14.sp, 1.3f, weight = FontWeight.Medium)
 }

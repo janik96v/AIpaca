@@ -43,14 +43,14 @@ import ch.firn.app.engine.ModelHeader
 import ch.firn.app.engine.ModelHeaders
 import ch.firn.app.engine.formatContext
 import ch.firn.app.ui.components.DotGrid
-import ch.firn.app.ui.components.Emphasis
+import ch.firn.app.ui.components.ButtonKind
 import ch.firn.app.ui.components.IconAction
 import ch.firn.app.ui.components.InkDialog
 import ch.firn.app.ui.components.InkSnackbarHost
-import ch.firn.app.ui.components.OutlineButton
 import ch.firn.app.ui.components.ProgressTrack
+import ch.firn.app.ui.components.QuietLabel
 import ch.firn.app.ui.components.ScreenTitle
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.shell.displayModelName
@@ -146,8 +146,8 @@ fun ModelScreen(modifier: Modifier = Modifier) {
             subtitle  = displayModelName(entry.filePath, ModelHeaders.peek(entry.filePath)),
             onDismiss = { pendingDelete = null },
             actions   = {
-                TextAction("Cancel", onClick = { pendingDelete = null }, color = Ink.Meta)
-                TextAction("Delete", onClick = {
+                SoftButton("Cancel", onClick = { pendingDelete = null })
+                SoftButton("Delete", kind = ButtonKind.Primary, icon = Ph.Trash, onClick = {
                     pendingDelete = null
                     unloadIfLoaded(entry)
                     ModelDownloadManager.deleteDownload(entry.repoId, entry.fileName)
@@ -324,21 +324,20 @@ private fun InstalledModels(
             modifier            = Modifier.padding(top = 4.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            OutlineButton(
+            SoftButton(
                 label        = "Browse models",
                 icon         = Ph.MagnifyingGlass,
                 trailingIcon = Ph.ArrowRight,
+                kind         = ButtonKind.Primary,
                 fillWidth    = true,
-                padding      = PaddingValues(15.dp),
+                padding      = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
                 onClick      = onBrowse
             )
-            OutlineButton(
-                label    = if (importing) "Copying file" else "Open a .gguf file",
-                icon     = Ph.FolderOpen,
-                emphasis = Emphasis.Secondary,
-                enabled  = !importing,
-                padding  = PaddingValues(15.dp),
-                onClick  = onOpenFile
+            SoftButton(
+                label   = if (importing) "Copying file" else "Open a .gguf file",
+                icon    = Ph.FolderOpen,
+                busy    = importing,
+                onClick = onOpenFile
             )
         }
     }
@@ -385,20 +384,13 @@ private fun InstalledRow(
             )
             Tracked(rowMeta(entry, header, loaded), InkType.Meta, color = Ink.Meta)
         }
-        val (label, tint) = when (state) {
-            RowState.Idle        -> "Load" to Ink.Meta
-            RowState.Reading     -> "Reading" to Ink.White
-            RowState.Loaded      -> "Unload" to Ink.White
-            RowState.Unavailable -> "Load" to Ink.Placeholder
+        when (state) {
+            RowState.Idle        -> SoftButton("Load", onClick = onToggle, small = true)
+            RowState.Reading     -> SoftButton("Reading", onClick = {}, kind = ButtonKind.Primary, busy = true, small = true)
+            RowState.Loaded      -> SoftButton("Unload", onClick = onToggle, kind = ButtonKind.Primary, small = true)
+            // A vision projector needs a chat model underneath.
+            RowState.Unavailable -> QuietLabel("Load")
         }
-        TextAction(
-            label    = label,
-            onClick  = onToggle,
-            color    = tint,
-            enabled  = state == RowState.Idle || state == RowState.Loaded,
-            style    = InkType.Action,
-            modifier = Modifier.padding(horizontal = 2.dp)
-        )
         IconAction(
             icon               = Ph.Trash,
             contentDescription = "Delete ${entry.fileName}",
@@ -437,7 +429,7 @@ private fun rowMeta(entry: DownloadedModelEntry, header: ModelHeader?, loaded: B
 @Composable
 private fun DownloadRow(progress: DownloadProgress) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 progress.fileName,
                 style    = InkType.Name,
@@ -446,10 +438,11 @@ private fun DownloadRow(progress: DownloadProgress) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
-            TextAction(
+            SoftButton(
                 "Cancel",
-                onClick = { ModelDownloadManager.cancelDownload(progress.repoId, progress.fileName) },
-                style   = InkType.Action
+                icon    = Ph.X,
+                small   = true,
+                onClick = { ModelDownloadManager.cancelDownload(progress.repoId, progress.fileName) }
             )
         }
         ProgressTrack(

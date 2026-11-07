@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -38,7 +37,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ch.firn.app.model.StoredConversation
 import ch.firn.app.ui.components.IconAction
-import ch.firn.app.ui.components.OutlineButton
+import ch.firn.app.ui.components.ButtonKind
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.components.hairlineTop
@@ -51,7 +51,7 @@ import java.util.Locale
 
 /**
  * Chat history as a bottom sheet over the content column: scrim, square sheet
- * at most 78% tall, `+ NEW CHAT`, then one row per stored conversation.
+ * at most 78% tall, `New chat`, then one row per stored conversation.
  */
 @Composable
 fun HistorySheet(
@@ -128,12 +128,11 @@ fun HistorySheet(
                             touch              = 32.dp
                         )
                     }
-                    OutlineButton(
-                        label    = "New chat",
-                        icon     = Ph.Plus,
-                        iconSize = 14.dp,
-                        padding  = PaddingValues(horizontal = 15.dp, vertical = 13.dp),
-                        onClick  = onNewChat
+                    SoftButton(
+                        label   = "New chat",
+                        icon    = Ph.Plus,
+                        kind    = ButtonKind.Primary,
+                        onClick = onNewChat
                     )
                     if (conversations.isEmpty()) {
                         Text(

@@ -8,8 +8,11 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,9 +22,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -30,10 +35,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
@@ -42,7 +52,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import ch.firn.app.ui.components.IconAction
-import ch.firn.app.ui.components.InkIcon
 import ch.firn.app.ui.components.InkMenu
 import ch.firn.app.ui.components.InkMenuItem
 import ch.firn.app.ui.components.Tracked
@@ -68,7 +77,7 @@ data class ComposerModes(
 /**
  * The composer: a live sine line over a row of attach · input · action.
  *
- * The square action is send (arrow), stop while the model streams or the mic
+ * The action is send (arrow), stop while the model streams or the mic
  * records, and the microphone when the input is empty and a Whisper model is
  * loaded. Sending is gated on a loaded model.
  */
@@ -151,7 +160,7 @@ fun Composer(
                 text.isBlank() && !hasAttachment && whisperLoaded && !transcribing -> SquareAction.Mic
                 else                                           -> SquareAction.Send
             }
-            SquareButton(
+            ComposerAction(
                 action  = action,
                 enabled = when (action) {
                     SquareAction.Send -> canSend
@@ -171,29 +180,84 @@ fun Composer(
 }
 
 private enum class SquareAction(val icon: ImageVector, val label: String) {
-    Send(Ph.ArrowUp, "Send message"),
-    Stop(Ph.Stop, "Stop generation"),
-    StopListening(Ph.Stop, "Stop recording"),
+    Send(SendArrow, "Send message"),
+    Stop(StopGlyph, "Stop generation"),
+    StopListening(StopGlyph, "Stop recording"),
     Mic(Ph.Microphone, "Dictate")
 }
 
-/** 40×40dp square: `#FFF` border and glyph when enabled, `.2` / `.55` when not. */
+private val ActionShape = RoundedCornerShape(12.dp)
+
+/**
+ * 40×40dp, radius 12. Send is `#FAFAFA` with a black arrow when it can send,
+ * `#1A1A1A` with a `.45` arrow when it can't; stop is the same white square
+ * with a black stop glyph. The microphone sits on the secondary surface.
+ */
 @Composable
-private fun SquareButton(action: SquareAction, enabled: Boolean, onClick: () -> Unit) {
+private fun ComposerAction(action: SquareAction, enabled: Boolean, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val secondary = action == SquareAction.Mic
+    val filled = enabled && !secondary
+    val fill = when {
+        filled  -> if (pressed) Ink.PrimaryPressed else Ink.Text
+        pressed -> Ink.ControlPressed
+        else    -> Ink.Control
+    }
+    val tint = when {
+        filled  -> Ink.Black
+        enabled -> Ink.Text
+        else    -> Ink.TertiaryIcon
+    }
     Box(
         modifier = Modifier
             .size(40.dp)
-            .border(1.dp, if (enabled) Ink.White else Ink.Border)
-            .clickable(enabled = enabled, onClickLabel = action.label, role = Role.Button, onClick = onClick),
+            .clip(ActionShape)
+            .background(fill)
+            .then(if (secondary) Modifier.border(1.dp, Ink.ControlBorder, ActionShape) else Modifier)
+            .clickable(
+                interactionSource = source,
+                indication        = null,
+                enabled           = enabled,
+                onClickLabel      = action.label,
+                role              = Role.Button,
+                onClick           = onClick
+            ),
         contentAlignment = Alignment.Center
     ) {
-        InkIcon(
-            action.icon,
-            16.dp,
-            tint               = if (enabled) Ink.White else Ink.DisabledIcon,
-            contentDescription = action.label
-        )
+        Icon(action.icon, contentDescription = action.label, tint = tint, modifier = Modifier.size(18.dp))
     }
+}
+
+/**
+ * Send arrow: a custom 24-grid vector at a 2.2 stroke with round caps — heavier
+ * than the thin icon set, so it reads on the white fill.
+ */
+private val SendArrow: ImageVector by lazy {
+    ImageVector.Builder("firn-send", 18.dp, 18.dp, 24f, 24f).apply {
+        path(
+            stroke          = SolidColor(Color.White),
+            strokeLineWidth = 2.2f,
+            strokeLineCap   = StrokeCap.Round,
+            strokeLineJoin  = StrokeJoin.Round
+        ) {
+            moveTo(12f, 19f); lineTo(12f, 5f)
+            moveTo(5.5f, 11.5f); lineTo(12f, 5f); lineTo(18.5f, 11.5f)
+        }
+    }.build()
+}
+
+/** Stop: a filled, slightly rounded square on the same grid as [SendArrow]. */
+private val StopGlyph: ImageVector by lazy {
+    ImageVector.Builder("firn-stop", 18.dp, 18.dp, 24f, 24f).apply {
+        path(fill = SolidColor(Color.White)) {
+            moveTo(9f, 7f); lineTo(15f, 7f)
+            arcTo(2f, 2f, 0f, false, true, 17f, 9f); lineTo(17f, 15f)
+            arcTo(2f, 2f, 0f, false, true, 15f, 17f); lineTo(9f, 17f)
+            arcTo(2f, 2f, 0f, false, true, 7f, 15f); lineTo(7f, 9f)
+            arcTo(2f, 2f, 0f, false, true, 9f, 7f); close()
+        }
+    }.build()
 }
 
 /**

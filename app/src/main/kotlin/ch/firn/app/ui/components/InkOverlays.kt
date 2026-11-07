@@ -46,7 +46,7 @@ import ch.firn.app.ui.theme.Ph
 
 /**
  * Square sheet-coloured dialog: tracked title with a close glyph, free content,
- * and a right-aligned row of [TextAction]s.
+ * and a right-aligned row of [SoftButton]s — the confirming one primary, last.
  */
 @Composable
 fun InkDialog(
@@ -85,8 +85,8 @@ fun InkDialog(
                 content()
             }
             Row(
-                modifier              = Modifier.fillMaxWidth().padding(end = 12.dp, top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.End),
+                modifier              = Modifier.fillMaxWidth().padding(end = 12.dp, top = 20.dp, bottom = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalAlignment     = Alignment.CenterVertically,
                 content               = actions
             )

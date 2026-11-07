@@ -1,9 +1,7 @@
 package ch.firn.app.ui.memory
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -22,27 +20,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ch.firn.app.EngineState
 import ch.firn.app.agent.AgentTier
 import ch.firn.app.agent.TierInputs
 import ch.firn.app.agent.TierPolicy
+import ch.firn.app.ui.components.ButtonKind
 import ch.firn.app.ui.components.FadeRule
 import ch.firn.app.ui.components.InkTextField
 import ch.firn.app.ui.components.ScreenTitle
-import ch.firn.app.ui.components.SquareSwitch
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SegmentedControl
+import ch.firn.app.ui.components.SoftButton
+import ch.firn.app.ui.components.ToggleCard
 import ch.firn.app.ui.components.Tracked
-import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.theme.Brand
 import ch.firn.app.ui.theme.Ink
 import ch.firn.app.ui.theme.InkType
+import ch.firn.app.ui.theme.Ph
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -84,53 +80,25 @@ fun MemoryScreen(
         ScreenTitle("Memory")
 
         // ---- Learning ----------------------------------------------------------
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(role = Role.Switch) { memoryViewModel.setLoopEnabled(!state.loopEnabled) }
-                .padding(vertical = 2.dp),
-            verticalAlignment     = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Tracked("Learning", InkType.Label, color = Ink.Text)
-                Text(
-                    text  = if (state.loopEnabled) {
-                        "Consolidates while charging · ${state.entriesSinceConsolidation} new " +
-                            if (state.entriesSinceConsolidation == 1) "note" else "notes"
-                    } else {
-                        "Paused — nothing is written"
-                    },
-                    style = InkType.SecondaryTight,
-                    color = Ink.Secondary
-                )
-            }
-            SquareSwitch(
-                checked            = state.loopEnabled,
-                onCheckedChange    = memoryViewModel::setLoopEnabled,
-                contentDescription = "Learning"
-            )
-        }
+        ToggleCard(
+            title           = "Learning",
+            meta            = if (state.loopEnabled) {
+                "Consolidates while charging · ${state.entriesSinceConsolidation} new " +
+                    if (state.entriesSinceConsolidation == 1) "note" else "notes"
+            } else {
+                "Paused — nothing is written"
+            },
+            checked         = state.loopEnabled,
+            onCheckedChange = memoryViewModel::setLoopEnabled
+        )
 
         // ---- Tabs --------------------------------------------------------------
-        FlowRow(
-            modifier              = Modifier.padding(top = 2.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
-            verticalArrangement   = Arrangement.spacedBy(10.dp)
-        ) {
-            MemoryViewModel.Tab.entries.forEach { tab ->
-                val selected = tab == state.tab
-                Box(
-                    Modifier
-                        .semantics { this.selected = selected }
-                        .clickable(role = Role.Tab) { memoryViewModel.selectTab(tab) }
-                        .then(if (selected) Modifier.hairlineBottom(Ink.White) else Modifier)
-                        .padding(bottom = 8.dp)
-                ) {
-                    Tracked(tab.label, InkType.Button, color = if (selected) Ink.Text else Ink.Meta, maxLines = 1)
-                }
-            }
-        }
+        SegmentedControl(
+            options  = MemoryViewModel.Tab.entries,
+            selected = state.tab,
+            label    = { it.label },
+            onSelect = memoryViewModel::selectTab
+        )
 
         Text(tabHint(state.tab), style = InkType.Secondary, color = Ink.Secondary)
 
@@ -150,9 +118,12 @@ fun MemoryScreen(
                     color = Ink.Secondary
                 )
                 Text(pending, style = InkType.BodyLoose, color = Ink.MemoryText)
-                Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                    TextAction("Approve", onClick = memoryViewModel::approvePending)
-                    TextAction("Reject", onClick = memoryViewModel::rejectPending, color = Ink.Meta)
+                Row(
+                    modifier              = Modifier.padding(bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SoftButton("Approve", onClick = memoryViewModel::approvePending, kind = ButtonKind.Primary, small = true)
+                    SoftButton("Reject", onClick = memoryViewModel::rejectPending, small = true)
                 }
             }
         }
@@ -167,13 +138,21 @@ fun MemoryScreen(
                 minLines      = 8,
                 textStyle     = InkType.BodyLoose
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                TextAction("Save", onClick = { memoryViewModel.save(draft); editing = false }, enabled = draft != state.content)
-                TextAction("Revert", onClick = { draft = state.content }, enabled = draft != state.content, color = Ink.Meta)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement   = Arrangement.spacedBy(8.dp)
+            ) {
+                SoftButton(
+                    "Save",
+                    onClick = { memoryViewModel.save(draft); editing = false },
+                    kind    = ButtonKind.Primary,
+                    enabled = draft != state.content
+                )
+                SoftButton("Revert", onClick = { draft = state.content }, enabled = draft != state.content)
                 if (state.hasBackup) {
-                    TextAction("Undo last change", onClick = memoryViewModel::restoreBackup, color = Ink.Meta)
+                    SoftButton("Undo last change", onClick = memoryViewModel::restoreBackup)
                 }
-                TextAction("Close", onClick = { draft = state.content; editing = false }, color = Ink.Meta)
+                SoftButton("Close", onClick = { draft = state.content; editing = false })
             }
         } else {
             Column(
@@ -191,9 +170,12 @@ fun MemoryScreen(
                     }
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                TextAction("Edit this file", onClick = { editing = true })
-                TextAction("Update now", onClick = memoryViewModel::runConsolidationNow, color = Ink.Meta)
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement   = Arrangement.spacedBy(8.dp)
+            ) {
+                SoftButton("Edit this file", onClick = { editing = true }, icon = Ph.PencilSimple)
+                SoftButton("Update now", onClick = memoryViewModel::runConsolidationNow, icon = Ph.ArrowsClockwise)
             }
         }
 

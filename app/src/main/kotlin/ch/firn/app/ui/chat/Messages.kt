@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -42,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import ch.firn.app.model.ChatMessage
 import ch.firn.app.model.Role as MessageRole
+import ch.firn.app.ui.components.FIRN_MARK_ASPECT
+import ch.firn.app.ui.components.FirnMark
 import ch.firn.app.ui.components.InkIcon
 import ch.firn.app.ui.components.StateSquare
 import ch.firn.app.ui.components.Tracked
@@ -115,8 +118,8 @@ private fun UserMessage(message: ChatMessage) {
 }
 
 /**
- * Left-aligned, unframed: the agent's label over its text, set off by a 1dp
- * `.55` rule on the left.
+ * Left-aligned, unframed: the firn mark and `FIRN` over the text, set off by a
+ * 1dp `.55` rule on the left. The mark thinks while this message streams.
  */
 @Composable
 private fun AgentMessage(message: ChatMessage, streaming: Boolean) {
@@ -125,7 +128,10 @@ private fun AgentMessage(message: ChatMessage, streaming: Boolean) {
         horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Tracked(Brand.LABEL, InkType.Stamp, color = Ink.White)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FirnMark(Modifier.size(width = 20.dp, height = 20.dp / FIRN_MARK_ASPECT), thinking = streaming)
+            Tracked(Brand.LABEL, InkType.Stamp, color = Ink.White)
+        }
         Column(
             modifier = Modifier
                 .widthIn(max = MessageMaxWidth)

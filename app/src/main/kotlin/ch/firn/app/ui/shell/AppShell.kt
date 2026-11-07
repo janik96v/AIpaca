@@ -38,10 +38,9 @@ import androidx.compose.ui.unit.dp
 import ch.firn.app.EngineState
 import ch.firn.app.engine.ModelHeader
 import ch.firn.app.ui.chat.ChatViewModel
-import ch.firn.app.ui.components.DotGrid
+import ch.firn.app.ui.components.FirnMark
 import ch.firn.app.ui.components.IconAction
 import ch.firn.app.ui.components.InkIcon
-import ch.firn.app.ui.components.StateSquare
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.theme.Ink
 import ch.firn.app.ui.theme.InkType
@@ -153,7 +152,7 @@ fun rememberModelPresence(chat: ChatViewModel): ModelPresence {
 // ---- Rail ---------------------------------------------------------------------
 
 /**
- * Left rail, 66dp. The 3×3 mark with a caret collapses it; items are icon over
+ * Left rail, 66dp. The firn mark with a caret collapses it; items are icon over
  * a tracked label, the active one white with a 1×16dp bar on the left edge.
  * At the bottom: session modes and chat history.
  */
@@ -181,7 +180,7 @@ fun Rail(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            DotGrid()
+            FirnMark(Modifier.size(width = 24.dp, height = 18.dp))
             InkIcon(Ph.CaretLeft, 12.dp, tint = Ink.white(.5f))
         }
         Spacer(Modifier.height(26.dp))
@@ -235,13 +234,15 @@ private fun RailItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
 // ---- Status line ------------------------------------------------------------------
 
 /**
- * Top line of the content column: a 4dp square and the model state. With the
- * rail collapsed it also carries the rail handle (left) and the rail's bottom
- * actions — modes and history — on the right.
+ * Top line of the content column: the firn mark and the model state; the mark
+ * thinks while the model streams. With the rail collapsed the line also
+ * carries the rail handle (left) and the rail's bottom actions — modes and
+ * history — on the right.
  */
 @Composable
 fun StatusLine(
     text: String,
+    thinking: Boolean,
     railCollapsed: Boolean,
     onExpandRail: () -> Unit,
     onHistory: () -> Unit,
@@ -265,10 +266,10 @@ fun StatusLine(
                 horizontalArrangement = Arrangement.spacedBy(9.dp)
             ) {
                 InkIcon(Ph.List, 16.dp, tint = Ink.Text)
-                DotGrid()
+                FirnMark(Modifier.size(width = 20.dp, height = 15.dp))
             }
         }
-        StateSquare()
+        FirnMark(Modifier.size(width = 18.dp, height = 13.dp), thinking = thinking)
         Tracked(
             text,
             InkType.Status,

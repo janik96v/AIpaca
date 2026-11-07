@@ -44,13 +44,12 @@ import ch.firn.app.server.ServerManager
 import ch.firn.app.server.security.AuthorizedKeysStore
 import ch.firn.app.server.security.PairingManager
 import ch.firn.app.server.security.TlsManager
-import ch.firn.app.ui.components.Emphasis
+import ch.firn.app.ui.components.ButtonKind
 import ch.firn.app.ui.components.IconAction
 import ch.firn.app.ui.components.InkDialog
 import ch.firn.app.ui.components.InkIcon
-import ch.firn.app.ui.components.OutlineButton
 import ch.firn.app.ui.components.ScreenTitle
-import ch.firn.app.ui.components.TextAction
+import ch.firn.app.ui.components.SoftButton
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.shell.displayModelName
@@ -147,16 +146,13 @@ fun ServerScreen(
             Tracked("Offline", InkType.Url, color = Ink.Meta)
         }
 
-        OutlineButton(
+        SoftButton(
             label     = if (isRunning) "Stop server" else "Start server",
             icon      = Ph.Power,
-            iconSize  = 16.dp,
-            emphasis  = if (isRunning) Emphasis.Secondary else Emphasis.Primary,
+            kind      = if (isRunning) ButtonKind.Secondary else ButtonKind.Primary,
             enabled   = isRunning || canStart,
             fillWidth = true,
-            centered  = true,
-            padding   = PaddingValues(16.dp),
-            style     = InkType.Label,
+            padding   = PaddingValues(15.dp),
             onClick   = {
                 if (isRunning) ServerManager.stop(context) else ServerManager.start(context)
             }
@@ -181,7 +177,7 @@ fun ServerScreen(
                 )
             }
             if (isRunning) {
-                TextAction("Pair a new device", onClick = { showPairing = true })
+                SoftButton("Pair a new device", icon = Ph.Plus, onClick = { showPairing = true })
             } else {
                 Text("Start the server to pair a device.", style = InkType.Secondary, color = Ink.Secondary)
             }
@@ -214,9 +210,10 @@ fun ServerScreen(
                         color = Ink.Text
                     )
                 }
-                TextAction(
+                SoftButton(
                     label   = if (isBenchmarking) "Benchmarking" else "Run native bench",
-                    enabled = !isBenchmarking,
+                    busy    = isBenchmarking,
+                    small   = true,
                     onClick = {
                         EngineState.scope.launch { EngineState.benchmark(pp = 128, tg = 128, pl = 1, nr = 3) }
                     }
@@ -336,13 +333,13 @@ private fun PairingDialog(
         subtitle  = "Scan the QR or enter the PIN",
         onDismiss = onDismiss,
         actions   = {
+            SoftButton("Close", onClick = onDismiss)
             if (remainingSec <= 0) {
-                TextAction("New PIN", onClick = {
+                SoftButton("New PIN", kind = ButtonKind.Primary, onClick = {
                     pin = PairingManager.generatePin()
                     remainingSec = (PairingManager.remainingMs() / 1000).toInt()
                 })
             }
-            TextAction("Close", onClick = onDismiss, color = Ink.Meta)
         }
     ) {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

@@ -1,4 +1,4 @@
-AIpaca
+firn (formerly AIpaca)
 Copyright 2026 Janik Vollenweider
 
 This product is licensed under the Apache License, Version 2.0 (the "License").
@@ -61,8 +61,8 @@ Copyright Google LLC
 --------------------------------------------------------------------------------
 Inter (typeface)
 --------------------------------------------------------------------------------
-Bundled as app/src/main/res/font/inter_light.ttf and inter_regular.ttf
-(static Light and Regular instances).
+Bundled as app/src/main/res/font/inter_light.ttf, inter_regular.ttf and
+inter_medium.ttf (static Light, Regular and Medium instances).
 Source: https://github.com/rsms/inter
 License: SIL Open Font License, Version 1.1
 Copyright 2016 The Inter Project Authors
@@ -73,7 +73,7 @@ app/src/main/assets/licenses/Inter-OFL.txt.
 --------------------------------------------------------------------------------
 Phosphor Icons (Thin weight)
 --------------------------------------------------------------------------------
-Path data embedded in app/src/main/kotlin/com/aipaca/app/ui/theme/PhosphorThin.kt
+Path data embedded in app/src/main/kotlin/ch/firn/app/ui/theme/PhosphorThin.kt
 Source: https://github.com/phosphor-icons/core (@phosphor-icons/core 2.1.1)
 License: MIT
 

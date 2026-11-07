@@ -20,10 +20,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
   clients
 - Complete visual redesign ("Instrument"): true black, white hairlines and tracked uppercase
   chrome; Inter (bundled) and Phosphor Thin icons replace Roboto and Material icons; zero
-  corner radius throughout. The bottom navigation is replaced by a collapsible left rail with
+  corner radius for layout. The bottom navigation is replaced by a collapsible left rail with
   a status line (`NO MODEL LOADED` / `READING QWEN3.GGUF HEADER` / `THINKING` /
   `… · GPU · READY`), chat history moves to a bottom sheet, and the Modes menu moves to the
   bottom of the rail
+- "Soft square" controls replace the outlined, tracked-uppercase buttons: one white primary
+  action per screen, everything else tappable on a `#1A1A1A` surface with 12dp corners, Inter
+  Medium sentence-case labels. Memory gets a Learning settings card and segmented tabs; model
+  rows get Load / Unload buttons; catalog rows show Installed / Too large in place of the action;
+  the send button is a filled square with a heavier arrow; dialogs use the same buttons
+- The firn mark replaces the dot-grid and square marks on the rail, the status line and the
+  agent's message label; it lights one path through its net while the model is thinking
 - Models screen reorganised into what is on the phone (load / unload / delete) and a browse
   view (catalog with kind filters, RAM fit, inline download progress, quant guide)
 

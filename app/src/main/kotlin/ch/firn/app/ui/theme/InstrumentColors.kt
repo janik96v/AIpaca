@@ -34,7 +34,6 @@ object Ink {
     val AgentBody    = white(.92f)
     val MemoryText   = white(.90f)
     val Chip         = white(.90f)
-    val Filter       = white(.85f)
     val Status       = white(.80f)
     val Meta         = white(.78f)
     val Body         = white(.76f)
@@ -56,4 +55,33 @@ object Ink {
 
     /** Scrim behind the history sheet. */
     val Scrim = Black.copy(alpha = .76f)
+
+    // ---- Controls ("Soft square") -------------------------------------------
+    // Everything tappable sits on a surface; selected and primary are filled
+    // [Text] with [Black] content.
+
+    /** Primary button pressed. */
+    val PrimaryPressed  = Color(0xFFE6E6E6)
+
+    /** Settings card. */
+    val Card            = Color(0xFF111111)
+    val CardPressed     = Color(0xFF161616)
+    val CardBorder      = white(.06f)
+
+    /** Segmented-control track. */
+    val SegmentTrack    = Color(0xFF141414)
+
+    /** Secondary buttons, chips, disabled send. */
+    val Control         = Color(0xFF1A1A1A)
+    val ControlPressed  = Color(0xFF242424)
+    val ControlBorder   = white(.08f)
+
+    /** Chip and filter labels on [Control]. */
+    val ControlText     = white(.88f)
+
+    /** Inactive segment label. */
+    val SegmentText     = white(.82f)
+
+    val SwitchOffTrack  = Color(0xFF2A2A2A)
+    val SwitchOffKnob   = Color(0xFF8C8C8C)
 }

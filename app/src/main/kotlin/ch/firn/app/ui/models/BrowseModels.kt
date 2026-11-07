@@ -44,12 +44,12 @@ import ch.firn.app.data.HuggingFaceApi
 import ch.firn.app.data.HuggingFaceApiException
 import ch.firn.app.data.ModelDownloadManager
 import ch.firn.app.data.ModelType
-import ch.firn.app.ui.components.ChipButton
-import ch.firn.app.ui.components.Emphasis
 import ch.firn.app.ui.components.InkIcon
 import ch.firn.app.ui.components.InkTextField
-import ch.firn.app.ui.components.OutlineButton
 import ch.firn.app.ui.components.ProgressTrack
+import ch.firn.app.ui.components.QuietLabel
+import ch.firn.app.ui.components.SoftButton
+import ch.firn.app.ui.components.SoftChip
 import ch.firn.app.ui.components.Tracked
 import ch.firn.app.ui.components.hairlineBottom
 import ch.firn.app.ui.theme.Ink
@@ -232,13 +232,7 @@ fun BrowseModels(
 
 @Composable
 private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    ChipButton(
-        label     = label,
-        selected  = selected,
-        idleColor = Ink.Filter,
-        padding   = PaddingValues(horizontal = 12.dp, vertical = 9.dp),
-        onClick   = onClick
-    )
+    SoftChip(label = label, selected = selected, onClick = onClick)
 }
 
 @Composable
@@ -246,11 +240,12 @@ private fun SectionNote(text: String) {
     Tracked(text, InkType.Count, color = Ink.Meta, modifier = Modifier.padding(top = 22.dp, bottom = 4.dp))
 }
 
-private enum class RowAction(val label: String, val icon: ImageVector, val emphasis: Emphasis) {
-    Download("Download", Ph.DownloadSimple, Emphasis.Primary),
-    Cancel("Cancel", Ph.X, Emphasis.Primary),
-    Installed("Installed", Ph.Check, Emphasis.Secondary),
-    TooLarge("Too large", Ph.Prohibit, Emphasis.Secondary)
+/** [tappable] actions are small secondary buttons; the others are states shown in their place. */
+private enum class RowAction(val label: String, val icon: ImageVector, val tappable: Boolean) {
+    Download("Download", Ph.DownloadSimple, tappable = true),
+    Cancel("Cancel", Ph.X, tappable = true),
+    Installed("Installed", Ph.Check, tappable = false),
+    TooLarge("Too large", Ph.Prohibit, tappable = false)
 }
 
 @Composable
@@ -277,17 +272,11 @@ private fun CatalogRow(
                 Tracked(meta, InkType.Meta, color = Ink.Meta)
                 if (note != null) Text(note, style = InkType.Secondary, color = Ink.Secondary)
             }
-            OutlineButton(
-                label    = action.label,
-                icon     = action.icon,
-                iconSize = 13.dp,
-                emphasis = action.emphasis,
-                tint     = if (action.emphasis == Emphasis.Secondary) Ink.Meta else null,
-                padding  = PaddingValues(horizontal = 13.dp, vertical = 12.dp),
-                style    = InkType.chrome(.18f),
-                gap      = 7.dp,
-                onClick  = onAction
-            )
+            if (action.tappable) {
+                SoftButton(label = action.label, icon = action.icon, small = true, onClick = onAction)
+            } else {
+                QuietLabel(label = action.label, icon = action.icon)
+            }
         }
         if (progress != null) {
             ProgressTrack(
