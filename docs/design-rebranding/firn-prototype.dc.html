@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/thin/style.css">
+<link rel="stylesheet" href="_ds/nocturne-0e0d6c3d-b4dc-4e4e-b4d8-3bcbefb84452/styles.css">
+<script src="_ds/nocturne-0e0d6c3d-b4dc-4e4e-b4d8-3bcbefb84452/_ds_bundle.js"></script>
+<style>
+body{margin:0;background:#000}
+a{color:#fff}a:hover{color:rgba(255,255,255,.7)}
+::-webkit-scrollbar,*::-webkit-scrollbar{width:0;height:0;display:none}
+*{scrollbar-width:none}
+@keyframes drift{to{transform:translateX(-50%)}}
+input::placeholder{color:rgba(255,255,255,.62);letter-spacing:.22em}
+</style>
+</helmet>
+
+<div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:22px;padding:36px 24px 56px;font-family:Inter,system-ui,sans-serif;background:#000">
+
+<div style="width:100%;max-width:820px;display:flex;flex-direction:column;gap:9px">
+<div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.3em;text-transform:uppercase;color:rgba(255,255,255,.78)">firn · direction 02</div>
+<div style="font:300 19px/1.5 Inter,sans-serif;letter-spacing:.34em;text-transform:uppercase;color:#fafafa">Instrument</div>
+<div style="font:400 13px/1.7 Inter,sans-serif;color:rgba(255,255,255,.74);max-width:64ch">The minimal app, re-cut in the reference's register. Tracked uppercase is chrome only — titles, status and labels; everything you read or tap stays sentence case. Buttons are soft squares: solid surfaces with 12 px corners, one white main action per screen, and plain text is never a button. The model is drawn as a live point-cloud: it drifts when idle, converges while a model loads, and spins while it thinks. Haze at the top of the screen, true black below.</div>
+</div>
+
+<x-import component-from-global-scope="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" width="{{ 412 }}" height="{{ 892 }}" hint-size="412px,892px">
+<div style="height:100%;display:flex;font-family:Inter,system-ui,sans-serif;color:#fafafa;position:relative;background:#000">
+
+<div style="position:absolute;inset:0;pointer-events:none;background:radial-gradient(120% 52% at 50% -6%,rgba(150,175,205,.13) 0%,rgba(90,110,135,.05) 38%,rgba(0,0,0,0) 72%)"></div>
+
+<sc-if value="{{ railOpen }}" hint-placeholder-val="{{ true }}">
+<div style="width:66px;flex:none;display:flex;flex-direction:column;align-items:center;padding:18px 0 12px;position:relative;z-index:1">
+  <div onClick="{{ hideRail }}" style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:26px;cursor:pointer;padding:4px" style-hover="opacity:.55">
+    <img src="brand/firn-mark-small-white.svg" alt="firn" style="width:24px;height:18px;display:block" />
+    <i class="ph-thin ph-caret-left" style="font-size:12px;color:rgba(255,255,255,.5)"></i>
+  </div>
+
+  <div onClick="{{ goChat }}" style="width:100%;padding:14px 0;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;position:relative" style-hover="background:rgba(255,255,255,.04)">
+    <div style="position:absolute;left:0;top:50%;margin-top:-8px;width:1px;height:16px;background:{{ barChat }}"></div>
+    <i class="ph-thin ph-chat-circle" style="font-size:20px;color:{{ tintChat }}"></i>
+    <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:{{ tintChat }}">Chat</span>
+  </div>
+
+  <div onClick="{{ goMemory }}" style="width:100%;padding:14px 0;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;position:relative" style-hover="background:rgba(255,255,255,.04)">
+    <div style="position:absolute;left:0;top:50%;margin-top:-8px;width:1px;height:16px;background:{{ barMemory }}"></div>
+    <i class="ph-thin ph-brain" style="font-size:20px;color:{{ tintMemory }}"></i>
+    <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:{{ tintMemory }}">Mem</span>
+  </div>
+
+  <div onClick="{{ goModels }}" style="width:100%;padding:14px 0;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;position:relative" style-hover="background:rgba(255,255,255,.04)">
+    <div style="position:absolute;left:0;top:50%;margin-top:-8px;width:1px;height:16px;background:{{ barModels }}"></div>
+    <i class="ph-thin ph-cube" style="font-size:20px;color:{{ tintModels }}"></i>
+    <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:{{ tintModels }}">Mdl</span>
+  </div>
+
+  <div onClick="{{ goServer }}" style="width:100%;padding:14px 0;display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;position:relative" style-hover="background:rgba(255,255,255,.04)">
+    <div style="position:absolute;left:0;top:50%;margin-top:-8px;width:1px;height:16px;background:{{ barServer }}"></div>
+    <i class="ph-thin ph-hard-drives" style="font-size:20px;color:{{ tintServer }}"></i>
+    <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.18em;text-transform:uppercase;color:{{ tintServer }}">Srv</span>
+  </div>
+
+  <div style="flex:1"></div>
+  <div onClick="{{ openHistory }}" style="padding:13px;cursor:pointer" style-hover="opacity:.65">
+    <i class="ph-thin ph-clock-counter-clockwise" style="font-size:18px;color:rgba(255,255,255,.72)"></i>
+  </div>
+</div>
+</sc-if>
+
+<div style="flex:1;min-width:0;display:flex;flex-direction:column;position:relative;z-index:1;border-left:1px solid rgba(255,255,255,.08)">
+
+  <div style="padding:20px 20px 0;display:flex;align-items:center;gap:10px">
+    <sc-if value="{{ railClosed }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ showRail }}" style="display:flex;align-items:center;gap:9px;cursor:pointer;padding:2px 0" style-hover="opacity:.6">
+        <i class="ph-thin ph-list" style="font-size:16px;color:#fafafa"></i>
+        <img src="brand/firn-mark-small-white.svg" alt="firn" style="width:20px;height:15px;display:block" />
+      </div>
+    </sc-if>
+    <img src="{{ stateMark }}" alt="" style="width:18px;height:13px;flex:none;display:block" />
+    <span style="font:400 10px/1.4 Inter,sans-serif;letter-spacing:.24em;text-transform:uppercase;color:rgba(255,255,255,.8);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ stateLine }}</span>
+    <sc-if value="{{ railClosed }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1"></div>
+      <i onClick="{{ openHistory }}" class="ph-thin ph-clock-counter-clockwise" style="font-size:16px;color:rgba(255,255,255,.72);cursor:pointer"></i>
+    </sc-if>
+  </div>
+
+  <div style="position:absolute;right:8px;top:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;pointer-events:none;z-index:3">
+    <sc-for list="{{ posDots }}" as="d" hint-placeholder-count="4">
+      <div style="width:3px;height:3px;background:#fff;opacity:{{ d.opacity }}"></div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{ isChat }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column;justify-content:space-between;padding:6px 20px 22px">
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:13px;padding:4px 0 14px">
+          <canvas ref="{{ fieldRef }}" width="520" height="520" style="width:224px;height:224px;display:block"></canvas>
+          <sc-if value="{{ hasModel }}" hint-placeholder-val="{{ false }}">
+            <div style="width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px 12px;border-top:1px solid rgba(255,255,255,.12);padding-top:12px">
+              <sc-for list="{{ ggufRows }}" as="row" hint-placeholder-count="6">
+                <div style="display:flex;flex-direction:column;gap:5px;min-width:0">
+                  <span style="font:400 9px/1 Inter,sans-serif;letter-spacing:.2em;color:rgba(255,255,255,.72)">{{ row.k }}</span>
+                  <span style="font:400 11px/1.1 Inter,sans-serif;letter-spacing:.08em;color:#fafafa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ row.v }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noModel }}" hint-placeholder-val="{{ true }}">
+            <div style="width:100%;font:400 9px/1.8 Inter,sans-serif;letter-spacing:.24em;text-transform:uppercase;color:rgba(255,255,255,.72);border-top:1px solid rgba(255,255,255,.12);padding-top:12px">No header read · idle</div>
+          </sc-if>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:15px">
+          <sc-if value="{{ noModel }}" hint-placeholder-val="{{ true }}">
+            <div style="font:300 15px/1.9 Inter,sans-serif;letter-spacing:.36em;text-transform:uppercase;color:#fafafa">Load a model</div>
+            <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.2),transparent 70%)"></div>
+            <div style="font:400 13px/1.7 Inter,sans-serif;color:rgba(255,255,255,.76);max-width:34ch">firn reads the .gguf header and builds the model from it — one ring per block, one point per KV head.</div>
+            <div onClick="{{ goModels }}" style="display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 18px;border-radius:12px;background:#fafafa;color:#000;cursor:pointer;width:fit-content;margin-top:2px" style-hover="background:#e6e6e6">
+              <i class="ph-thin ph-cube" style="font-size:19px"></i>
+              <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">Open models</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ hasModel }}" hint-placeholder-val="{{ false }}">
+            <div style="font:300 15px/1.9 Inter,sans-serif;letter-spacing:.36em;text-transform:uppercase;color:#fafafa">Ask me anything</div>
+            <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.2),transparent 70%)"></div>
+            <div style="font:400 13px/1.7 Inter,sans-serif;color:rgba(255,255,255,.76);max-width:32ch">Runs on this phone. Nothing leaves it unless you say so.</div>
+            <sc-if value="{{ showSuggestions }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:2px">
+              <div onClick="{{ useSuggestion1 }}" style="padding:10px 14px;border-radius:12px;background:#1a1a1a;border:1px solid rgba(255,255,255,.08);font:500 13px/1 Inter,sans-serif;color:#fafafa;cursor:pointer;white-space:nowrap" style-hover="background:#242424">Summarise a PDF</div>
+              <div onClick="{{ useSuggestion2 }}" style="padding:10px 14px;border-radius:12px;background:#1a1a1a;border:1px solid rgba(255,255,255,.08);font:500 13px/1 Inter,sans-serif;color:#fafafa;cursor:pointer;white-space:nowrap" style-hover="background:#242424">What do you recall</div>
+            </div>
+            </sc-if>
+          </sc-if>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ hasMessages }}" hint-placeholder-val="{{ true }}">
+      <div style="flex:1;min-height:0;overflow:auto;padding:20px 20px 8px;display:flex;flex-direction:column;gap:22px">
+        <sc-for list="{{ msgs }}" as="m" hint-placeholder-count="2">
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:{{ m.align }}">
+            <div style="display:flex;align-items:center;gap:8px"><img src="{{ m.markSrc }}" alt="" style="width:{{ m.markW }};height:auto;display:{{ m.markDisplay }}" /><div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.28em;color:{{ m.metaColor }}">{{ m.meta }}</div></div>
+            <div style="max-width:268px;padding:{{ m.pad }};border:{{ m.border }};border-left:{{ m.mark }};font:400 13px/1.75 Inter,sans-serif;color:{{ m.color }};white-space:pre-wrap">{{ m.text }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <div style="padding:8px 16px 14px">
+      <div style="height:20px;overflow:hidden;margin-bottom:6px;opacity:{{ waveOpacity }}">
+        <div style="width:200%;height:100%;display:flex;animation:drift 5.5s linear infinite;transform-origin:left center;will-change:transform">
+          <svg viewBox="0 0 400 20" preserveAspectRatio="none" style="width:50%;height:100%;flex:none;transform:scaleY({{ waveScale }})">
+            <path d="M0 10 Q12.5 3 25 10 T50 10 T75 10 T100 10 T125 10 T150 10 T175 10 T200 10 T225 10 T250 10 T275 10 T300 10 T325 10 T350 10 T375 10 T400 10" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1" vector-effect="non-scaling-stroke"></path>
+          </svg>
+          <svg viewBox="0 0 400 20" preserveAspectRatio="none" style="width:50%;height:100%;flex:none;transform:scaleY({{ waveScale }})">
+            <path d="M0 10 Q12.5 3 25 10 T50 10 T75 10 T100 10 T125 10 T150 10 T175 10 T200 10 T225 10 T250 10 T275 10 T300 10 T325 10 T350 10 T375 10 T400 10" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1" vector-effect="non-scaling-stroke"></path>
+          </svg>
+        </div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:12px">
+        <i class="ph-thin ph-paperclip" style="font-size:19px;color:rgba(255,255,255,.45);padding-bottom:10px;cursor:pointer"></i>
+        <input value="{{ input }}" onChange="{{ onInput }}" onKeyDown="{{ onKey }}" placeholder="{{ composerHint }}" style="flex:1;min-width:0;background:transparent;border:0;outline:none;font:400 13px/1.6 Inter,sans-serif;color:#fafafa;caret-color:#fff;padding:10px 0" />
+        <div onClick="{{ send }}" style="width:40px;height:40px;flex:none;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:12px;background:{{ sendBorder }}">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:block;color:{{ sendTint }}"><path d="M12 19V5"></path><path d="M5.5 11.5L12 5l6.5 6.5"></path></svg>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isMemory }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-height:0;overflow:auto;padding:28px 20px 24px;display:flex;flex-direction:column;gap:18px">
+    <div style="font:300 16px/1.6 Inter,sans-serif;letter-spacing:.42em;text-transform:uppercase">Memory</div>
+    <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.2),transparent 76%)"></div>
+    <div onClick="{{ toggleLearning }}" role="switch" style="display:flex;align-items:center;justify-content:space-between;gap:14px;cursor:pointer;padding:14px 16px;border-radius:14px;background:#111;border:1px solid rgba(255,255,255,.06)" style-hover="background:#161616">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div style="font:500 14px/1.3 Inter,sans-serif;color:#fafafa">Learning</div>
+        <div style="font:400 12px/1.6 Inter,sans-serif;color:rgba(255,255,255,.74)">{{ learnMeta }}</div>
+      </div>
+      <div style="width:46px;height:28px;flex:none;box-sizing:border-box;border-radius:8px;background:{{ switchBg }};display:flex;align-items:center;padding:3px;justify-content:{{ switchAlign }}">
+        <div style="width:22px;height:22px;border-radius:5px;background:{{ switchDot }};box-shadow:0 1px 2px rgba(0,0,0,.4)"></div>
+      </div>
+    </div>
+    <div role="tablist" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px;padding:3px;border-radius:12px;background:#141414">
+      <div onClick="{{ memSoul }}" role="tab" style="font:500 13px/1 Inter,sans-serif;padding:9px 0;text-align:center;border-radius:9px;cursor:pointer;color:{{ memSoulTint }};background:{{ memSoulLine }}">Soul</div>
+      <div onClick="{{ memYou }}" role="tab" style="font:500 13px/1 Inter,sans-serif;padding:9px 0;text-align:center;border-radius:9px;cursor:pointer;color:{{ memYouTint }};background:{{ memYouLine }}">You</div>
+      <div onClick="{{ memFacts }}" role="tab" style="font:500 13px/1 Inter,sans-serif;padding:9px 0;text-align:center;border-radius:9px;cursor:pointer;color:{{ memFactsTint }};background:{{ memFactsLine }}">Facts</div>
+      <div onClick="{{ memSessions }}" role="tab" style="font:500 13px/1 Inter,sans-serif;padding:9px 0;text-align:center;border-radius:9px;cursor:pointer;color:{{ memSessionsTint }};background:{{ memSessionsLine }}">Sessions</div>
+    </div>
+    <div style="font:400 12px/1.7 Inter,sans-serif;color:rgba(255,255,255,.74)">{{ memHint }}</div>
+    <div style="display:flex;flex-direction:column;gap:18px;padding-top:2px">
+      <sc-for list="{{ memEntries }}" as="e" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.28em;color:rgba(255,255,255,.78)">{{ e.date }}</div>
+          <div style="font:400 13px/1.75 Inter,sans-serif;color:rgba(255,255,255,.9)">{{ e.text }}</div>
+          <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.13),transparent 82%);margin-top:4px"></div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 18px;border-radius:12px;background:#1a1a1a;border:1px solid rgba(255,255,255,.08);color:#fafafa;cursor:pointer;width:fit-content" style-hover="background:#242424">
+      <i class="ph-thin ph-pencil-simple" style="font-size:19px"></i>
+      <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">Edit this file</span>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isInstalled }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-height:0;overflow:auto;padding:28px 20px 24px;display:flex;flex-direction:column;gap:18px">
+    <div style="font:300 16px/1.6 Inter,sans-serif;letter-spacing:.42em;text-transform:uppercase">Models</div>
+    <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.2),transparent 76%)"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.26em;color:rgba(255,255,255,.78)">ON THIS PHONE · {{ installedCount }}</div>
+      <div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.26em;color:rgba(255,255,255,.78)">{{ storageLine }}</div>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ installed }}" as="mo" hint-placeholder-count="3">
+        <div style="display:flex;align-items:center;gap:12px;padding:16px 0;border-bottom:1px solid rgba(255,255,255,.08)">
+          <div style="width:7px;flex:none;display:flex;flex-direction:column;gap:2px;opacity:{{ mo.markOpacity }}">
+            <div style="display:flex;gap:2px"><div style="width:2px;height:2px;background:#fff"></div><div style="width:2px;height:2px;background:#fff"></div></div>
+            <div style="display:flex;gap:2px"><div style="width:2px;height:2px;background:#fff"></div><div style="width:2px;height:2px;background:#fff"></div></div>
+          </div>
+          <div onClick="{{ mo.onLoad }}" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;cursor:pointer">
+            <div style="font:400 13px/1.3 Inter,sans-serif;color:{{ mo.tint }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ mo.name }}</div>
+            <div style="font:400 10px/1.6 Inter,sans-serif;letter-spacing:.24em;color:rgba(255,255,255,.78)">{{ mo.meta }}</div>
+          </div>
+          <div onClick="{{ mo.onLoad }}" style="font:500 12px/1 Inter,sans-serif;color:{{ mo.actionTint }};cursor:pointer;padding:9px 14px;border-radius:12px;background:{{ mo.actionBorder }};white-space:nowrap">{{ mo.action }}</div>
+          <i onClick="{{ mo.onDelete }}" class="ph-thin ph-trash" style="font-size:16px;color:rgba(255,255,255,.55);cursor:pointer;padding:13px 2px"></i>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;padding-top:4px">
+      <div onClick="{{ openBrowse }}" style="display:flex;align-items:center;gap:9px;padding:14px 18px;border-radius:12px;background:#fafafa;color:#000;cursor:pointer" style-hover="background:#e6e6e6">
+        <i class="ph-thin ph-magnifying-glass" style="font-size:19px"></i>
+        <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">Browse models</span>
+        <div style="flex:1"></div>
+        <i class="ph-thin ph-arrow-right" style="font-size:18px"></i>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 18px;border-radius:12px;background:#1a1a1a;border:1px solid rgba(255,255,255,.08);color:#fafafa;cursor:pointer;width:fit-content" style-hover="background:#242424">
+        <i class="ph-thin ph-folder-open" style="font-size:19px"></i>
+        <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">Open a .gguf file</span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isBrowse }}" hint-placeholder-val="{{ false }}">
+  <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="padding:24px 20px 0;display:flex;flex-direction:column;gap:16px">
+      <div onClick="{{ closeBrowse }}" style="display:flex;align-items:center;gap:9px;cursor:pointer;color:rgba(255,255,255,.78);width:fit-content" style-hover="color:#fafafa">
+        <i class="ph-thin ph-arrow-left" style="font-size:14px"></i>
+        <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.24em;text-transform:uppercase">Models</span>
+      </div>
+      <div style="font:300 16px/1.8 Inter,sans-serif;letter-spacing:.4em;text-transform:uppercase">Available<br>models</div>
+      <div style="display:flex;align-items:center;gap:10px;padding-bottom:11px;border-bottom:1px solid rgba(255,255,255,.2)">
+        <i class="ph-thin ph-magnifying-glass" style="font-size:16px;color:rgba(255,255,255,.6)"></i>
+        <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="SEARCH HUGGING FACE" style="flex:1;min-width:0;background:transparent;border:0;outline:none;font:400 12px/1.5 Inter,sans-serif;color:#fafafa;caret-color:#fff" />
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <sc-for list="{{ filters }}" as="f" hint-placeholder-count="4">
+          <div onClick="{{ f.onPick }}" style="padding:8px 13px;border-radius:12px;border:1px solid {{ f.border }};background:{{ f.bg }};white-space:nowrap;font:500 12px/1 Inter,sans-serif;color:{{ f.tint }};cursor:pointer">{{ f.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="flex:1;min-height:0;overflow:auto;padding:16px 20px 24px;display:flex;flex-direction:column">
+      <sc-for list="{{ catalog }}" as="c" hint-placeholder-count="5">
+        <div style="display:flex;flex-direction:column;gap:11px;padding:18px 0;border-bottom:1px solid rgba(255,255,255,.08);opacity:{{ c.opacity }}">
+          <div style="display:flex;align-items:flex-start;gap:12px">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:8px">
+              <div style="font:400 13px/1.3 Inter,sans-serif;color:#fafafa">{{ c.name }}</div>
+              <div style="font:400 10px/1.6 Inter,sans-serif;letter-spacing:.24em;color:rgba(255,255,255,.78)">{{ c.meta }}</div>
+              <div style="font:400 12px/1.7 Inter,sans-serif;color:rgba(255,255,255,.74)">{{ c.note }}</div>
+            </div>
+            <div onClick="{{ c.onAction }}" style="flex:none;display:flex;align-items:center;gap:7px;padding:9px 14px;border-radius:12px;background:{{ c.btnBorder }};color:{{ c.btnTint }};cursor:pointer">
+              <i class="{{ c.btnIcon }}" style="font-size:15px"></i>
+              <span style="font:500 12px/1 Inter,sans-serif;white-space:nowrap">{{ c.btnLabel }}</span>
+            </div>
+          </div>
+          <sc-if value="{{ c.downloading }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="flex:1;height:1px;background:rgba(255,255,255,.16);overflow:hidden">
+                <div style="height:100%;width:{{ c.pct }}%;background:#fff"></div>
+              </div>
+              <span style="font:400 10px/1 Inter,sans-serif;letter-spacing:.22em;color:rgba(255,255,255,.8);white-space:nowrap">{{ c.pctLabel }}</span>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <div style="font:400 12px/1.7 Inter,sans-serif;color:rgba(255,255,255,.74);padding-top:18px">Builds larger than this device's memory stay listed but dimmed, with the reason in place of the action.</div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isServer }}" hint-placeholder-val="{{ true }}">
+  <div style="flex:1;min-height:0;overflow:auto;padding:28px 20px 24px;display:flex;flex-direction:column;gap:18px">
+    <div style="font:300 16px/1.6 Inter,sans-serif;letter-spacing:.42em;text-transform:uppercase">Server</div>
+    <div style="height:1px;background:linear-gradient(to right,rgba(255,255,255,.2),transparent 76%)"></div>
+    <div style="font:400 13px/1.7 Inter,sans-serif;color:rgba(255,255,255,.78);max-width:34ch">{{ serverBlurb }}</div>
+    <div style="font:400 13px/1.6 Inter,sans-serif;letter-spacing:.16em;color:{{ serverUrlTint }}">{{ serverUrl }}</div>
+    <div onClick="{{ toggleServer }}" style="display:flex;align-items:center;justify-content:center;gap:9px;padding:15px;border-radius:12px;background:{{ serverBtnBorder }};color:{{ serverBtnTint }};cursor:pointer">
+      <i class="ph-thin ph-power" style="font-size:19px"></i>
+      <span style="font:500 14px/1 Inter,sans-serif">{{ serverBtnLabel }}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;padding-top:12px">
+      <div style="font:400 10px/1 Inter,sans-serif;letter-spacing:.26em;color:rgba(255,255,255,.78)">PAIRED DEVICES · 1</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.08)">
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <div style="font:400 13px/1.3 Inter,sans-serif">MacBook Pro</div>
+          <div style="font:400 10px/1.6 Inter,sans-serif;letter-spacing:.24em;color:rgba(255,255,255,.78)">SHA256:8F3A…C21D</div>
+        </div>
+        <i class="ph-thin ph-x" style="font-size:14px;color:rgba(255,255,255,.45);cursor:pointer"></i>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 18px;border-radius:12px;background:#1a1a1a;border:1px solid rgba(255,255,255,.08);color:#fafafa;cursor:pointer;width:fit-content" style-hover="background:#242424">
+        <i class="ph-thin ph-plus" style="font-size:19px"></i>
+        <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">Pair a new device</span>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ historyOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeHistory }}" style="position:absolute;inset:0;background:rgba(0,0,0,.76);backdrop-filter:blur(2px);z-index:4"></div>
+    <div style="position:absolute;left:0;right:0;bottom:0;max-height:78%;overflow:auto;background:#050505;border-top:1px solid rgba(255,255,255,.2);padding:20px 20px 22px;display:flex;flex-direction:column;gap:16px;z-index:5;box-shadow:0 -24px 60px rgba(0,0,0,.6)">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div style="font:300 12px/1.4 Inter,sans-serif;letter-spacing:.34em;text-transform:uppercase">History</div>
+        <i onClick="{{ closeHistory }}" class="ph-thin ph-x" style="font-size:16px;color:rgba(255,255,255,.5);cursor:pointer"></i>
+      </div>
+      <div onClick="{{ newChat }}" style="display:flex;align-items:center;justify-content:center;gap:9px;padding:13px 18px;border-radius:12px;background:#fafafa;color:#000;cursor:pointer;width:fit-content" style-hover="background:#e6e6e6">
+        <i class="ph-thin ph-plus" style="font-size:19px"></i>
+        <span style="font:500 14px/1 Inter,sans-serif;white-space:nowrap">New chat</span>
+      </div>
+      <div style="display:flex;flex-direction:column">
+        <sc-for list="{{ history }}" as="h" hint-placeholder-count="3">
+          <div onClick="{{ closeHistory }}" style="display:flex;flex-direction:column;gap:7px;padding:15px 0;border-bottom:1px solid rgba(255,255,255,.08);cursor:pointer">
+            <div style="font:400 13px/1.4 Inter,sans-serif;color:#fafafa">{{ h.title }}</div>
+            <div style="font:400 10px/1.6 Inter,sans-serif;letter-spacing:.24em;color:rgba(255,255,255,.78)">{{ h.meta }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</div>
+</x-import>
+
+<div style="width:100%;max-width:820px;font:400 10px/1.9 Inter,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:rgba(255,255,255,.5)">Idle, the world is a sphere — no header read · Models → Load — the .gguf header is parsed and the sphere becomes that model: one ring per block, one point per KV head, radius from embedding_length, twist from context_length, dot weight from the quantisation · Load again to unload</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;hideRail&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;showSuggestions&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Chat&quot;},&quot;startWithModel&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Chat&quot;}}">
+class Component extends DCLogic {
+  fieldRef = React.createRef();
+
+  state = {
+    screen: 'chat', input: '', msgs: [], streaming: false, loading: false,
+    loadedId: null, memTab: 'soul', learning: true, serverOn: false, historyOpen: false,
+    browse: false, query: '', filter: 'All', railHidden: false,
+    installedIds: ['qwen4', 'gemma2b', 'whisper'],
+    downloads: {}
+  };
+
+  // gguf: the header fields firn reads out of the file. blocks/heads/kv/
+  // embd/ctx/bits are what the world is built from — nothing here is decoration.
+  CATALOG = [
+    { id: 'qwen4', name: 'Qwen3.5 4B Instruct', meta: 'Q4_K_M · 2.7 GB · 128K CTX', kind: 'Chat',
+      note: 'Best all-rounder that still fits comfortably in 8 GB of RAM.',
+      gguf: { arch: 'qwen3', blocks: 36, heads: 32, kv: 8, embd: 2560, ffn: 9728, ctx: 131072, ctxLabel: '128K', quant: 'Q4_K_M', bits: 4.5, params: '4.0 B' } },
+    { id: 'gemma2b', name: 'Gemma 4 E2B Instruct', meta: 'Q4_0 · 2.5 GB · 32K CTX', kind: 'Chat',
+      note: 'Fastest first token on Adreno GPUs. Good default for older phones.',
+      gguf: { arch: 'gemma3', blocks: 30, heads: 8, kv: 4, embd: 2048, ffn: 16384, ctx: 32768, ctxLabel: '32K', quant: 'Q4_0', bits: 4, params: '2.0 B' } },
+    { id: 'whisper', name: 'Whisper base', meta: 'SPEECH · 142 MB', kind: 'Speech',
+      note: 'On-device dictation. Runs while the LLM is loaded.',
+      gguf: { arch: 'whisper', blocks: 12, heads: 8, kv: 8, embd: 512, ffn: 2048, ctx: 448, ctxLabel: '448', quant: 'F16', bits: 16, params: '74 M', split: true } },
+    { id: 'llama8', name: 'Llama 3.3 8B Instruct', meta: 'Q4_K_M · 4.9 GB · 128K CTX', kind: 'Chat',
+      note: 'Stronger reasoning, roughly half the speed.', needs: '12 GB RAM',
+      gguf: { arch: 'llama', blocks: 32, heads: 32, kv: 8, embd: 4096, ffn: 14336, ctx: 131072, ctxLabel: '128K', quant: 'Q4_K_M', bits: 4.5, params: '8.0 B' } },
+    { id: 'qwencoder', name: 'Qwen3 Coder 3B', meta: 'Q4_K_M · 2.0 GB · 32K CTX', kind: 'Code',
+      note: 'Code completion and refactors. Weak at open chat.',
+      gguf: { arch: 'qwen3', blocks: 36, heads: 16, kv: 8, embd: 2048, ffn: 6144, ctx: 32768, ctxLabel: '32K', quant: 'Q4_K_M', bits: 4.5, params: '3.0 B' } },
+    { id: 'phi', name: 'Phi-4 mini', meta: 'Q4_K_M · 2.4 GB · 16K CTX', kind: 'Chat',
+      note: 'Tight, well-behaved answers on maths and structured output.',
+      gguf: { arch: 'phi3', blocks: 32, heads: 24, kv: 8, embd: 3072, ffn: 8192, ctx: 16384, ctxLabel: '16K', quant: 'Q4_K_M', bits: 4.5, params: '3.8 B' } },
+    { id: 'moondream', name: 'Moondream 2', meta: 'VISION · 1.8 GB', kind: 'Vision',
+      note: 'Reads screenshots and photos. Pairs with any chat model.',
+      gguf: { arch: 'phi2', blocks: 24, heads: 32, kv: 32, embd: 2048, ffn: 8192, ctx: 2048, ctxLabel: '2K', quant: 'Q8_0', bits: 8, params: '1.9 B' } },
+    { id: 'embed', name: 'Nomic Embed v1.5', meta: 'EMBEDDING · 274 MB', kind: 'Embedding',
+      note: 'Required for memory search over long histories.',
+      gguf: { arch: 'nomic-bert', blocks: 12, heads: 12, kv: 12, embd: 768, ffn: 3072, ctx: 8192, ctxLabel: '8K', quant: 'F16', bits: 16, params: '137 M' } }
+  ];
+
+  MEM = {
+    soul: {
+      hint: 'Who firn is. Proposed changes always wait for you.',
+      entries: [
+        { date: '13 SEP', text: 'I run on this phone. Nothing leaves it unless a network tool is switched on.' },
+        { date: '13 SEP', text: 'I answer concisely and say plainly when I am unsure rather than guessing.' },
+        { date: '13 SEP', text: 'I remember what you tell me about yourself and use it without asking twice.' }
+      ]
+    },
+    you: {
+      hint: 'What firn has picked up about you.',
+      entries: [
+        { date: '12 SEP', text: 'Builds Android apps in Kotlin; prefers short, direct answers.' },
+        { date: '10 SEP', text: 'Works offline on trains — assume no network by default.' }
+      ]
+    },
+    facts: {
+      hint: 'Technical facts about your projects, tools and conventions.',
+      entries: [
+        { date: '11 SEP', text: 'llama.cpp builds with NDK r27; Adreno OpenCL backend for Q4_0.' },
+        { date: '09 SEP', text: 'Server listens on 8443 with a self-signed certificate.' }
+      ]
+    },
+    sessions: {
+      hint: 'One line per past conversation. Read in full only when relevant.',
+      entries: [
+        { date: '13 SEP', text: 'Context-window sizing for 4 GB devices — settled on 4K.' },
+        { date: '12 SEP', text: 'Debugged a hallucinated tool call in the agent loop.' }
+      ]
+    }
+  };
+
+  // The world: a Fibonacci point-sphere rotated in real 3D, depth read as size
+  // and opacity. Idle it drifts, it converges while a model loads, spins while
+  // the model thinks.
+  componentDidMount() {
+    const N = 420, golden = Math.PI * (3 - Math.sqrt(5));
+    this.pts = [];
+    for (let i = 0; i < N; i++) {
+      const y = 1 - (i / (N - 1)) * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = golden * i;
+      this.pts.push([Math.cos(th) * r, y, Math.sin(th) * r]);
+    }
+    const reach = 1.25 * Math.sqrt(4 * Math.PI / N);
+    this.links = [];
+    for (let i = 0; i < N; i++) {
+      let made = 0;
+      for (let j = i + 1; j < N && made < 2; j++) {
+        const a = this.pts[i], b = this.pts[j];
+        if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < reach) { this.links.push([i, j]); made++; }
+      }
+    }
+    this.N = N;
+    this._conv = 1; this._m = 0;
+    if (this.props.startWithModel) this.setState({ loadedId: 'qwen4' });
+    this._tick();
+  }
+
+  loaded() {
+    const id = this.state.loadedId;
+    if (!id || !this.state.installedIds.includes(id)) return null;
+    return this.CATALOG.find(c => c.id === id) || null;
+  }
+
+  // The model's own shape, read straight out of the .gguf header: one ring per
+  // transformer block, one point per KV head, ring radius from embedding_length,
+  // helical twist from context_length. Encoder-decoder files split in two.
+  shapeFor(c) {
+    if (!c || !c.gguf) return null;
+    if (this._shapeId === c.id) return this._shape;
+    const g = c.gguf, N = this.N;
+    const per = Math.max(6, Math.min(12, g.kv));
+    const maxRings = Math.floor(N / per);
+    const rad0 = 0.28 + 0.26 * Math.min(1, g.embd / 4096);
+    // twist is a fraction of the ring's own angular spacing, so it never aliases
+    const ctxF = Math.min(1, Math.max(0, Math.log2(Math.max(2, g.ctx) / 1024)) / 7);
+    const twist = (6.2832 / per) * (0.10 + 0.34 * ctxF);
+    const stacks = g.split
+      ? [[Math.ceil(g.blocks / 2), -0.44], [Math.floor(g.blocks / 2), 0.44]]
+      : [[Math.min(g.blocks, maxRings), 0]];
+    const pts = [], links = [];
+    for (const st of stacks) {
+      const rings = st[0], ox = st[1];
+      const rad = g.split ? rad0 * 0.62 : rad0;
+      const hspan = 0.42 + 0.50 * Math.min(1, rings / 36);
+      let prev = -1;
+      for (let l = 0; l < rings; l++) {
+        const y = rings === 1 ? 0 : -hspan + 2 * hspan * (l / (rings - 1));
+        const base = l * twist;
+        const first = pts.length;
+        for (let k = 0; k < per; k++) {
+          const th = base + (k / per) * 6.2832;
+          pts.push([Math.cos(th) * rad + ox, y, Math.sin(th) * rad]);
+          links.push([first + k, first + ((k + 1) % per)]);
+          if (prev >= 0) links.push([prev + k, first + k]);
+        }
+        prev = first;
+      }
+    }
+    this._shapeId = c.id;
+    this._shape = {
+      pts: pts.slice(0, N),
+      links: links.filter(l => l[0] < N && l[1] < N),
+      dotW: 0.62 + 0.52 * Math.min(1, g.bits / 8)
+    };
+    return this._shape;
+  }
+
+  _tick = () => {
+    this._raf = requestAnimationFrame(this._tick);
+    const now = performance.now() / 1000;
+    const dt = Math.min(0.05, now - (this._last || now));
+    this._last = now;
+    const c = this.fieldRef.current;
+    if (!c) return;
+    const s = this.state;
+    const shape = this.shapeFor(this.loaded());
+    const want = shape && !s.loading ? 1 : 0;
+    this._m += (want - this._m) * Math.min(1, dt * (want ? 2.2 : 3.6));
+    this._conv += ((s.loading ? 0.34 : 1) - this._conv) * Math.min(1, dt * 3.2);
+    this._a = (this._a || 0) + dt * (s.streaming ? 0.8 : s.loading ? 1.6 : 0.11);
+    const ctx = c.getContext('2d');
+    const W = c.width, H = c.height, cx = W / 2, cy = H / 2;
+    const R = W * 0.4 * this._conv;
+    ctx.clearRect(0, 0, W, H);
+    const a = this._a, t = 0.42;
+    const ca = Math.cos(a), sa = Math.sin(a), ct = Math.cos(t), st = Math.sin(t);
+    const m = this._m, e = m * m * (3 - 2 * m);
+    const src = this.pts, tgt = shape ? shape.pts : null;
+    const P = [], alive = [];
+    for (let i = 0; i < src.length; i++) {
+      const o = src[i], g = tgt && i < tgt.length ? tgt[i] : null;
+      const f = g ? e : 0;
+      // points with no counterpart in the model's shape collapse inward and fade
+      const k = tgt && !g ? 1 - e * 0.94 : 1;
+      const px = (o[0] + (g ? (g[0] - o[0]) * f : 0)) * k;
+      const py = (o[1] + (g ? (g[1] - o[1]) * f : 0)) * k;
+      const pz = (o[2] + (g ? (g[2] - o[2]) * f : 0)) * k;
+      const x = px * ca + pz * sa;
+      const z0 = -px * sa + pz * ca;
+      P.push([cx + x * R, cy + (py * ct - z0 * st) * R, py * st + z0 * ct]);
+      alive.push(tgt && !g ? 1 - e : 1);
+    }
+    ctx.lineWidth = 1;
+    const drawLinks = (set, fade) => {
+      if (fade < 0.03) return;
+      for (let k = 0; k < set.length; k++) {
+        const A = P[set[k][0]], B = P[set[k][1]];
+        ctx.strokeStyle = 'rgba(255,255,255,' + ((0.05 + 0.23 * ((A[2] + B[2]) / 2 + 1) / 2) * fade).toFixed(3) + ')';
+        ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.stroke();
+      }
+    };
+    drawLinks(this.links, 1 - e);
+    if (shape) drawLinks(shape.links, e);
+    const dw = 1 + ((shape ? shape.dotW : 1) - 1) * e;
+    for (let k = 0; k < P.length; k++) {
+      const d = (P[k][2] + 1) / 2;
+      ctx.fillStyle = 'rgba(255,255,255,' + ((0.1 + 0.82 * d) * alive[k]).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(P[k][0], P[k][1], (0.8 + 2.1 * d) * dw, 0, 6.2832); ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.09)';
+    ctx.beginPath(); ctx.arc(cx, cy, W * 0.455, 0, 6.2832); ctx.stroke();
+  };
+
+  componentWillUnmount() {
+    clearInterval(this._t); clearTimeout(this._lt);
+    cancelAnimationFrame(this._raf);
+    (this._dl || []).forEach(clearInterval);
+  }
+
+  nav(screen) { return () => this.setState({ screen, historyOpen: false, browse: false }); }
+
+  loadModel(id) {
+    clearTimeout(this._lt);
+    if (this.state.loadedId === id) { this.setState({ loadedId: null, loading: false }); return; }
+    this.setState({ loadedId: id, loading: true });
+    this._lt = setTimeout(() => this.setState({ loading: false }), 1500);
+  }
+
+  startDownload(id) {
+    if (this.state.downloads[id] != null || this.state.installedIds.includes(id)) return;
+    this.setState(s => ({ downloads: { ...s.downloads, [id]: 0 } }));
+    const t = setInterval(() => {
+      this.setState(s => {
+        const pct = (s.downloads[id] ?? 0) + 7;
+        if (pct >= 100) {
+          clearInterval(t);
+          const { [id]: _, ...rest } = s.downloads;
+          return { downloads: rest, installedIds: [...s.installedIds, id] };
+        }
+        return { downloads: { ...s.downloads, [id]: pct } };
+      });
+    }, 160);
+    this._dl = (this._dl || []).concat(t);
+  }
+
+  send = () => {
+    const text = this.state.input.trim();
+    if (!text || this.state.streaming || !this.loaded()) return;
+    const reply = 'Locally, yes. I keep the whole exchange on the phone and only reach the network if you switch a tool on.';
+    this.setState(s => ({ input: '', streaming: true, msgs: [...s.msgs, { role: 'user', text }, { role: 'agent', text: '' }] }));
+    let i = 0;
+    clearInterval(this._t);
+    this._t = setInterval(() => {
+      i += 2;
+      this.setState(s => {
+        const msgs = s.msgs.slice();
+        msgs[msgs.length - 1] = { role: 'agent', text: reply.slice(0, i) };
+        return { msgs, streaming: i < reply.length };
+      });
+      if (i >= reply.length) clearInterval(this._t);
+    }, 28);
+  };
+
+  renderVals() {
+    const s = this.state;
+    const accent = '#ffffff';
+    const dim = 'rgba(255,255,255,.75)';
+    const tint = k => (s.screen === k ? accent : dim);
+    const bar = k => (s.screen === k ? accent : 'transparent');
+    const installedList = s.installedIds.map(id => this.CATALOG.find(c => c.id === id)).filter(Boolean);
+    const model = this.loaded();
+    const loadedId = model?.id;
+    const g = model?.gguf;
+    const q = s.query.trim().toLowerCase();
+    const kinds = ['All', 'Chat', 'Code', 'Vision', 'Speech', 'Embedding'];
+    const tab = this.MEM[s.memTab];
+    const tabTint = k => (s.memTab === k ? '#000' : 'rgba(255,255,255,.82)');
+    const tabLine = k => (s.memTab === k ? '#fafafa' : 'transparent');
+    const canSend = s.input.trim().length > 0 && !s.streaming && !!model;
+    const order = ['chat', 'memory', 'models', 'server'];
+
+    return {
+      isChat: s.screen === 'chat', isMemory: s.screen === 'memory', isServer: s.screen === 'server',
+      historyOpen: s.historyOpen,
+      goChat: this.nav('chat'), goMemory: this.nav('memory'),
+      goModels: this.nav('models'), goServer: this.nav('server'),
+      tintChat: tint('chat'), tintMemory: tint('memory'),
+      tintModels: tint('models'), tintServer: tint('server'),
+      barChat: bar('chat'), barMemory: bar('memory'),
+      barModels: bar('models'), barServer: bar('server'),
+      posDots: order.map(k => ({ opacity: s.screen === k ? 1 : 0.26 })),
+
+      fieldRef: this.fieldRef,
+      waveScale: s.streaming ? 1 : 0.12,
+      waveOpacity: s.streaming ? 1 : 0.45,
+      stateDot: accent,
+      stateMark: s.streaming ? 'brand/firn-mark-thinking-small-animated.svg' : 'brand/firn-mark-small-white.svg',
+      stateLine: !model ? 'No model loaded'
+        : s.loading ? 'Reading ' + model.gguf.arch + '.gguf header'
+        : s.streaming ? 'Thinking' : model.name + ' · GPU · Ready',
+
+      hasModel: !!model, noModel: !model,
+      composerHint: model ? 'MESSAGE' : 'LOAD A MODEL FIRST',
+      ggufRows: g ? [
+        { k: 'BLOCKS', v: String(g.blocks) },
+        { k: 'HEADS', v: g.heads + ' / ' + g.kv + ' KV' },
+        { k: 'EMBD', v: String(g.embd) },
+        { k: 'CTX', v: g.ctxLabel },
+        { k: 'QUANT', v: g.quant },
+        { k: 'PARAMS', v: g.params }
+      ] : [],
+
+      showSuggestions: this.props.showSuggestions ?? true,
+      isEmpty: s.msgs.length === 0,
+      hasMessages: s.msgs.length > 0,
+      msgs: s.msgs.map((m, i) => m.role === 'user'
+        ? { text: m.text, meta: 'YOU', metaColor: 'rgba(255,255,255,.78)', align: 'flex-end',
+            markSrc: 'brand/firn-mark-small-white.svg', markDisplay: 'none', markW: '0',
+            border: '1px solid rgba(255,255,255,.2)', color: '#fafafa', pad: '12px 14px',
+            mark: '1px solid rgba(255,255,255,.2)' }
+        : { text: m.text, meta: 'FIRN', metaColor: '#ffffff', align: 'flex-start',
+            markSrc: s.streaming && i === s.msgs.length - 1 ? 'brand/firn-mark-thinking-small-animated.svg' : 'brand/firn-mark-small-white.svg',
+            markDisplay: 'block', markW: '20px',
+            border: '0', color: 'rgba(255,255,255,.92)', pad: '0 0 0 14px',
+            mark: '1px solid rgba(255,255,255,.55)' }),
+
+      input: s.input,
+      onInput: e => this.setState({ input: e.target.value }),
+      onKey: e => { if (e.key === 'Enter') this.send(); },
+      send: this.send,
+      sendBorder: canSend ? '#fafafa' : '#1a1a1a',
+      sendTint: canSend ? '#000' : 'rgba(255,255,255,.45)',
+      useSuggestion1: () => this.setState({ input: 'Summarise the PDF I just opened' }),
+      useSuggestion2: () => this.setState({ input: 'What do you remember about me?' }),
+
+      memEntries: tab.entries, memHint: tab.hint,
+      memSoul: () => this.setState({ memTab: 'soul' }),
+      memYou: () => this.setState({ memTab: 'you' }),
+      memFacts: () => this.setState({ memTab: 'facts' }),
+      memSessions: () => this.setState({ memTab: 'sessions' }),
+      memSoulTint: tabTint('soul'), memYouTint: tabTint('you'),
+      memFactsTint: tabTint('facts'), memSessionsTint: tabTint('sessions'),
+      memSoulLine: tabLine('soul'), memYouLine: tabLine('you'),
+      memFactsLine: tabLine('facts'), memSessionsLine: tabLine('sessions'),
+      learnMeta: s.learning ? 'Consolidates while charging · 4 new notes' : 'Paused — nothing is written',
+      toggleLearning: () => this.setState(st => ({ learning: !st.learning })),
+      switchBg: s.learning ? '#fafafa' : '#2a2a2a',
+      switchAlign: s.learning ? 'flex-end' : 'flex-start',
+      switchDot: s.learning ? '#000' : '#8c8c8c',
+
+      isInstalled: s.screen === 'models' && !s.browse,
+      isBrowse: s.screen === 'models' && s.browse,
+      openBrowse: () => this.setState({ browse: true }),
+      closeBrowse: () => this.setState({ browse: false }),
+      installedCount: String(installedList.length),
+      storageLine: installedList.length ? '5.3 / 128 GB' : '0 / 128 GB',
+      installed: installedList.map(m => ({
+        name: m.name,
+        meta: m.id === loadedId ? m.gguf.blocks + ' BLOCKS · ' + m.gguf.heads + '/' + m.gguf.kv + ' HEADS' : m.meta,
+        markOpacity: m.id === loadedId ? 1 : 0.22,
+        tint: m.id === loadedId ? '#ffffff' : '#fafafa',
+        action: m.id === loadedId ? (s.loading ? 'Reading' : 'Unload') : 'Load',
+        actionTint: m.id === loadedId ? '#000' : '#fafafa',
+        actionBorder: m.id === loadedId ? '#fafafa' : '#1a1a1a',
+        onLoad: () => this.loadModel(m.id),
+        onDelete: () => this.setState(st => ({
+          loadedId: st.loadedId === m.id ? null : st.loadedId,
+          installedIds: st.installedIds.filter(x => x !== m.id)
+        }))
+      })),
+      query: s.query,
+      onQuery: e => this.setState({ query: e.target.value }),
+      filters: kinds.map(k => ({
+        label: k,
+        onPick: () => this.setState({ filter: k }),
+        border: s.filter === k ? 'transparent' : 'rgba(255,255,255,.08)',
+        bg: s.filter === k ? '#fafafa' : '#1a1a1a',
+        tint: s.filter === k ? '#000' : 'rgba(255,255,255,.88)'
+      })),
+      catalog: this.CATALOG
+        .filter(c => (s.filter === 'All' || c.kind === s.filter) &&
+          (!q || c.name.toLowerCase().includes(q) || c.kind.toLowerCase().includes(q)))
+        .map(c => {
+          const pct = s.downloads[c.id];
+          const has = s.installedIds.includes(c.id);
+          const dl = pct != null;
+          const blocked = !!c.needs && !has;
+          return {
+            name: c.name, meta: c.meta,
+            note: blocked ? c.note + ' Needs ' + c.needs + '.' : c.note,
+            opacity: blocked ? 0.55 : 1,
+            downloading: dl, pct: pct ?? 0, pctLabel: (pct ?? 0) + '%',
+            btnLabel: blocked ? 'Too large' : has ? 'Installed' : dl ? 'Cancel' : 'Download',
+            btnIcon: blocked ? 'ph-thin ph-prohibit' : has ? 'ph-thin ph-check' : dl ? 'ph-thin ph-x' : 'ph-thin ph-download-simple',
+            btnBorder: blocked || has ? 'transparent' : '#1a1a1a',
+            btnTint: blocked || has ? 'rgba(255,255,255,.62)' : '#fafafa',
+            onAction: () => {
+              if (has || blocked) return;
+              if (dl) this.setState(st => { const { [c.id]: _, ...rest } = st.downloads; return { downloads: rest }; });
+              else this.startDownload(c.id);
+            }
+          };
+        }),
+
+      serverBlurb: s.serverOn
+        ? 'Any OpenAI-compatible client on your network can talk to this model.'
+        : 'Expose this model to your network as an OpenAI-compatible endpoint.',
+      serverUrl: s.serverOn ? 'https://192.168.1.42:8443' : 'OFFLINE',
+      serverUrlTint: s.serverOn ? '#fafafa' : 'rgba(255,255,255,.78)',
+      serverBtnLabel: s.serverOn ? 'Stop server' : 'Start server',
+      serverBtnBorder: s.serverOn ? '#1a1a1a' : '#fafafa',
+      serverBtnTint: s.serverOn ? '#fafafa' : '#000',
+      toggleServer: () => this.setState(st => ({ serverOn: !st.serverOn })),
+
+      railOpen: !(this.props.hideRail ?? false) && !s.railHidden,
+      railClosed: (this.props.hideRail ?? false) || s.railHidden,
+      hideRail: () => this.setState({ railHidden: true }),
+      showRail: () => this.setState({ railHidden: false }),
+      openHistory: () => this.setState({ historyOpen: true }),
+      closeHistory: () => this.setState({ historyOpen: false }),
+      newChat: () => this.setState({ msgs: [], historyOpen: false, screen: 'chat' }),
+      history: [
+        { title: 'Context window on 4 GB devices', meta: '12 LINES · SEP 13 09:41' },
+        { title: 'Hallucinated tool call', meta: '24 LINES · SEP 12 22:10' },
+        { title: 'Adreno OpenCL quant support', meta: '8 LINES · SEP 10 07:55' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
