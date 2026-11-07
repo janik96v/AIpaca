@@ -6,6 +6,7 @@ ktor = "2.3.12"
 kotlinxSerialization = "1.7.3"
 kotlinxCoroutines = "1.9.0"
 androidxCoreKtx = "1.13.1"
+androidxCoreSplashscreen = "1.0.1"
 androidxLifecycle = "2.8.6"
 androidxActivityCompose = "1.9.2"
 androidxNavigationCompose = "2.9.8"
@@ -23,6 +24,7 @@ kotlinxCoroutinesTest = "1.9.0"
 [libraries]
 # AndroidX Core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "androidxCoreSplashscreen" }
 
 # Lifecycle
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }

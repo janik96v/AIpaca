@@ -1,6 +1,6 @@
-# AIpaca Lab Journal
+# firn Lab Journal
 
-A living research repository for the AIpaca development team. Entries are ordered newest-first.
+A living research log for firn (formerly AIpaca). Entries are ordered newest-first.
 
 ---
 

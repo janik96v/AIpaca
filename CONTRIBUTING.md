@@ -1,6 +1,6 @@
-# Contributing to AIpaca
+# Contributing to firn
 
-Thanks for your interest in contributing! AIpaca is an Apache-2.0 licensed open-source project, and contributions of all kinds are welcome — bug reports, feature ideas, documentation fixes, code, or just feedback.
+Thanks for your interest in contributing! firn is an Apache-2.0 licensed open-source project, and contributions of all kinds are welcome — bug reports, feature ideas, documentation fixes, code, or just feedback.
 
 This document explains how to get a working development environment, the conventions we follow, and the pull-request workflow.
 
@@ -16,18 +16,19 @@ This document explains how to get a working development environment, the convent
 
 | Tool | Version |
 |---|---|
-| Android Studio | Hedgehog 2023.1+ |
+| Android Studio | Narwhal 3 Feature Drop (2025.1.3)+ (AGP 8.13) |
+| Android SDK | Platform 36 |
 | JDK | 17 |
 | Android NDK | r27.2.12479018 |
-| CMake | 3.22+ |
-| Device | API 28+, ≥4 GB RAM (real device required — emulators are not supported because AIpaca builds only `arm64-v8a`) |
+| CMake | 3.22.1+ |
+| Device | API 28+, ≥4 GB RAM (real device recommended — firn builds only `arm64-v8a`, so x86_64 emulators won't run it) |
 
 ### Build from source
 
 ```bash
 git clone https://github.com/<your-fork>/AIpaca.git
 cd AIpaca
-git submodule update --init --recursive   # pulls llama.cpp + whisper.cpp
+git submodule update --init --recursive   # pulls llama.cpp (fork) + whisper.cpp
 ```
 
 Open the project in Android Studio, let Gradle sync, then `Run` on a connected Android device.
@@ -38,7 +39,7 @@ For a release build from the CLI:
 ./gradlew assembleRelease
 ```
 
-(Requires a signing config — see [docs/api-client-guide.md](docs/api-client-guide.md).)
+(Signs with the keystore given by the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` environment variables.)
 
 ## How to contribute
 
@@ -50,11 +51,11 @@ Open an issue with the **Bug Report** template. The more of these you can fill i
 - Model file you were using (name + quantization)
 - Exact steps to reproduce
 - What you expected vs. what happened
-- Logcat output (filter by `aipaca` tag)
+- Logcat output (tags such as `Firn`, `FirnWhisper`, `ApiServer`)
 
 ### Suggesting features
 
-Open an issue with the **Feature Request** template. Before opening, please check existing issues and the [Roadmap](README.md#roadmap) — your idea might already be tracked.
+Open an issue with the **Feature Request** template. Before opening, please check existing issues and the [Roadmap](docs/roadmap.md) — your idea might already be tracked.
 
 ### Submitting code
 
@@ -64,7 +65,7 @@ Open an issue with the **Feature Request** template. Before opening, please chec
    git checkout -b feature/short-description
    ```
 3. **Make your changes.** Keep PRs focused; one logical change per PR.
-4. **Test on a real device.** AIpaca builds `arm64-v8a` only, so emulators won't work.
+4. **Test on a real device.** firn builds `arm64-v8a` only; GPU paths (OpenCL) need real hardware.
 5. **Update the changelog** under `## [Unreleased]` in `CHANGELOG.md` if your change is user-visible.
 6. **Open a pull request** against `main`. Reference the issue you're fixing in the PR description.
 
@@ -103,7 +104,6 @@ Conventional commits enable automated changelog generation later and make `git l
 If you're looking for something to work on, these are particularly impactful:
 
 - **KV-cache prefix reuse** across agent turns (reduce prefill time)
-- **In-app model browser** integrated with HuggingFace
 - **Multi-request queuing** for the API server
 - **iOS port** (shared C++ core, SwiftUI shell)
 - **Documentation, screenshots, and example clients**
@@ -114,6 +114,6 @@ By submitting a contribution, you agree that your contribution is licensed under
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you're agreeing to uphold it.
+This project has a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you're agreeing to uphold it.
 
 Thanks again — small contributions make a real difference.

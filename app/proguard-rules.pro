@@ -1,23 +1,23 @@
 # Add project specific ProGuard rules here.
 
 # Keep JNI bridge class and all its native methods
--keep class com.aipaca.app.engine.LlamaCppEngine { *; }
--keepclassmembers class com.aipaca.app.engine.LlamaCppEngine {
+-keep class ch.firn.app.engine.LlamaCppEngine { *; }
+-keepclassmembers class ch.firn.app.engine.LlamaCppEngine {
     native <methods>;
 }
 
 # whisper.cpp JNI bridge
--keep class com.aipaca.app.engine.WhisperEngine { *; }
--keepclassmembers class com.aipaca.app.engine.WhisperEngine {
+-keep class ch.firn.app.engine.WhisperEngine { *; }
+-keepclassmembers class ch.firn.app.engine.WhisperEngine {
     native <methods>;
 }
 
 # Whisper model path persistence
--keep class com.aipaca.app.data.WhisperModelPrefs { *; }
+-keep class ch.firn.app.data.WhisperModelPrefs { *; }
 
 # Keep TokenCallback — called from C++ via JNI
--keep interface com.aipaca.app.engine.TokenCallback { *; }
--keepclassmembers interface com.aipaca.app.engine.TokenCallback {
+-keep interface ch.firn.app.engine.TokenCallback { *; }
+-keepclassmembers interface ch.firn.app.engine.TokenCallback {
     public void onToken(java.lang.String);
 }
 
@@ -25,8 +25,11 @@
 -keep class io.ktor.** { *; }
 -dontwarn io.ktor.**
 
-# Netty — keep channel/handler classes instantiated via reflection
--keep class io.netty.** { *; }
+# Netty — keep channel/handler classes instantiated via reflection.
+# Except InsecureTrustManagerFactory: a trust-all TLS manager the app never
+# uses. Keeping it would put an unsafe X509TrustManager in the release, which
+# Google Play's security scan flags.
+-keep class !io.netty.handler.ssl.util.InsecureTrustManagerFactory**,io.netty.** { *; }
 -dontwarn io.netty.**
 -keepclassmembers class * extends io.netty.channel.ChannelHandler {
     public <init>(...);

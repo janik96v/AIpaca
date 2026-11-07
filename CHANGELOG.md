@@ -1,12 +1,72 @@
 # Changelog
 
-All notable changes to AIpaca are documented here.
+All notable changes to firn (formerly AIpaca) are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
 ## [Unreleased]
+
+---
+
+## [1.0.0] – 2026-11-07
+
+### Changed
+- **Renamed to firn.** New application ID `ch.firn.app` (installs alongside the old
+  `com.aipaca.app` build — uninstall that one by hand), Kotlin package `ch.firn.app`, native
+  library `libfirn.so`, launcher label `firn`. New adaptive launcher icon — the glowing master (haze, glow, grain) rendered
+  per density, with a flat themed (monochrome) layer, a black splash screen with the firn mark, and the mark as the server
+  notification icon. Internal storage names (database, preferences, TLS keystore alias,
+  WorkManager jobs, notification channel) are renamed too; there is no data to migrate
+- **Breaking for API clients:** the server's auth scheme is now `Firn-Ed25519` (was
+  `AIpaca-Ed25519`) and the Python examples keep their keys in `~/.firn/`. Re-pair existing
+  clients
+- Complete visual redesign ("Instrument"): true black, white hairlines and tracked uppercase
+  chrome; Inter (bundled) and Phosphor Thin icons replace Roboto and Material icons; zero
+  corner radius for layout. The bottom navigation is replaced by a collapsible left rail with
+  a status line (`NO MODEL LOADED` / `READING QWEN3.GGUF HEADER` / `THINKING` /
+  `… · GPU · READY`), chat history moves to a bottom sheet, and the Modes menu moves to the
+  bottom of the rail
+- "Soft square" controls replace the outlined, tracked-uppercase buttons: one white primary
+  action per screen, everything else tappable on a `#1A1A1A` surface with 12dp corners, Inter
+  Medium sentence-case labels. Memory gets a Learning settings card and segmented tabs; model
+  rows get Load / Unload buttons; catalog rows show Installed / Too large in place of the action;
+  the send button is a filled square with a heavier arrow; dialogs use the same buttons
+- The firn mark replaces the dot-grid mark on the rail and labels the agent's messages,
+  lighting one path through its net while the model is thinking; the status line drops its
+  square mark and shows the model state alone
+- Models screen reorganised into what is on the phone (load / unload / delete) and a browse
+  view (catalog with kind filters, RAM fit, inline download progress, quant guide)
+
+### Added
+- Model World: the chat empty state draws the loaded model as a live point cloud built from
+  its header (sphere when idle; contracts and spins while loading; unfolds into the model when
+  ready; spins faster while generating). Whisper models show as two towers (encoder/decoder)
+- Header readout under the world: blocks, heads / KV heads, embedding width, context, quant,
+  parameters
+- Hugging Face search on the browse screen (GGUF repos, most downloaded first)
+- Files opened from the device are listed with downloaded models and can be reloaded or
+  deleted later
+- Delete confirmation for installed models
+
+### Fixed
+- Google Play requirements: every native library is now linked for 16 KB memory pages
+  (required for apps targeting Android 15+), and the app targets Android 16 (API 36), required
+  for new apps and updates since 31 Aug 2026
+- The local API server stops cleanly when Android's 6-hour limit for `dataSync` foreground
+  services runs out, instead of the process being killed
+- Release builds no longer contain Netty's trust-all `InsecureTrustManagerFactory`, which Google
+  Play's security scan flags as an unsafe TLS trust manager
+- Removed the unused `READ_EXTERNAL_STORAGE` and `READ_MEDIA_VISUAL_USER_SELECTED` permissions:
+  files come through the document picker and images through the photo picker
+- The GGUF header probe no longer aborts on integer metadata stored with an unexpected width
+  or as a per-layer array; it now also reports `nHead`, `general.name` and an exact parameter
+  count from the tensor shapes (previously a rough estimate)
+- Loading a model no longer depends on the Models screen staying open
+- Downloads from different repos no longer overwrite each other: each repo's files are kept in
+  their own folder (two repos shipping `mmproj-F16.gguf` broke one model's vision encoder).
+  Existing downloads keep working
 
 ---
 
@@ -110,7 +170,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Python example scripts (`chat.py`, `pair.py`)
 - Full API client guide (`docs/api-client-guide.md`)
 
-[Unreleased]: https://github.com/janik96v/AIpaca/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/janik96v/AIpaca/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/janik96v/AIpaca/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/janik96v/AIpaca/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/janik96v/AIpaca/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/janik96v/AIpaca/compare/v0.2.0...v0.3.0

@@ -1,18 +1,18 @@
-# AIpaca API Client Guide
+# firn API Client Guide
 
-How to connect to and use the AIpaca AI server from a laptop, another app, or any HTTP client.
+How to connect to and use the firn AI server from a laptop, another app, or any HTTP client.
 
 ---
 
 ## Overview
 
-AIpaca runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
+firn runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
 Every client must **pair once** before it can make API calls.
 
-Generation can be served either by the on-device model or, if enabled in the app, routed through a local-network Ollama server — but a local GGUF model must still be loaded in the app either way (see the `503 model_not_loaded` entry in Troubleshooting).
+Requests are answered by whatever model the app has active: a local GGUF model, or — if Ollama is enabled in the chat Modes menu — the model selected on your local-network Ollama server.
 
 ```
-Client                          AIpaca (your phone)
+Client                          firn (your phone)
 ──────                          ──────────────────────
 Pair once   ──── /v1/pair ────► Register your public key
 API calls   ── signed header ►  Verify signature → respond
@@ -25,25 +25,27 @@ Your private key never leaves your device. The phone stores only your public key
 
 ## Step 1 — Start the server on your phone
 
-1. Open AIpaca → **Server tab**
-2. Load a GGUF model if you haven't already
-3. Tap **START\_SERVER**
+1. Open firn → **MDL** and load a model (get one via **Browse models** or **Open a .gguf file**)
+2. Open **SRV** and tap **Start server**
 
-The notification and Server tab show:
+The SRV screen and the notification show the address (tap it on SRV to copy):
 ```
 https://192.168.1.42:8443
 ```
-Note this address — you'll need it.
+The server listens only on the phone's WiFi/Ethernet address — not on hotspot or VPN interfaces.
 
 ---
 
 ## Step 2 — Generate a pairing PIN on your phone
 
-1. On the Server tab tap **PAIR\_NEW\_DEVICE**
-2. A QR code appears with a 6-digit PIN below it (valid for 5 minutes)
+1. On **SRV** tap **Pair a new device** (available while the server runs)
+2. A QR code appears with a 6-digit PIN below it
+
+The PIN is valid for 5 minutes and works once. Ten wrong attempts invalidate it; tap **New PIN** after expiry.
 
 You can either:
-- **Scan the QR code** with a client that supports it (the QR encodes the full pairing payload)
+- **Scan the QR code** with a client that supports it. It encodes
+  `{"endpoint":"https://192.168.1.42:8443","pin":"482910","fingerprint":"AA:BB:…"}`
 - **Use the PIN manually** by following Step 3 below
 
 ---
@@ -52,84 +54,36 @@ You can either:
 
 ### Python (recommended)
 
-Install dependencies once:
+Use the scripts in [`examples/python/`](../examples/python/):
 ```bash
-pip install cryptography requests
-```
-
-Run the pairing script once per device:
-```python
-#!/usr/bin/env python3
-"""pair.py — run once to register this machine with AIpaca"""
-
-import base64, json, os, requests
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import (
-    Encoding, PublicFormat, PrivateFormat, NoEncryption
-)
-
-KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
-os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
-
-# --- Generate key pair (skipped if already exists) ---
-if not os.path.exists(KEY_FILE):
-    private_key = Ed25519PrivateKey.generate()
-    with open(KEY_FILE, "wb") as f:
-        f.write(private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
-    print("Generated new key pair →", KEY_FILE)
-else:
-    from cryptography.hazmat.primitives.serialization import load_pem_private_key
-    with open(KEY_FILE, "rb") as f:
-        private_key = load_pem_private_key(f.read(), password=None)
-    print("Loaded existing key from", KEY_FILE)
-
-public_key = private_key.public_key()
-pubkey_b64 = base64.b64encode(
-    public_key.public_bytes(Encoding.Raw, PublicFormat.Raw)
-).decode()
-
-# --- Pairing ---
-server = input("Server URL (e.g. https://192.168.1.42:8443): ").strip().rstrip("/")
-pin    = input("PIN shown on phone: ").strip()
-name   = input("Device name (e.g. My Laptop) [Enter to skip]: ").strip() or "Client"
-
-resp = requests.post(
-    f"{server}/v1/pair",
-    json={"clientPublicKey": pubkey_b64, "pin": pin, "displayName": name},
-    verify=False   # self-signed cert — we'll pin the fingerprint next
-)
-resp.raise_for_status()
-data = resp.json()
-print("Paired! Server cert fingerprint:", data["serverCertFingerprint"])
-
-# --- Save config ---
-config = {"server": server, "certFingerprint": data["serverCertFingerprint"]}
-with open(CFG_FILE, "w") as f:
-    json.dump(config, f, indent=2)
-print("Config saved →", CFG_FILE)
-```
-
-```bash
+cd examples/python
+pip install -r requirements.txt
 python3 pair.py
 # Server URL: https://192.168.1.42:8443
-# PIN: 482910
-# Device name: My Laptop
+# PIN shown on phone: 482910
+# Device name [My Mac]: My Laptop
 ```
+
+`pair.py` generates an Ed25519 key pair (`~/.firn/client_key.pem`), downloads the server certificate (`~/.firn/server.pem`), checks it against the `serverCertFingerprint` returned by `/v1/pair`, and saves `~/.firn/config.json`.
 
 ### curl (manual pairing)
 
+Needs OpenSSL 3 (macOS ships LibreSSL, which lacks Ed25519 — use `brew install openssl@3`).
+
 ```bash
+mkdir -p ~/.firn
+openssl genpkey -algorithm ed25519 -out ~/.firn/client_key.pem
+PUBKEY=$(openssl pkey -in ~/.firn/client_key.pem -pubout -outform DER | tail -c 32 | base64 | tr -d '\n')
+
 PHONE="https://192.168.1.42:8443"
 PIN="482910"
-PUBKEY="<your-base64-public-key>"   # see note below
 
 curl -k -X POST "$PHONE/v1/pair" \
   -H "Content-Type: application/json" \
   -d "{\"clientPublicKey\":\"$PUBKEY\",\"pin\":\"$PIN\",\"displayName\":\"curl client\"}"
 ```
 
-> **Note:** `-k` skips TLS verification for this one-time call. After pairing, the server returns its cert fingerprint — use that to pin the cert in future requests.
+> **Note:** `-k` skips TLS verification for this one-time call. The response contains the server's cert fingerprint — use it to pin the cert in future requests (see [TLS](#tls--certificate-handling)).
 
 ---
 
@@ -140,124 +94,68 @@ Every request after pairing must include a signed `Authorization` header.
 ### Header format
 
 ```
-Authorization: AIpaca-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
+Authorization: Firn-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
 ```
 
-The **signed message** is exactly:
-```
-AIpaca-Ed25519:<unix-timestamp-seconds>
-```
+- `<base64-pubkey>` — base64 of the raw 32-byte Ed25519 public key
+- `<base64-signature>` — base64 Ed25519 signature over the **signed message**, which is exactly:
+  ```
+  Firn-Ed25519:<unix-timestamp-seconds>
+  ```
 
-The timestamp must be within **±30 seconds** of the phone's clock.
+The timestamp must be within **±30 seconds** of the phone's clock. The signature covers only the timestamp, not the request, so generate a fresh header per request and never send it outside TLS.
 
 ---
 
-### Python client (full example)
+### Python
 
 ```python
-#!/usr/bin/env python3
-"""chat.py — send a message to AIpaca"""
-
-import base64, json, os, time, requests
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
-
-KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
-
-# Load key and config
-with open(KEY_FILE, "rb") as f:
-    private_key = load_pem_private_key(f.read(), password=None)
-with open(CFG_FILE) as f:
-    config = json.load(f)
-
+import base64, time
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-PUBKEY_B64 = base64.b64encode(
-    private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
-).decode()
 
-def auth_header() -> str:
+def auth_header(private_key) -> str:
+    pubkey = base64.b64encode(
+        private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    ).decode()
     ts = str(int(time.time()))
-    message = f"AIpaca-Ed25519:{ts}".encode()
-    sig = base64.b64encode(private_key.sign(message)).decode()
-    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
-
-def chat(messages: list, stream: bool = False) -> str:
-    resp = requests.post(
-        f"{config['server']}/v1/chat/completions",
-        headers={
-            "Authorization": auth_header(),
-            "Content-Type": "application/json",
-        },
-        json={"model": "local", "messages": messages, "stream": stream},
-        verify=False,   # replace with cert pinning in production (see below)
-        timeout=120,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
-
-# Example
-reply = chat([{"role": "user", "content": "What is the capital of Switzerland?"}])
-print(reply)
+    sig = base64.b64encode(private_key.sign(f"Firn-Ed25519:{ts}".encode())).decode()
+    return f"Firn-Ed25519 {pubkey} {sig} {ts}"
 ```
 
-### Python — streaming response
-
-```python
-import sseclient   # pip install sseclient-py
-
-def chat_stream(messages: list):
-    resp = requests.post(
-        f"{config['server']}/v1/chat/completions",
-        headers={"Authorization": auth_header(), "Content-Type": "application/json"},
-        json={"model": "local", "messages": messages, "stream": True},
-        verify=False,
-        stream=True,
-        timeout=120,
-    )
-    client = sseclient.SSEClient(resp)
-    for event in client.events():
-        if event.data == "[DONE]":
-            break
-        chunk = json.loads(event.data)
-        delta = chunk["choices"][0]["delta"].get("content", "")
-        print(delta, end="", flush=True)
-    print()
-
-chat_stream([{"role": "user", "content": "Tell me a short story."}])
+[`examples/python/chat.py`](../examples/python/chat.py) wraps this into a complete client with cert pinning and streaming:
+```bash
+python3 chat.py "What is the capital of Switzerland?"
+python3 chat.py "Tell me a short story" --stream
 ```
 
 ### curl (signed request)
 
-Generate the header values manually:
 ```bash
-# Requires openssl and python3
+KEY=~/.firn/client_key.pem
 TIMESTAMP=$(date +%s)
-MESSAGE="AIpaca-Ed25519:$TIMESTAMP"
-SIG=$(echo -n "$MESSAGE" | openssl pkeyutl -sign -inkey ~/.aipaca/client_key.pem -out - | base64 | tr -d '\n')
-PUBKEY=$(openssl pkey -in ~/.aipaca/client_key.pem -pubout -outform DER 2>/dev/null | tail -c 32 | base64 | tr -d '\n')
+printf '%s' "Firn-Ed25519:$TIMESTAMP" > /tmp/firn_msg
+SIG=$(openssl pkeyutl -sign -inkey "$KEY" -rawin -in /tmp/firn_msg | base64 | tr -d '\n')
+PUBKEY=$(openssl pkey -in "$KEY" -pubout -outform DER | tail -c 32 | base64 | tr -d '\n')
 
 curl -k -X POST "https://192.168.1.42:8443/v1/chat/completions" \
-  -H "Authorization: AIpaca-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
+  -H "Authorization: Firn-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
 
-> **Tip:** The Python client is much easier than constructing the header manually in bash. Use curl only for quick one-off tests.
+The header expires after 30 seconds — rerun the first lines for each request.
 
 ---
 
 ## Connecting from another app on the same phone
 
-If your client app runs on the **same Android device** as AIpaca, use `localhost` or `127.0.0.1` as the host — no WiFi required.
+Use the URL shown on **SRV** (the phone's own WiFi address). The server binds to that interface only, so `127.0.0.1` is not reachable while WiFi is connected.
 
-```
-https://127.0.0.1:8443
-```
-
-The pairing flow is identical: tap **PAIR\_NEW\_DEVICE** on the Server tab, use the PIN in your app.
+The pairing flow is identical: tap **Pair a new device** on SRV, use the PIN in your app.
 
 ### Android app (Kotlin / OkHttp)
+
+Ed25519 keys in Android Keystore need Android 13+.
 
 Add OkHttp to your `build.gradle`:
 ```kotlin
@@ -271,10 +169,9 @@ import android.security.keystore.KeyProperties
 import java.security.*
 import java.util.Base64
 
-object AIpacaClient {
+object FirnClient {
 
-    private const val KEY_ALIAS = "aipaca_client"
-    private const val SERVER = "https://127.0.0.1:8443"
+    private const val KEY_ALIAS = "firn_client"
 
     // Call once at app start — generates key in Android Keystore if not present
     fun ensureKeyExists() {
@@ -305,7 +202,7 @@ object AIpacaClient {
 
     fun buildAuthHeader(): String {
         val ts = (System.currentTimeMillis() / 1000L).toString()
-        val message = "AIpaca-Ed25519:$ts".toByteArray(Charsets.UTF_8)
+        val message = "Firn-Ed25519:$ts".toByteArray(Charsets.UTF_8)
         val ks = KeyStore.getInstance("AndroidKeyStore").also { it.load(null) }
         val privateKey = ks.getKey(KEY_ALIAS, null) as PrivateKey
         val sig = Signature.getInstance("Ed25519").run {
@@ -313,7 +210,7 @@ object AIpacaClient {
             update(message)
             Base64.getEncoder().encodeToString(sign())
         }
-        return "AIpaca-Ed25519 ${getPublicKeyBase64()} $sig $ts"
+        return "Firn-Ed25519 ${getPublicKeyBase64()} $sig $ts"
     }
 }
 ```
@@ -343,8 +240,8 @@ fun buildUnsafeOkHttpClient(): OkHttpClient {
 val client = buildUnsafeOkHttpClient()
 val body = """{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}"""
 val request = Request.Builder()
-    .url("https://127.0.0.1:8443/v1/chat/completions")
-    .header("Authorization", AIpacaClient.buildAuthHeader())
+    .url("https://192.168.1.42:8443/v1/chat/completions")   // URL shown on SRV
+    .header("Authorization", FirnClient.buildAuthHeader())
     .header("Content-Type", "application/json")
     .post(body.toRequestBody("application/json".toMediaType()))
     .build()
@@ -360,16 +257,16 @@ client.newCall(request).execute().use { response ->
 import Foundation
 import CryptoKit
 
-// Key generation — stored in Keychain via SecureEnclave or P256
-// Note: Apple's CryptoKit uses Curve25519 (same as Ed25519) for signing
+// CryptoKit's Curve25519.Signing is Ed25519. Persist the key (e.g. in the Keychain) —
+// a new key needs pairing again.
 let privateKey = Curve25519.Signing.PrivateKey()
 let publicKeyBase64 = privateKey.publicKey.rawRepresentation.base64EncodedString()
 
 func authHeader() -> String {
     let ts = String(Int(Date().timeIntervalSince1970))
-    let message = "AIpaca-Ed25519:\(ts)".data(using: .utf8)!
+    let message = "Firn-Ed25519:\(ts)".data(using: .utf8)!
     let signature = try! privateKey.signature(for: message).base64EncodedString()
-    return "AIpaca-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
+    return "Firn-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
 }
 
 var request = URLRequest(url: URL(string: "https://192.168.1.42:8443/v1/chat/completions")!)
@@ -387,38 +284,21 @@ request.httpBody = try! JSONSerialization.data(withJSONObject: [
 
 ## TLS / Certificate handling
 
-AIpaca uses a **self-signed certificate** generated on first launch. Clients need to either:
+firn uses a **self-signed certificate**, created when the server first starts and regenerated when the phone's WiFi IP changes (the cert carries that IP as a subject alternative name). A new cert has a new fingerprint — re-pin it (re-run `pair.py`).
+
+Clients need to either:
 
 ### Option A — Skip verification (development only)
 Use `-k` with curl, `verify=False` in Python requests, or a trust-all TrustManager in Android. Only acceptable for local testing.
 
 ### Option B — Pin the certificate fingerprint (recommended)
 
-The pairing response includes the server's certificate SHA-256 fingerprint:
+The pairing response includes the SHA-256 fingerprint of the server's DER certificate (uppercase hex, colon-separated):
 ```json
 {"status": "paired", "serverCertFingerprint": "AA:BB:CC:DD:..."}
 ```
 
-In Python, download and save the cert on first connection:
-```python
-import ssl, socket
-
-def fetch_cert_der(host: str, port: int) -> bytes:
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    with socket.create_connection((host, port)) as sock:
-        with ctx.wrap_socket(sock) as ssock:
-            return ssock.getpeercert(binary_form=True)
-
-# Save on first connection
-cert_der = fetch_cert_der("192.168.1.42", 8443)
-with open(os.path.expanduser("~/.aipaca/server.der"), "wb") as f:
-    f.write(cert_der)
-
-# Then in future requests, use the saved cert:
-requests.post(url, ..., verify=os.path.expanduser("~/.aipaca/server.der"))
-```
+Fetch the certificate, compare its SHA-256 to this value, then trust only that certificate. [`examples/python/pair.py`](../examples/python/pair.py) does exactly this and [`chat.py`](../examples/python/chat.py) reuses the pinned cert.
 
 ---
 
@@ -432,6 +312,8 @@ curl -k https://192.168.1.42:8443/health
 ```json
 {"status": "ok", "model": "Qwen2.5-3B-Instruct-Q4_K_M", "loaded": true}
 ```
+
+`model` is the local GGUF file name; it is omitted when no local model is loaded.
 
 ---
 
@@ -450,7 +332,9 @@ curl -k -X POST https://192.168.1.42:8443/v1/pair \
 |---|---|---|
 | `clientPublicKey` | Yes | Base64 of raw 32-byte Ed25519 public key |
 | `pin` | Yes | 6-digit PIN shown in the app |
-| `displayName` | No | Human-readable name shown in the paired clients list |
+| `displayName` | No | Name shown in the paired devices list (max 64 chars, default `Unknown Device`) |
+
+A wrong or expired PIN returns `401 auth_error`; an invalid key returns `400 invalid_request_error`.
 
 ---
 
@@ -458,11 +342,13 @@ curl -k -X POST https://192.168.1.42:8443/v1/pair \
 
 ```bash
 curl -k https://192.168.1.42:8443/v1/models \
-  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>"
+  -H "Authorization: Firn-Ed25519 <pubkey> <sig> <timestamp>"
 ```
 ```json
-{"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model"}]}
+{"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model", "created": 1718000000, "owned_by": "local"}]}
 ```
+
+Lists the loaded local GGUF model; `data` is empty when none is loaded (including Ollama-only mode).
 
 ---
 
@@ -470,7 +356,7 @@ curl -k https://192.168.1.42:8443/v1/models \
 
 ```bash
 curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
-  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Authorization: Firn-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local",
@@ -489,16 +375,18 @@ curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | — | Any string (ignored, one model loaded at a time). If Ollama is active, the model actually used is whatever `OllamaPrefs` holds server-side — the client cannot select it via this field |
-| `messages` | array | — | Array of `{role, content}` objects |
+| `model` | string | required | Any string — ignored, the app's active model answers. With Ollama active, the model selected in the app is used |
+| `messages` | array | required | `{role, content}` objects; `content` must be a string. Roles other than `system`/`assistant`/`user` are treated as `user`; empty messages are dropped. Without a system message, `You are a helpful assistant.` is added |
 | `stream` | boolean | `false` | `true` for SSE token streaming |
-| `temperature` | float | `0.7` | Sampling temperature (0.0–2.0) |
+| `temperature` | float | `0.7` | Sampling temperature |
 | `max_tokens` | int | `512` | Maximum tokens to generate |
 | `top_p` | float | `0.9` | Nucleus sampling threshold |
-| `frequency_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
-| `presence_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
-| `stop` | array of strings | `null` | Accepted for OpenAI compatibility |
-| `include_thinking` | boolean | `false` | AIpaca extension — include `<think>...</think>` reasoning content in the response for models that support it |
+| `frequency_penalty` | float | `0.0` | Accepted for OpenAI compatibility, ignored |
+| `presence_penalty` | float | `0.0` | Accepted for OpenAI compatibility, ignored |
+| `stop` | array of strings | `null` | Accepted for OpenAI compatibility, ignored |
+| `include_thinking` | boolean | `false` | firn extension — include reasoning from thinking models. Non-streaming: prefixed as `<think>…</think>`; streaming: emitted inline without tags |
+
+Unknown fields (e.g. `tools`) are ignored.
 
 **Response (non-streaming):**
 ```json
@@ -516,50 +404,54 @@ curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
 }
 ```
 
+`usage` counts are whitespace-separated words, not tokenizer tokens.
+
 **Response (streaming, `stream: true`):**
 
 Server-Sent Events stream:
 ```
-data: {"id":"chatcmpl-...","choices":[{"delta":{"role":"assistant"}}]}
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"}}]}
 
-data: {"id":"chatcmpl-...","choices":[{"delta":{"content":"4"}}]}
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"4"}}]}
 
-data: {"id":"chatcmpl-...","choices":[{"delta":{},"finish_reason":"stop"}]}
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 ```
+
+If generation fails or times out mid-stream, a `data: {"error":"server_busy"}` event precedes the final stop chunk.
 
 ---
 
 ## Using with OpenAI SDKs
 
 Since the API is OpenAI-compatible, you can use the official SDK directly.
-You only need a small auth adapter to inject the signed header.
+The SDK sends `Authorization: Bearer <api_key>`, so replace that header on every request:
 
 ### Python openai SDK
 
 ```python
-import time, base64, openai
+import base64, os, time, openai
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
 
-with open(os.path.expanduser("~/.aipaca/client_key.pem"), "rb") as f:
+with open(os.path.expanduser("~/.firn/client_key.pem"), "rb") as f:
     private_key = load_pem_private_key(f.read(), password=None)
 PUBKEY_B64 = base64.b64encode(
     private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
 ).decode()
 
-def make_auth_header():
+def sign_request(request):
     ts = str(int(time.time()))
-    sig = base64.b64encode(private_key.sign(f"AIpaca-Ed25519:{ts}".encode())).decode()
-    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
+    sig = base64.b64encode(private_key.sign(f"Firn-Ed25519:{ts}".encode())).decode()
+    request.headers["Authorization"] = f"Firn-Ed25519 {PUBKEY_B64} {sig} {ts}"
 
 client = openai.OpenAI(
     base_url="https://192.168.1.42:8443/v1",
-    api_key="not-used",                  # required by SDK, ignored by server
+    api_key="not-used",                  # required by SDK, replaced by sign_request
     http_client=openai.DefaultHttpxClient(
-        verify=False,                    # or pass cert path
-        headers={"Authorization": make_auth_header()}
-    )
+        verify=False,                    # or a pinned cert, see TLS
+        event_hooks={"request": [sign_request]},
+    ),
 )
 
 response = client.chat.completions.create(
@@ -569,21 +461,22 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-> **Note:** The `Authorization` header is generated once at client creation. For long-running scripts, regenerate it periodically (the ±30s timestamp window will expire otherwise). Create a new `openai.OpenAI` instance or intercept requests to refresh the header.
-
 ---
 
 ## Error Reference
+
+Auth errors are `{"error": "<message>", "type": "auth_error"}`; all others are `{"error": {"message": "...", "type": "..."}}`.
 
 | HTTP Status | `type` field | Meaning |
 |---|---|---|
 | `401` | `auth_error` | Missing, malformed, or invalid Authorization header |
 | `401` | `auth_error` | Public key not registered — pair the device first |
 | `401` | `auth_error` | Timestamp outside ±30s window — sync your clock |
+| `401` | `auth_error` | Pairing: invalid or expired PIN |
 | `400` | `invalid_request_error` | Malformed JSON or invalid public key |
 | `413` | `invalid_request_error` | Request body exceeds 1 MB |
 | `503` | `model_not_loaded` | No model loaded in the app |
-| `503` | `server_busy` | Generation timed out (2 min limit) |
+| `503` | `server_busy` | Engine busy or generation timed out (2 min limit, including the wait for another request) |
 
 ---
 
@@ -593,19 +486,21 @@ print(response.choices[0].message.content)
 → You're not sending the `Authorization` header. Check your client code.
 
 **`401 Timestamp outside allowed window`**
-→ Your computer's clock differs from the phone's by more than 30 seconds.
-Run `sudo ntpdate pool.ntp.org` (Linux/macOS) to sync.
+→ Your computer's clock differs from the phone's by more than 30 seconds. Turn on automatic time sync on both devices.
 
 **`401 Public key not registered`**
 → You haven't paired this device yet, or the paired key was removed.
-Go to Server tab → PAIR\_NEW\_DEVICE and pair again.
+On SRV tap **Pair a new device** and pair again.
 
 **Connection refused / timeout**
 → Phone and laptop must be on the **same WiFi network**.
-Check the IP shown in the Server tab notification matches what you're connecting to.
+Check that the address on SRV (or in the notification) matches what you're connecting to. The server does not listen on hotspot or VPN interfaces.
+
+**Server stopped by itself**
+→ Android 15+ limits `dataSync` foreground services to 6 hours per 24 hours; firn stops the server when the limit runs out. Start it again on SRV.
 
 **SSL error / certificate verify failed**
-→ Expected — AIpaca uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
+→ Expected with default verification — firn uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above. If pinning suddenly fails, the phone's IP changed and the cert was regenerated; re-run `pair.py`.
 
 **`503 model_not_loaded`**
-→ Open AIpaca and load a GGUF model from the Chat or Server tab first. This check runs before generation starts regardless of backend — even when Ollama is enabled, the server still requires a local GGUF model to be loaded before it will accept `/v1/chat/completions` requests; the actual generation is then routed to Ollama, but the "is anything loaded" gate is unconditional.
+→ Open firn and load a model on MDL, or enable Ollama in the chat Modes menu.

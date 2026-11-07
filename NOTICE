@@ -1,4 +1,4 @@
-AIpaca
+firn (formerly AIpaca)
 Copyright 2026 Janik Vollenweider
 
 This product is licensed under the Apache License, Version 2.0 (the "License").
@@ -31,6 +31,17 @@ License: MIT
 Copyright (c) 2022-2024 Georgi Gerganov
 
 --------------------------------------------------------------------------------
+whisper.cpp
+--------------------------------------------------------------------------------
+Bundled as a git submodule at app/src/main/cpp/whisper.cpp/
+Source: https://github.com/ggml-org/whisper.cpp
+License: MIT
+Copyright (c) 2023-2026 The ggml authors
+
+The full text of the MIT License is provided in the submodule directory at
+app/src/main/cpp/whisper.cpp/LICENSE.
+
+--------------------------------------------------------------------------------
 Ktor
 --------------------------------------------------------------------------------
 Source: https://github.com/ktorio/ktor
@@ -52,11 +63,59 @@ License: Apache License, Version 2.0
 Copyright (C) The Android Open Source Project
 
 --------------------------------------------------------------------------------
+PdfBox-Android
+--------------------------------------------------------------------------------
+Source: https://github.com/TomRoush/PdfBox-Android
+License: Apache License, Version 2.0
+Copyright The Apache Software Foundation and PdfBox-Android contributors
+
+--------------------------------------------------------------------------------
 Material Icons Extended
 --------------------------------------------------------------------------------
 Source: https://github.com/google/material-design-icons
 License: Apache License, Version 2.0
 Copyright Google LLC
+
+--------------------------------------------------------------------------------
+Inter (typeface)
+--------------------------------------------------------------------------------
+Bundled as app/src/main/res/font/inter_light.ttf, inter_regular.ttf and
+inter_medium.ttf (static Light, Regular and Medium instances).
+Source: https://github.com/rsms/inter
+License: SIL Open Font License, Version 1.1
+Copyright 2016 The Inter Project Authors
+
+The full text of the license ships with the app at
+app/src/main/assets/licenses/Inter-OFL.txt.
+
+--------------------------------------------------------------------------------
+Phosphor Icons (Thin weight)
+--------------------------------------------------------------------------------
+Path data embedded in app/src/main/kotlin/ch/firn/app/ui/theme/PhosphorThin.kt
+Source: https://github.com/phosphor-icons/core (@phosphor-icons/core 2.1.1)
+License: MIT
+
+MIT License
+
+Copyright (c) 2023 Phosphor Icons
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --------------------------------------------------------------------------------
 ZXing Core
@@ -84,7 +143,7 @@ Copyright The Netty Project
 Model weights
 ================================================================================
 
-AIpaca does not bundle any model weights. Users download GGUF model files from
+firn does not bundle any model weights. Users download GGUF model files from
 third-party sources (e.g. HuggingFace). Those models are licensed independently
 by their respective publishers; please review the license of any model you load
-into AIpaca.
+into firn.

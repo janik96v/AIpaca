@@ -7,15 +7,15 @@ plugins {
 }
 
 android {
-    namespace = "com.aipaca.app"
-    compileSdk = 35
+    namespace = "ch.firn.app"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.aipaca.app"
+        applicationId = "ch.firn.app"
         minSdk = 28
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0"
+        targetSdk = 36
+        versionCode = 6
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -36,7 +36,11 @@ android {
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_OPENCL=ON",
-                    "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON"
+                    "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON",
+                    // 16 KB page alignment for every native library, required by
+                    // Google Play for apps targeting Android 15+ (NDK r28 does this
+                    // by default; r27 needs the opt-in).
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
                 )
             }
         }
@@ -125,6 +129,7 @@ android {
 dependencies {
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
 
     // Lifecycle
     implementation(libs.androidx.lifecycle.runtime.ktx)

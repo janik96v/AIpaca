@@ -31,6 +31,6 @@ Once a fix is available we will:
 
 ## Scope
 
-In scope: the AIpaca Android app, the local HTTPS server, the pairing and authentication mechanisms, the JNI/C++ bridge to llama.cpp, the agent memory/skill persistence layer, and the MCP client.
+In scope: the firn Android app, the local HTTPS server, the pairing and authentication mechanisms, the JNI/C++ bridge to llama.cpp, the agent memory/skill persistence layer, and the MCP client.
 
 Out of scope: third-party libraries (llama.cpp, Ktor, …) — please report those upstream.

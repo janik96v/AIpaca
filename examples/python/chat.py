@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-chat.py — Send a message to your AIpaca server.
+chat.py — Send a message to your firn server.
 
 Usage:
     python3 chat.py "What is the capital of Switzerland?"
@@ -24,14 +24,15 @@ from cryptography.hazmat.primitives.serialization import (
     PublicFormat,
 )
 
-KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
+KEY_FILE = os.path.expanduser("~/.firn/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.firn/config.json")
 
 
 class PinnedCertAdapter(HTTPAdapter):
     """Verify TLS cert against pinned file but skip hostname check.
-    AIpaca's self-signed cert has CN=AIpaca (no IP SAN), so hostname
-    verification always fails. Security is maintained via fingerprint pinning.
+    firn's self-signed cert (CN=firn) may lack an IP SAN for the address
+    you connect to, so hostname verification is skipped. Security is
+    maintained via fingerprint pinning.
 
     Note: urllib3 1.x has TWO hostname checks — one in ssl.SSLContext and one
     internal to urllib3. Both must be disabled via check_hostname=False and
@@ -70,9 +71,9 @@ def auth_header(private_key) -> str:
         private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
     ).decode()
     ts = str(int(time.time()))
-    message = f"AIpaca-Ed25519:{ts}".encode()
+    message = f"Firn-Ed25519:{ts}".encode()
     sig = base64.b64encode(private_key.sign(message)).decode()
-    return f"AIpaca-Ed25519 {pubkey_b64} {sig} {ts}"
+    return f"Firn-Ed25519 {pubkey_b64} {sig} {ts}"
 
 
 def chat(prompt: str, stream: bool = False):
@@ -123,7 +124,7 @@ def chat(prompt: str, stream: bool = False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Send a message to AIpaca")
+    parser = argparse.ArgumentParser(description="Send a message to firn")
     parser.add_argument("prompt", help="The message to send")
     parser.add_argument("--stream", action="store_true", help="Stream the response")
     args = parser.parse_args()
