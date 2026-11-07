@@ -25,8 +25,11 @@
 -keep class io.ktor.** { *; }
 -dontwarn io.ktor.**
 
-# Netty — keep channel/handler classes instantiated via reflection
--keep class io.netty.** { *; }
+# Netty — keep channel/handler classes instantiated via reflection.
+# Except InsecureTrustManagerFactory: a trust-all TLS manager the app never
+# uses. Keeping it would put an unsafe X509TrustManager in the release, which
+# Google Play's security scan flags.
+-keep class !io.netty.handler.ssl.util.InsecureTrustManagerFactory**,io.netty.** { *; }
 -dontwarn io.netty.**
 -keepclassmembers class * extends io.netty.channel.ChannelHandler {
     public <init>(...);

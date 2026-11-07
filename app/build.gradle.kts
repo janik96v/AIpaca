@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "ch.firn.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "ch.firn.app"
         minSdk = 28
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 5
         versionName = "0.5.0"
 
@@ -36,7 +36,11 @@ android {
                     "-DGGML_OPENMP=OFF",
                     "-DGGML_LLAMAFILE=OFF",
                     "-DGGML_OPENCL=ON",
-                    "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON"
+                    "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON",
+                    // 16 KB page alignment for every native library, required by
+                    // Google Play for apps targeting Android 15+ (NDK r28 does this
+                    // by default; r27 needs the opt-in).
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
                 )
             }
         }

@@ -46,6 +46,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Delete confirmation for installed models
 
 ### Fixed
+- Google Play requirements: every native library is now linked for 16 KB memory pages
+  (required for apps targeting Android 15+), and the app targets Android 16 (API 36), required
+  for new apps and updates since 31 Aug 2026
+- The local API server stops cleanly when Android's 6-hour limit for `dataSync` foreground
+  services runs out, instead of the process being killed
+- Release builds no longer contain Netty's trust-all `InsecureTrustManagerFactory`, which Google
+  Play's security scan flags as an unsafe TLS trust manager
+- Removed the unused `READ_EXTERNAL_STORAGE` and `READ_MEDIA_VISUAL_USER_SELECTED` permissions:
+  files come through the document picker and images through the photo picker
 - The GGUF header probe no longer aborts on integer metadata stored with an unexpected width
   or as a per-layer array; it now also reports `nHead`, `general.name` and an exact parameter
   count from the tensor shapes (previously a rough estimate)

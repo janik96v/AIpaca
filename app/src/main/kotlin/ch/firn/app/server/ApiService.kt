@@ -68,6 +68,16 @@ class ApiService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Android 15+ caps `dataSync` foreground services at 6 hours per 24. When
+     * the cap is hit the service must stop within seconds or the process is
+     * killed; stopping here takes the server down cleanly via [onDestroy].
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "Foreground service time limit reached — stopping server")
+        stopSelf()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     // -------------------------------------------------------------------------
