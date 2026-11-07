@@ -234,15 +234,14 @@ private fun RailItem(screen: Screen, selected: Boolean, onClick: () -> Unit) {
 // ---- Status line ------------------------------------------------------------------
 
 /**
- * Top line of the content column: the firn mark and the model state; the mark
- * thinks while the model streams. With the rail collapsed the line also
- * carries the rail handle (left) and the rail's bottom actions — modes and
+ * Top line of the content column: the model state. The firn mark lives on the
+ * rail, not here; with the rail collapsed the line carries the rail handle
+ * (list glyph + mark) on the left and the rail's bottom actions — modes and
  * history — on the right.
  */
 @Composable
 fun StatusLine(
     text: String,
-    thinking: Boolean,
     railCollapsed: Boolean,
     onExpandRail: () -> Unit,
     onHistory: () -> Unit,
@@ -269,7 +268,6 @@ fun StatusLine(
                 FirnMark(Modifier.size(width = 20.dp, height = 15.dp))
             }
         }
-        FirnMark(Modifier.size(width = 18.dp, height = 13.dp), thinking = thinking)
         Tracked(
             text,
             InkType.Status,

@@ -29,8 +29,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
   Medium sentence-case labels. Memory gets a Learning settings card and segmented tabs; model
   rows get Load / Unload buttons; catalog rows show Installed / Too large in place of the action;
   the send button is a filled square with a heavier arrow; dialogs use the same buttons
-- The firn mark replaces the dot-grid and square marks on the rail, the status line and the
-  agent's message label; it lights one path through its net while the model is thinking
+- The firn mark replaces the dot-grid mark on the rail and labels the agent's messages,
+  lighting one path through its net while the model is thinking; the status line drops its
+  square mark and shows the model state alone
 - Models screen reorganised into what is on the phone (load / unload / delete) and a browse
   view (catalog with kind filters, RAM fit, inline download progress, quant guide)
 
