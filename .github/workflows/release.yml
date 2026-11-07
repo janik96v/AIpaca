@@ -59,7 +59,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: AIpaca ${{ steps.version.outputs.VERSION }}
+          name: firn ${{ steps.version.outputs.VERSION }}
           files: app/build/outputs/apk/release/*.apk
           generate_release_notes: true
         env:

@@ -7,7 +7,7 @@
 #include <signal.h>
 #include <chrono>
 
-#define LOG_TAG "AIpacaWhisper"
+#define LOG_TAG "FirnWhisper"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,  LOG_TAG, __VA_ARGS__)
@@ -37,7 +37,7 @@ static std::string g_last_model_path;
 // Returns a jlong handle (whisper_context*), 0 on failure.
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeLoadWhisperModel(
+Java_ch_firn_app_engine_WhisperEngine_nativeLoadWhisperModel(
         JNIEnv* env,
         jobject /* thiz */,
         jstring jModelPath,
@@ -72,7 +72,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeLoadWhisperModel(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeProbeWhisperGpu(
+Java_ch_firn_app_engine_WhisperEngine_nativeProbeWhisperGpu(
         JNIEnv* /* env */,
         jobject /* thiz */,
         jlong   ctxPtr)
@@ -141,7 +141,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeProbeWhisperGpu(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeReloadWhisperCpuOnly(
+Java_ch_firn_app_engine_WhisperEngine_nativeReloadWhisperCpuOnly(
         JNIEnv* /* env */,
         jobject /* thiz */,
         jlong   ctxPtr)
@@ -176,7 +176,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeReloadWhisperCpuOnly(
 // Transcribes float[] PCM (16 kHz, mono, [-1, 1]). Returns null on error.
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeTranscribe(
+Java_ch_firn_app_engine_WhisperEngine_nativeTranscribe(
         JNIEnv* env,
         jobject /* thiz */,
         jlong   ctxPtr,
@@ -237,7 +237,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeTranscribe(
 // Returns the detected language code (e.g. "en") after a transcription.
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeGetLanguage(
+Java_ch_firn_app_engine_WhisperEngine_nativeGetLanguage(
         JNIEnv* env,
         jobject /* thiz */,
         jlong   ctxPtr)
@@ -252,7 +252,7 @@ Java_com_aipaca_app_engine_WhisperEngine_nativeGetLanguage(
 // Frees the whisper_context. Safe to call even if ctxPtr is 0.
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_WhisperEngine_nativeFreeWhisperModel(
+Java_ch_firn_app_engine_WhisperEngine_nativeFreeWhisperModel(
         JNIEnv* /* env */,
         jobject /* thiz */,
         jlong   ctxPtr)

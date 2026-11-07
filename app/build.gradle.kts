@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-    namespace = "com.aipaca.app"
+    namespace = "ch.firn.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.aipaca.app"
+        applicationId = "ch.firn.app"
         minSdk = 28
         targetSdk = 35
         versionCode = 5
@@ -125,6 +125,7 @@ android {
 dependencies {
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
 
     // Lifecycle
     implementation(libs.androidx.lifecycle.runtime.ktx)

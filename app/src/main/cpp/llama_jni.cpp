@@ -20,7 +20,7 @@
 #include <setjmp.h>
 #include <signal.h>
 
-#define LOG_TAG "AIpaca"
+#define LOG_TAG "Firn"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
@@ -280,7 +280,7 @@ static std::string gguf_read_str(const gguf_context* ctx, const char* key) {
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeProbeGgufMeta(
         JNIEnv*  env,
         jobject  /* thiz */,
         jstring  jModelPath)
@@ -397,7 +397,7 @@ static void probe_signal_handler(int /*sig*/) {
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeLoadModel(
         JNIEnv*  env,
         jobject  /* thiz */,
         jstring  jModelPath,
@@ -492,7 +492,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
     // llama_init_from_model() hard-fails ("V cache quantization requires flash_attn") if
     // type_v is quantized while flash_attn is disabled.
     //
-    // Flash Attention is a known risk on AIpaca's Adreno/OpenCL GPU backend: the same
+    // Flash Attention is a known risk on firn's Adreno/OpenCL GPU backend: the same
     // FLASH_ATTN_EXT OpenCL kernel produced incorrect results for whisper.cpp on this
     // GPU family (docs/lab_journal.md, 2026-06-05) and is force-disabled for the mtmd/
     // vision context in this file for that reason (see nativeLoadMmproj below). Whether
@@ -553,7 +553,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadModel(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGpu(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeProbeGpu(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -621,7 +621,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeGpu(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGetActiveGpuLayers(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1113,7 +1113,7 @@ static void run_generate(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerate(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGenerate(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,
@@ -1141,7 +1141,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerate(
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChat(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGenerateChat(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,
@@ -1179,7 +1179,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChat(
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeBench(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeBench(
         JNIEnv* env,
         jobject /* thiz */,
         jlong ctxPtr,
@@ -1273,7 +1273,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeBench(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeStopGeneration(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeStopGeneration(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1289,7 +1289,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeStopGeneration(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadModel(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeUnloadModel(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1314,7 +1314,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadModel(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetSystemInfo(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGetSystemInfo(
         JNIEnv*  env,
         jobject  /* thiz */)
 {
@@ -1334,7 +1334,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetSystemInfo(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGetModelInfo(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1433,7 +1433,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetModelInfo(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetChatTemplate(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGetChatTemplate(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1450,7 +1450,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGetChatTemplate(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadMmproj(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeLoadMmproj(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,
@@ -1491,7 +1491,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeLoadMmproj(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadMmproj(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeUnloadMmproj(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1510,7 +1510,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeUnloadMmproj(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeIsMmprojLoaded(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeIsMmprojLoaded(
         JNIEnv*  /* env */,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1780,7 +1780,7 @@ static void run_generate_with_image(
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
         JNIEnv*      env,
         jobject      /* thiz */,
         jlong        ctxPtr,
@@ -1849,7 +1849,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateChatWithImage(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeToolSupport(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeProbeToolSupport(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr)
@@ -1864,10 +1864,10 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeToolSupport(
 
     // A name no chat template would emit on its own, so finding it in the rendered
     // prompt proves the template really rendered the tool definition.
-    static const char* PROBE_TOOL_NAME = "aipaca_probe_tool";
+    static const char* PROBE_TOOL_NAME = "firn_probe_tool";
     static const char* PROBE_MESSAGES  = R"([{"role":"user","content":"hi"}])";
     static const char* PROBE_TOOLS =
-        R"([{"type":"function","function":{"name":"aipaca_probe_tool",)"
+        R"([{"type":"function","function":{"name":"firn_probe_tool",)"
         R"("description":"probe","parameters":{"type":"object","properties":{}}}}])";
 
     try {
@@ -1911,7 +1911,7 @@ Java_com_aipaca_app_engine_LlamaCppEngine_nativeProbeToolSupport(
 // ---------------------------------------------------------------------------
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_aipaca_app_engine_LlamaCppEngine_nativeGenerateAgent(
+Java_ch_firn_app_engine_LlamaCppEngine_nativeGenerateAgent(
         JNIEnv*  env,
         jobject  /* thiz */,
         jlong    ctxPtr,

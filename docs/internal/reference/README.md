@@ -1,8 +1,8 @@
 # Hermes Agent — Reference Analysis
 
-This folder contains a **reference analysis** of the [NousResearch Hermes agent](https://github.com/nousresearch/hermes-agent) architecture. It is not part of AIpaca's current implementation.
+This folder contains a **reference analysis** of the [NousResearch Hermes agent](https://github.com/nousresearch/hermes-agent) architecture. It is not part of firn's current implementation.
 
-The analysis documents patterns and techniques that may inform future AIpaca features, particularly:
+The analysis documents patterns and techniques that may inform future firn features, particularly:
 
 - **Programmatic tool calling** — zero-context RPC via in-process code execution
 - **File-based skill system** — progressive disclosure with compact index
@@ -10,7 +10,7 @@ The analysis documents patterns and techniques that may inform future AIpaca fea
 - **FTS5 session search** — cross-session recall without embeddings
 - **Prompt caching strategies** — frozen snapshots, stable prefix tiers
 
-See [docs/roadmap.md](../../roadmap.md) for how these ideas map to AIpaca's future roadmap.
+See [docs/roadmap.md](../../roadmap.md) for how these ideas map to firn's future roadmap.
 
 ## Files
 

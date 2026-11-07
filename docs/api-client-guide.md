@@ -1,18 +1,18 @@
-# AIpaca API Client Guide
+# firn API Client Guide
 
-How to connect to and use the AIpaca AI server from a laptop, another app, or any HTTP client.
+How to connect to and use the firn AI server from a laptop, another app, or any HTTP client.
 
 ---
 
 ## Overview
 
-AIpaca runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
+firn runs an **HTTPS server on port 8443** with an OpenAI-compatible API.
 Every client must **pair once** before it can make API calls.
 
 Generation can be served either by the on-device model or, if enabled in the app, routed through a local-network Ollama server — but a local GGUF model must still be loaded in the app either way (see the `503 model_not_loaded` entry in Troubleshooting).
 
 ```
-Client                          AIpaca (your phone)
+Client                          firn (your phone)
 ──────                          ──────────────────────
 Pair once   ──── /v1/pair ────► Register your public key
 API calls   ── signed header ►  Verify signature → respond
@@ -25,7 +25,7 @@ Your private key never leaves your device. The phone stores only your public key
 
 ## Step 1 — Start the server on your phone
 
-1. Open AIpaca → **Server tab**
+1. Open firn → **Server tab**
 2. Load a GGUF model if you haven't already
 3. Tap **START\_SERVER**
 
@@ -60,7 +60,7 @@ pip install cryptography requests
 Run the pairing script once per device:
 ```python
 #!/usr/bin/env python3
-"""pair.py — run once to register this machine with AIpaca"""
+"""pair.py — run once to register this machine with firn"""
 
 import base64, json, os, requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -68,8 +68,8 @@ from cryptography.hazmat.primitives.serialization import (
     Encoding, PublicFormat, PrivateFormat, NoEncryption
 )
 
-KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
+KEY_FILE = os.path.expanduser("~/.firn/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.firn/config.json")
 os.makedirs(os.path.dirname(KEY_FILE), exist_ok=True)
 
 # --- Generate key pair (skipped if already exists) ---
@@ -140,12 +140,12 @@ Every request after pairing must include a signed `Authorization` header.
 ### Header format
 
 ```
-Authorization: AIpaca-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
+Authorization: Firn-Ed25519 <base64-pubkey> <base64-signature> <unix-timestamp>
 ```
 
 The **signed message** is exactly:
 ```
-AIpaca-Ed25519:<unix-timestamp-seconds>
+Firn-Ed25519:<unix-timestamp-seconds>
 ```
 
 The timestamp must be within **±30 seconds** of the phone's clock.
@@ -156,14 +156,14 @@ The timestamp must be within **±30 seconds** of the phone's clock.
 
 ```python
 #!/usr/bin/env python3
-"""chat.py — send a message to AIpaca"""
+"""chat.py — send a message to firn"""
 
 import base64, json, os, time, requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
-KEY_FILE = os.path.expanduser("~/.aipaca/client_key.pem")
-CFG_FILE = os.path.expanduser("~/.aipaca/config.json")
+KEY_FILE = os.path.expanduser("~/.firn/client_key.pem")
+CFG_FILE = os.path.expanduser("~/.firn/config.json")
 
 # Load key and config
 with open(KEY_FILE, "rb") as f:
@@ -178,9 +178,9 @@ PUBKEY_B64 = base64.b64encode(
 
 def auth_header() -> str:
     ts = str(int(time.time()))
-    message = f"AIpaca-Ed25519:{ts}".encode()
+    message = f"Firn-Ed25519:{ts}".encode()
     sig = base64.b64encode(private_key.sign(message)).decode()
-    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
+    return f"Firn-Ed25519 {PUBKEY_B64} {sig} {ts}"
 
 def chat(messages: list, stream: bool = False) -> str:
     resp = requests.post(
@@ -233,12 +233,12 @@ Generate the header values manually:
 ```bash
 # Requires openssl and python3
 TIMESTAMP=$(date +%s)
-MESSAGE="AIpaca-Ed25519:$TIMESTAMP"
-SIG=$(echo -n "$MESSAGE" | openssl pkeyutl -sign -inkey ~/.aipaca/client_key.pem -out - | base64 | tr -d '\n')
-PUBKEY=$(openssl pkey -in ~/.aipaca/client_key.pem -pubout -outform DER 2>/dev/null | tail -c 32 | base64 | tr -d '\n')
+MESSAGE="Firn-Ed25519:$TIMESTAMP"
+SIG=$(echo -n "$MESSAGE" | openssl pkeyutl -sign -inkey ~/.firn/client_key.pem -out - | base64 | tr -d '\n')
+PUBKEY=$(openssl pkey -in ~/.firn/client_key.pem -pubout -outform DER 2>/dev/null | tail -c 32 | base64 | tr -d '\n')
 
 curl -k -X POST "https://192.168.1.42:8443/v1/chat/completions" \
-  -H "Authorization: AIpaca-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
+  -H "Authorization: Firn-Ed25519 $PUBKEY $SIG $TIMESTAMP" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
@@ -249,7 +249,7 @@ curl -k -X POST "https://192.168.1.42:8443/v1/chat/completions" \
 
 ## Connecting from another app on the same phone
 
-If your client app runs on the **same Android device** as AIpaca, use `localhost` or `127.0.0.1` as the host — no WiFi required.
+If your client app runs on the **same Android device** as firn, use `localhost` or `127.0.0.1` as the host — no WiFi required.
 
 ```
 https://127.0.0.1:8443
@@ -271,9 +271,9 @@ import android.security.keystore.KeyProperties
 import java.security.*
 import java.util.Base64
 
-object AIpacaClient {
+object FirnClient {
 
-    private const val KEY_ALIAS = "aipaca_client"
+    private const val KEY_ALIAS = "firn_client"
     private const val SERVER = "https://127.0.0.1:8443"
 
     // Call once at app start — generates key in Android Keystore if not present
@@ -305,7 +305,7 @@ object AIpacaClient {
 
     fun buildAuthHeader(): String {
         val ts = (System.currentTimeMillis() / 1000L).toString()
-        val message = "AIpaca-Ed25519:$ts".toByteArray(Charsets.UTF_8)
+        val message = "Firn-Ed25519:$ts".toByteArray(Charsets.UTF_8)
         val ks = KeyStore.getInstance("AndroidKeyStore").also { it.load(null) }
         val privateKey = ks.getKey(KEY_ALIAS, null) as PrivateKey
         val sig = Signature.getInstance("Ed25519").run {
@@ -313,7 +313,7 @@ object AIpacaClient {
             update(message)
             Base64.getEncoder().encodeToString(sign())
         }
-        return "AIpaca-Ed25519 ${getPublicKeyBase64()} $sig $ts"
+        return "Firn-Ed25519 ${getPublicKeyBase64()} $sig $ts"
     }
 }
 ```
@@ -344,7 +344,7 @@ val client = buildUnsafeOkHttpClient()
 val body = """{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}"""
 val request = Request.Builder()
     .url("https://127.0.0.1:8443/v1/chat/completions")
-    .header("Authorization", AIpacaClient.buildAuthHeader())
+    .header("Authorization", FirnClient.buildAuthHeader())
     .header("Content-Type", "application/json")
     .post(body.toRequestBody("application/json".toMediaType()))
     .build()
@@ -367,9 +367,9 @@ let publicKeyBase64 = privateKey.publicKey.rawRepresentation.base64EncodedString
 
 func authHeader() -> String {
     let ts = String(Int(Date().timeIntervalSince1970))
-    let message = "AIpaca-Ed25519:\(ts)".data(using: .utf8)!
+    let message = "Firn-Ed25519:\(ts)".data(using: .utf8)!
     let signature = try! privateKey.signature(for: message).base64EncodedString()
-    return "AIpaca-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
+    return "Firn-Ed25519 \(publicKeyBase64) \(signature) \(ts)"
 }
 
 var request = URLRequest(url: URL(string: "https://192.168.1.42:8443/v1/chat/completions")!)
@@ -387,7 +387,7 @@ request.httpBody = try! JSONSerialization.data(withJSONObject: [
 
 ## TLS / Certificate handling
 
-AIpaca uses a **self-signed certificate** generated on first launch. Clients need to either:
+firn uses a **self-signed certificate** generated on first launch. Clients need to either:
 
 ### Option A — Skip verification (development only)
 Use `-k` with curl, `verify=False` in Python requests, or a trust-all TrustManager in Android. Only acceptable for local testing.
@@ -413,11 +413,11 @@ def fetch_cert_der(host: str, port: int) -> bytes:
 
 # Save on first connection
 cert_der = fetch_cert_der("192.168.1.42", 8443)
-with open(os.path.expanduser("~/.aipaca/server.der"), "wb") as f:
+with open(os.path.expanduser("~/.firn/server.der"), "wb") as f:
     f.write(cert_der)
 
 # Then in future requests, use the saved cert:
-requests.post(url, ..., verify=os.path.expanduser("~/.aipaca/server.der"))
+requests.post(url, ..., verify=os.path.expanduser("~/.firn/server.der"))
 ```
 
 ---
@@ -458,7 +458,7 @@ curl -k -X POST https://192.168.1.42:8443/v1/pair \
 
 ```bash
 curl -k https://192.168.1.42:8443/v1/models \
-  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>"
+  -H "Authorization: Firn-Ed25519 <pubkey> <sig> <timestamp>"
 ```
 ```json
 {"object": "list", "data": [{"id": "Qwen2.5-3B-Instruct-Q4_K_M", "object": "model"}]}
@@ -470,7 +470,7 @@ curl -k https://192.168.1.42:8443/v1/models \
 
 ```bash
 curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
-  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Authorization: Firn-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "local",
@@ -498,7 +498,7 @@ curl -k -X POST https://192.168.1.42:8443/v1/chat/completions \
 | `frequency_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
 | `presence_penalty` | float | `0.0` | Accepted for OpenAI compatibility |
 | `stop` | array of strings | `null` | Accepted for OpenAI compatibility |
-| `include_thinking` | boolean | `false` | AIpaca extension — include `<think>...</think>` reasoning content in the response for models that support it |
+| `include_thinking` | boolean | `false` | firn extension — include `<think>...</think>` reasoning content in the response for models that support it |
 
 **Response (non-streaming):**
 ```json
@@ -542,7 +542,7 @@ You only need a small auth adapter to inject the signed header.
 import time, base64, openai
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
 
-with open(os.path.expanduser("~/.aipaca/client_key.pem"), "rb") as f:
+with open(os.path.expanduser("~/.firn/client_key.pem"), "rb") as f:
     private_key = load_pem_private_key(f.read(), password=None)
 PUBKEY_B64 = base64.b64encode(
     private_key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
@@ -550,8 +550,8 @@ PUBKEY_B64 = base64.b64encode(
 
 def make_auth_header():
     ts = str(int(time.time()))
-    sig = base64.b64encode(private_key.sign(f"AIpaca-Ed25519:{ts}".encode())).decode()
-    return f"AIpaca-Ed25519 {PUBKEY_B64} {sig} {ts}"
+    sig = base64.b64encode(private_key.sign(f"Firn-Ed25519:{ts}".encode())).decode()
+    return f"Firn-Ed25519 {PUBKEY_B64} {sig} {ts}"
 
 client = openai.OpenAI(
     base_url="https://192.168.1.42:8443/v1",
@@ -605,7 +605,7 @@ Go to Server tab → PAIR\_NEW\_DEVICE and pair again.
 Check the IP shown in the Server tab notification matches what you're connecting to.
 
 **SSL error / certificate verify failed**
-→ Expected — AIpaca uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
+→ Expected — firn uses a self-signed cert. Use `-k` (curl) or `verify=False` (Python) for development, or pin the cert as described above.
 
 **`503 model_not_loaded`**
-→ Open AIpaca and load a GGUF model from the Chat or Server tab first. This check runs before generation starts regardless of backend — even when Ollama is enabled, the server still requires a local GGUF model to be loaded before it will accept `/v1/chat/completions` requests; the actual generation is then routed to Ollama, but the "is anything loaded" gate is unconditional.
+→ Open firn and load a GGUF model from the Chat or Server tab first. This check runs before generation starts regardless of backend — even when Ollama is enabled, the server still requires a local GGUF model to be loaded before it will accept `/v1/chat/completions` requests; the actual generation is then routed to Ollama, but the "is anything loaded" gate is unconditional.

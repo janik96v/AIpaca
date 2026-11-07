@@ -23,7 +23,7 @@ What actually happened.
 ## Environment
 - Device: (e.g. Samsung Galaxy S24 Ultra)
 - Android version: (e.g. Android 14)
-- AIpaca version: (e.g. 0.1.0)
+- firn version: (e.g. 0.1.0)
 - Model used: (e.g. Qwen2.5-3B Q4_K_M)
 
 ## Logs / screenshots

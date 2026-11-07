@@ -1,4 +1,4 @@
-# AIpaca Architecture
+# firn Architecture
 
 ## System Architecture
 
@@ -39,8 +39,8 @@ Open WebUI / OpenClaw / LangChain / curl
 
 ```
 app/src/main/
-|-- kotlin/com/aipaca/app/
-|   |-- AIpacaApp.kt                    # Application entry point
+|-- kotlin/ch/firn/app/
+|   |-- FirnApplication.kt              # Application entry point
 |   |-- EngineState.kt                  # Process-scoped engine singleton (agentWorkspace, memoryStore, computeContextConfig)
 |   |-- agent/                          # Agent mode + MCP client
 |   |   |-- AgentOrchestrator.kt        # Think->tool->observe loop
@@ -163,7 +163,7 @@ app/src/main/
 
 ### Adreno OpenCL Backend
 
-AIpaca uses a custom fork of llama.cpp with Adreno OpenCL kernels. Both llama.cpp and whisper.cpp share the same ggml backend.
+firn uses a custom fork of llama.cpp with Adreno OpenCL kernels. Both llama.cpp and whisper.cpp share the same ggml backend.
 
 **GPU-compatible quantizations**: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU silently.
 
@@ -202,7 +202,7 @@ The native layer is built via CMake through the Android Gradle Plugin:
 - **llama.cpp** is included as a git submodule (`app/src/main/cpp/llama.cpp/`) from a custom fork with Adreno kernel support
 - **whisper.cpp** is included as a git submodule (`app/src/main/cpp/whisper.cpp/`), sharing the same ggml backend
 - **mtmd** (multimodal) is built from `llama.cpp/tools/mtmd/` via `add_subdirectory(... EXCLUDE_FROM_ALL)`
-- All three link into a single shared library (`libaipaca.so`) exposed via JNI
+- All three link into a single shared library (`libfirn.so`) exposed via JNI
 - Target ABI: arm64-v8a only, C++17, NDK r27.2
 
 ### JNI Functions (llama_jni.cpp)

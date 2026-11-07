@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
-project("aipaca" CXX C)
+project("firn" CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
@@ -127,12 +127,12 @@ endif()
 add_subdirectory(llama.cpp/tools/mtmd EXCLUDE_FROM_ALL)
 
 # Our JNI bridge library
-add_library(aipaca SHARED llama_jni.cpp whisper_jni.cpp)
+add_library(firn SHARED llama_jni.cpp whisper_jni.cpp)
 
 find_library(log-lib     log)
 find_library(android-lib android)
 
-target_link_libraries(aipaca
+target_link_libraries(firn
     llama
     llama-common
     ggml
@@ -143,7 +143,7 @@ target_link_libraries(aipaca
     OpenCL::OpenCL
 )
 
-target_include_directories(aipaca PRIVATE
+target_include_directories(firn PRIVATE
     llama.cpp/include
     llama.cpp/ggml/include
     llama.cpp/common

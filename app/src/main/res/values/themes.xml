@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Minimal theme stub. The full Material 3 theme is defined in Compose (AIpacaTheme).
-    This XML theme is only needed for the Activity window background before Compose renders.
+    Minimal theme stub. The full theme is defined in Compose (FirnTheme).
+    These XML themes only cover the window before Compose renders.
 -->
 <resources>
-    <style name="Theme.AIpaca" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+    <style name="Theme.Firn" parent="@android:style/Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- Launch: black, the small firn mark, no text. -->
+    <style name="Theme.Firn.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@android:color/black</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_firn_mark_adaptive</item>
+        <item name="postSplashScreenTheme">@style/Theme.Firn</item>
     </style>
 </resources>

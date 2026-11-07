@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to AIpaca are documented here.
+All notable changes to firn (formerly AIpaca) are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
 
@@ -9,6 +9,15 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **Renamed to firn.** New application ID `ch.firn.app` (installs alongside the old
+  `com.aipaca.app` build — uninstall that one by hand), Kotlin package `ch.firn.app`, native
+  library `libfirn.so`, launcher label `firn`. New adaptive launcher icon with a themed
+  (monochrome) layer, a black splash screen with the firn mark, and the mark as the server
+  notification icon. Internal storage names (database, preferences, TLS keystore alias,
+  WorkManager jobs, notification channel) are renamed too; there is no data to migrate
+- **Breaking for API clients:** the server's auth scheme is now `Firn-Ed25519` (was
+  `AIpaca-Ed25519`) and the Python examples keep their keys in `~/.firn/`. Re-pair existing
+  clients
 - Complete visual redesign ("Instrument"): true black, white hairlines and tracked uppercase
   chrome; Inter (bundled) and Phosphor Thin icons replace Roboto and Material icons; zero
   corner radius throughout. The bottom navigation is replaced by a collapsible left rail with

@@ -1,23 +1,23 @@
 # Add project specific ProGuard rules here.
 
 # Keep JNI bridge class and all its native methods
--keep class com.aipaca.app.engine.LlamaCppEngine { *; }
--keepclassmembers class com.aipaca.app.engine.LlamaCppEngine {
+-keep class ch.firn.app.engine.LlamaCppEngine { *; }
+-keepclassmembers class ch.firn.app.engine.LlamaCppEngine {
     native <methods>;
 }
 
 # whisper.cpp JNI bridge
--keep class com.aipaca.app.engine.WhisperEngine { *; }
--keepclassmembers class com.aipaca.app.engine.WhisperEngine {
+-keep class ch.firn.app.engine.WhisperEngine { *; }
+-keepclassmembers class ch.firn.app.engine.WhisperEngine {
     native <methods>;
 }
 
 # Whisper model path persistence
--keep class com.aipaca.app.data.WhisperModelPrefs { *; }
+-keep class ch.firn.app.data.WhisperModelPrefs { *; }
 
 # Keep TokenCallback — called from C++ via JNI
--keep interface com.aipaca.app.engine.TokenCallback { *; }
--keepclassmembers interface com.aipaca.app.engine.TokenCallback {
+-keep interface ch.firn.app.engine.TokenCallback { *; }
+-keepclassmembers interface ch.firn.app.engine.TokenCallback {
     public void onToken(java.lang.String);
 }
 

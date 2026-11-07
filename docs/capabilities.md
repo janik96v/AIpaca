@@ -1,4 +1,4 @@
-# AIpaca — Capabilities
+# firn — Capabilities
 
 A detailed breakdown of everything the app can do, organized by feature area.
 
@@ -6,7 +6,7 @@ A detailed breakdown of everything the app can do, organized by feature area.
 
 ## 1. On-Device LLM Inference
 
-AIpaca runs GGUF language models entirely on-device via llama.cpp, compiled as a native ARM64 library through JNI.
+firn runs GGUF language models entirely on-device via llama.cpp, compiled as a native ARM64 library through JNI.
 
 **Core capabilities:**
 - Load any GGUF model from device storage
@@ -39,7 +39,7 @@ The computed options and a recommended value are shown in a "Context Window" dia
 
 ## 2. Remote LLM (Ollama)
 
-AIpaca can route generation through a remote Ollama server running on the local network instead of the on-device model. This is designed to test the agentic pipeline with larger models (e.g. Qwen3 30B) running on a desktop machine while the app acts purely as an orchestration front-end.
+firn can route generation through a remote Ollama server running on the local network instead of the on-device model. This is designed to test the agentic pipeline with larger models (e.g. Qwen3 30B) running on a desktop machine while the app acts purely as an orchestration front-end.
 
 **How it works:**
 - `OllamaEngine` connects to Ollama's OpenAI-compatible API (`/v1/chat/completions`) via Ktor HTTP client with SSE streaming
@@ -68,7 +68,7 @@ AIpaca can route generation through a remote Ollama server running on the local 
 
 ## 3. Vision / Multimodal
 
-AIpaca supports image+text inference using llama.cpp's `mtmd` (multimodal) library.
+firn supports image+text inference using llama.cpp's `mtmd` (multimodal) library.
 
 **How it works:**
 - A separate **mmproj** (multimodal projector) GGUF file is loaded via `mtmd_init_from_file()`
@@ -105,7 +105,7 @@ On-device transcription via whisper.cpp (v1.8.4), sharing the same GGML backend 
 
 ## 5. Agent Mode
 
-AIpaca includes a native on-device agent that can call external tools via the Model Context Protocol (MCP) and built-in local tools. It also supports routing through a remote Ollama engine for testing with larger models.
+firn includes a native on-device agent that can call external tools via the Model Context Protocol (MCP) and built-in local tools. It also supports routing through a remote Ollama engine for testing with larger models.
 
 ### Agent Loop
 
@@ -172,7 +172,7 @@ The tool manifest is kept intentionally compact to fit within small on-device co
 
 ### MCP Client
 
-AIpaca includes a hand-rolled MCP client (`HttpMcpClient`) supporting:
+firn includes a hand-rolled MCP client (`HttpMcpClient`) supporting:
 - **Streamable HTTP** transport (not stdio — subprocess spawning is forbidden on Android)
 - **SSE** (Server-Sent Events) for streaming responses
 - **JSON-RPC 2.0** protocol
@@ -331,7 +331,7 @@ Agent steps are streamed to the UI in real-time:
 
 ## 6. OpenAI-Compatible REST API Server
 
-AIpaca exposes an HTTPS server on port 8443 that implements the OpenAI chat completions API.
+firn exposes an HTTPS server on port 8443 that implements the OpenAI chat completions API.
 
 ### Endpoints
 
@@ -359,7 +359,7 @@ Standard OpenAI `/v1/chat/completions` format with support for:
 - `temperature`, `top_p`, `max_tokens`
 - `frequency_penalty`, `presence_penalty`
 - `stop` sequences
-- `include_thinking` (AIpaca extension for reasoning models)
+- `include_thinking` (firn extension for reasoning models)
 
 ### Foreground Service
 
@@ -372,12 +372,12 @@ The server runs as an Android foreground service (`ApiService`) with a persisten
 
 ### Authentication — Ed25519 Asymmetric Keys
 
-AIpaca uses SSH-style public key authentication:
+firn uses SSH-style public key authentication:
 1. Client generates an Ed25519 keypair locally
-2. Client sends public key + 6-digit PIN to AIpaca via `/v1/pair`
-3. AIpaca stores the public key in an encrypted key store
+2. Client sends public key + 6-digit PIN to firn via `/v1/pair`
+3. firn stores the public key in an encrypted key store
 4. All subsequent API requests must include a signed `Authorization` header
-5. Signature format: `AIpaca-Ed25519:<base64-pubkey> <base64-sig> <unix-timestamp>`
+5. Signature format: `Firn-Ed25519:<base64-pubkey> <base64-sig> <unix-timestamp>`
 6. Timestamp window: +/-30 seconds (replay protection)
 
 ### Transport — TLS

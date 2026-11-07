@@ -1,4 +1,4 @@
-# AIpaca
+# firn
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-API%2028%2B-green.svg)](https://developer.android.com/about/versions/pie)
@@ -6,7 +6,9 @@
 
 **On-device AI for Android — LLM, vision, speech, and agent capabilities, all running locally on your phone.**
 
-AIpaca runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It provides a built-in chat UI, speech-to-text, multimodal vision, an on-device agent with tool calling and persistent memory, and an OpenAI-compatible REST API server — all without any cloud dependency.
+> firn was formerly called AIpaca.
+
+firn runs GGUF models entirely on-device via llama.cpp with GPU acceleration. It provides a built-in chat UI, speech-to-text, multimodal vision, an on-device agent with tool calling and persistent memory, and an OpenAI-compatible REST API server — all without any cloud dependency.
 
 ---
 
@@ -109,7 +111,7 @@ The in-app **Models tab** links directly to each model's Hugging Face page.
 
 The in-app **Models tab** also lists three Whisper speech-to-text models (Tiny/Base/Small).
 
-> **GPU compatibility:** AIpaca uses the Adreno OpenCL backend with optimized kernels. GPU-accelerated quantizations: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU automatically.
+> **GPU compatibility:** firn uses the Adreno OpenCL backend with optimized kernels. GPU-accelerated quantizations: Q4_0, Q4_1, Q4_K_S, Q4_K_M, Q5_K_S, Q5_K_M, Q6_K, Q8_0, IQ4_NL. All others fall back to CPU automatically.
 
 ### 4. Build and run
 
@@ -132,7 +134,7 @@ The model loads in the background (~5-15 seconds depending on size and GPU offlo
 
 **Server tab** → tap **"START_SERVER"**
 
-The notification shows: `AIpaca Server • https://192.168.x.x:8443`
+The notification shows: `firn server • https://192.168.x.x:8443`
 
 ### 7. (Optional) Pair a client device
 
@@ -144,7 +146,7 @@ curl -k https://192.168.1.XX:8443/health
 
 # Chat — requires signed Authorization header (see docs/api-client-guide.md)
 curl -k -X POST https://192.168.1.XX:8443/v1/chat/completions \
-  -H "Authorization: AIpaca-Ed25519 <pubkey> <sig> <timestamp>" \
+  -H "Authorization: Firn-Ed25519 <pubkey> <sig> <timestamp>" \
   -H "Content-Type: application/json" \
   -d '{"model":"local","messages":[{"role":"user","content":"Hello!"}],"stream":false}'
 ```
@@ -246,12 +248,12 @@ For detailed roadmap with technical specs, see [docs/roadmap.md](docs/roadmap.md
 
 ---
 
-## Why AIpaca?
+## Why firn?
 
 PocketPal, SmolChat, Off Grid — all great apps, but none expose a local API.
 Termux + llama-server works but it's a developer hack, not a product.
 
-AIpaca is the first **polished Android app** that turns your phone into a portable AI server — usable as an Ollama replacement for Open WebUI and anything that speaks the OpenAI API. Plus it adds on-device agent capabilities, vision, and speech-to-text that work completely offline.
+firn is the first **polished Android app** that turns your phone into a portable AI server — usable as an Ollama replacement for Open WebUI and anything that speaks the OpenAI API. Plus it adds on-device agent capabilities, vision, and speech-to-text that work completely offline.
 
 ---
 
