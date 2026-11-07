@@ -11,8 +11,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ### Changed
 - **Renamed to firn.** New application ID `ch.firn.app` (installs alongside the old
   `com.aipaca.app` build — uninstall that one by hand), Kotlin package `ch.firn.app`, native
-  library `libfirn.so`, launcher label `firn`. New adaptive launcher icon with a themed
-  (monochrome) layer, a black splash screen with the firn mark, and the mark as the server
+  library `libfirn.so`, launcher label `firn`. New adaptive launcher icon — the glowing master (haze, glow, grain) rendered
+  per density, with a flat themed (monochrome) layer, a black splash screen with the firn mark, and the mark as the server
   notification icon. Internal storage names (database, preferences, TLS keystore alias,
   WorkManager jobs, notification channel) are renamed too; there is no data to migrate
 - **Breaking for API clients:** the server's auth scheme is now `Firn-Ed25519` (was
